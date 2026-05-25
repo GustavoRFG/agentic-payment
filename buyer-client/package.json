@@ -1,0 +1,22 @@
+{
+  "name": "buyer-client",
+  "private": true,
+  "version": "0.1.0",
+  "description": "x402 buyer client with safe --dry-run mode (testnet only).",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/call-paid-report.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@x402/evm": "^2.13.0",
+    "@x402/fetch": "^2.13.0",
+    "dotenv": "^17.0.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.0"
+  }
+}
