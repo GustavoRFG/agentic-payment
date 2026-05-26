@@ -14,6 +14,24 @@ confirmed.
 
 No payment was executed in this run.
 
+## Local wallet setup update
+
+Fresh testnet wallet generated for Base Sepolia only.
+
+Local `.env` files created but not committed:
+
+- `buyer-client/.env`
+- `seller-api/.env`
+
+Buyer address: `0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392`
+
+Seller receiver address: `0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392`
+
+Wallet funding still required:
+
+- Base Sepolia ETH for gas is missing.
+- Base Sepolia USDC is missing.
+
 ## Network, asset, and amount
 
 - Network: Base Sepolia
