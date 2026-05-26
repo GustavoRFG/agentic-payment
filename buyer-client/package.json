@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/call-paid-report.ts",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "payment:check": "tsx src/check-payment-readiness.ts"
   },
   "dependencies": {
     "@x402/evm": "^2.13.0",

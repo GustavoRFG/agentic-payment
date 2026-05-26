@@ -10,6 +10,7 @@
     "buyer:install": "npm --prefix buyer-client install",
     "buyer:dev": "npm --prefix buyer-client run dev",
     "buyer:build": "npm --prefix buyer-client run build",
+    "buyer:payment-check": "npm --prefix buyer-client run payment:check",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   }
 }
