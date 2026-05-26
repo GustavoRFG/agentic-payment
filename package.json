@@ -11,6 +11,7 @@
     "buyer:dev": "npm --prefix buyer-client run dev",
     "buyer:build": "npm --prefix buyer-client run build",
     "buyer:payment-check": "npm --prefix buyer-client run payment:check",
+    "buyer:wallet-check": "npm --prefix buyer-client run wallet:check",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   }
 }

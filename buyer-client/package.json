@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "tsx src/call-paid-report.ts",
     "build": "tsc --noEmit",
-    "payment:check": "tsx src/check-payment-readiness.ts"
+    "payment:check": "tsx src/check-payment-readiness.ts",
+    "wallet:check": "tsx src/check-wallet-balances.ts"
   },
   "dependencies": {
     "@x402/evm": "^2.13.0",
