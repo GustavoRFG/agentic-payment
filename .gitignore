@@ -5,6 +5,8 @@ dist/
 !.env.example
 debug/
 *.log
+logs/
+*.jsonl
 .awal-electron-user-data/
 .wallet-electron-user-data*/
 mcp/

@@ -12,6 +12,8 @@
     "buyer:build": "npm --prefix buyer-client run build",
     "buyer:payment-check": "npm --prefix buyer-client run payment:check",
     "buyer:wallet-check": "npm --prefix buyer-client run wallet:check",
+    "logs:tail:seller": "powershell -NoProfile -Command \"Get-Content -Wait logs/seller-events.jsonl\"",
+    "logs:tail:buyer": "powershell -NoProfile -Command \"Get-Content -Wait logs/buyer-events.jsonl\"",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   }
 }

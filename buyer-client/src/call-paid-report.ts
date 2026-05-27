@@ -17,9 +17,12 @@
  */
 
 import dotenv from "dotenv";
+import { randomUUID } from "node:crypto";
 import { privateKeyToAccount } from "viem/accounts";
 import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import { writeBuyerAuditEvent } from "./observability/auditLogger";
+import type { AuditPaymentSummary } from "./observability/auditTypes";
 
 dotenv.config();
 
@@ -100,7 +103,7 @@ function decodePaymentRequiredHeader(value: string): PaymentRequiredEnvelope {
     return JSON.parse(decoded) as PaymentRequiredEnvelope;
   } catch (error) {
     throw new Error(
-      `Failed to decode PAYMENT-REQUIRED header. Raw value: ${value}\n` +
+      "Failed to decode PAYMENT-REQUIRED header.\n" +
         `Cause: ${(error as Error).message}`,
     );
   }
@@ -134,6 +137,18 @@ function summarizeAccept(entry: AcceptEntry): string {
     .join("\n");
 }
 
+function paymentSummaryFromAccept(entry: AcceptEntry): AuditPaymentSummary {
+  const amountAtomic = entry.amount ?? entry.maxAmountRequired;
+  const amountUsd = atomicToUsd(amountAtomic, USDC_DECIMALS);
+  return {
+    network: entry.network,
+    asset: entry.extra?.name ?? "USDC",
+    amountAtomic,
+    amountUsd: Number.isFinite(amountUsd) ? amountUsd.toString() : undefined,
+    maxAmountUsd: MAX_PAYMENT_USD.toString(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Buyer flows
 // ---------------------------------------------------------------------------
@@ -148,14 +163,17 @@ const REQUEST_BODY = {
   },
 };
 
-async function preflightPaymentRequirements(): Promise<{
+async function preflightPaymentRequirements(requestId: string): Promise<{
   envelope: PaymentRequiredEnvelope;
   status: number;
   raw: string;
 }> {
   const response = await fetch(`${SELLER_BASE_URL}${PAID_ROUTE}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Agentic-Request-Id": requestId,
+    },
     body: JSON.stringify(REQUEST_BODY),
   });
   if (response.status !== 402) {
@@ -176,10 +194,40 @@ async function preflightPaymentRequirements(): Promise<{
 }
 
 async function runDryRun(): Promise<number> {
+  const requestId = randomUUID();
   console.log("[buyer-client] dry-run mode — no signing, no payment.");
   console.log(`[buyer-client] target: POST ${SELLER_BASE_URL}${PAID_ROUTE}`);
   console.log(`[buyer-client] MAX_PAYMENT_USD ceiling: $${MAX_PAYMENT_USD}`);
-  const { envelope, status } = await preflightPaymentRequirements();
+  await writeBuyerAuditEvent({
+    eventType: "buyer.request_started",
+    requestId,
+    sellerBaseUrl: SELLER_BASE_URL,
+    path: PAID_ROUTE,
+    method: "POST",
+    dryRun: true,
+  });
+
+  let envelope: PaymentRequiredEnvelope;
+  let status: number;
+  try {
+    const result = await preflightPaymentRequirements(requestId);
+    envelope = result.envelope;
+    status = result.status;
+  } catch (error) {
+    await writeBuyerAuditEvent({
+      eventType: "buyer.error",
+      requestId,
+      sellerBaseUrl: SELLER_BASE_URL,
+      path: PAID_ROUTE,
+      method: "POST",
+      dryRun: true,
+      outcome: "error",
+      error: {
+        message: (error as Error).message,
+      },
+    });
+    throw error;
+  }
   console.log(`[buyer-client] received HTTP ${status} as expected.`);
 
   const accepts = envelope.accepts ?? [];
@@ -215,6 +263,17 @@ async function runDryRun(): Promise<number> {
     cheapest.amount ?? cheapest.maxAmountRequired,
     USDC_DECIMALS,
   );
+  const payment = paymentSummaryFromAccept(cheapest);
+  await writeBuyerAuditEvent({
+    eventType: "buyer.payment_requirements_received",
+    requestId,
+    sellerBaseUrl: SELLER_BASE_URL,
+    path: PAID_ROUTE,
+    method: "POST",
+    dryRun: true,
+    statusCode: status,
+    payment,
+  });
   console.log("[buyer-client] max-amount check:");
   console.log(`  required (USD ≈): $${requiredUsd.toFixed(6)}`);
   console.log(`  ceiling   (USD):  $${MAX_PAYMENT_USD}`);
@@ -229,13 +288,25 @@ async function runDryRun(): Promise<number> {
     );
     return 5;
   }
+  await writeBuyerAuditEvent({
+    eventType: "buyer.dry_run_completed",
+    requestId,
+    sellerBaseUrl: SELLER_BASE_URL,
+    path: PAID_ROUTE,
+    method: "POST",
+    dryRun: true,
+    statusCode: status,
+    payment,
+    outcome: "dry_run_no_payment",
+  });
   console.log("[buyer-client] dry-run OK. No payment attempted.");
   return 0;
 }
 
 async function runPay(): Promise<number> {
+  const requestId = randomUUID();
   console.log("[buyer-client] --pay requested. Performing pre-flight first.");
-  const { envelope } = await preflightPaymentRequirements();
+  const { envelope } = await preflightPaymentRequirements(requestId);
   const accepts = envelope.accepts ?? [];
   const onNetwork = accepts.filter((a) => a.network === EXPECTED_NETWORK);
   if (onNetwork.length === 0) {
@@ -275,7 +346,10 @@ async function runPay(): Promise<number> {
   const fetchWithPayment = wrapFetchWithPayment(fetch, client);
   const response = await fetchWithPayment(`${SELLER_BASE_URL}${PAID_ROUTE}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Agentic-Request-Id": requestId,
+    },
     body: JSON.stringify(REQUEST_BODY),
   });
   console.log(`[buyer-client] final response HTTP ${response.status}`);
