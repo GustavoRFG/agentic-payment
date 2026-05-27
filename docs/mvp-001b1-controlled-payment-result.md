@@ -12,7 +12,8 @@ This phase was intended to execute one controlled x402 payment on Base Sepolia
 only after readiness checks, wallet configuration, and testnet funding were
 confirmed.
 
-No payment was executed in this run.
+The initial 2026-05-26 run did not execute a payment. Later sections record
+the CDP ETH funding update and the 2026-05-27 controlled paid test.
 
 ## Local wallet setup update
 
@@ -79,7 +80,7 @@ npm.cmd run wallet:check
 npm.cmd run dev -- --dry-run
 ```
 
-## Payment execution result
+## Initial payment execution result
 
 Blocked. No payment was attempted.
 
@@ -151,6 +152,55 @@ CDP Faucet sent Base Sepolia ETH to the external buyer address.
 - No x402 payment attempted yet.
 - Secrets were not printed.
 - Secrets were not committed.
+
+## Controlled x402 payment succeeded
+
+Date: 2026-05-27
+
+Exactly one controlled x402 payment attempt was executed on Base Sepolia after
+final readiness checks and a final dry-run.
+
+Final pre-payment checks:
+
+- `payment:check`: pass
+- `wallet:check`: pass
+- ETH status: pass
+- USDC status: pass
+
+Final dry-run requirements:
+
+- Network: `eip155:84532`
+- Asset: Base Sepolia USDC
+- Amount: `1000` atomic units (`0.001 USDC` / `$0.001`)
+- Receiver: `0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392`
+- Dry-run result: HTTP 402 detected and no payment attempted.
+
+Payment execution result:
+
+- Command: `npm.cmd run dev -- --pay`
+- Payment attempts: 1
+- Final response: HTTP 200
+- Transaction hash: not available in the captured buyer or seller output
+- Paid report returned: yes
+
+Paid report summary:
+
+```json
+{
+  "reportId": "mock-report-001",
+  "mode": "mock",
+  "riskLevel": "medium",
+  "rangeStatus": "in_range",
+  "recommendation": "hold"
+}
+```
+
+Safety confirmations for the paid run:
+
+- No mainnet was used.
+- No USDT was used.
+- Private key was not printed.
+- CDP secrets were not printed.
 
 ## Safety confirmations
 
