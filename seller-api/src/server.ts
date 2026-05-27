@@ -3,8 +3,8 @@
  *
  * Express server that exposes:
  *   GET  /health                    — public liveness probe
- *   POST /mock/defi-risk-report     — public, returns a static mock report
- *   POST /paid/defi-risk-report     — x402-protected, returns the same shape
+ *   POST /mock/defi-risk-report     — public, returns adapter mock report
+ *   POST /paid/defi-risk-report     — x402-protected, returns same adapter
  *
  * The paid endpoint is wired through @x402/express. Until a buyer presents a
  * valid x402 payment, the middleware short-circuits with HTTP 402 and the
@@ -18,6 +18,11 @@ import dotenv from "dotenv";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
+import {
+  defiGuardianAdapter,
+  validateRiskReportPayload,
+} from "./domain/defiGuardianAdapter";
+import type { RiskReportRequest } from "./domain/reportTypes";
 
 dotenv.config();
 
@@ -64,95 +69,6 @@ function assertConfig(): void {
 assertConfig();
 
 // ---------------------------------------------------------------------------
-// Mock report shape
-// ---------------------------------------------------------------------------
-
-interface RiskReportRequest {
-  wallet?: unknown;
-  position?: {
-    protocol?: unknown;
-    chain?: unknown;
-    tokenId?: unknown;
-  };
-}
-
-interface RiskReport {
-  reportId: string;
-  mode: "mock";
-  riskLevel: "low" | "medium" | "high";
-  rangeStatus: "in_range" | "out_of_range" | "unknown";
-  recommendation: "hold" | "rebalance" | "exit" | "monitor";
-  summary: string;
-  checks: Array<{
-    name: string;
-    status: "pass" | "warn" | "fail";
-    detail: string;
-  }>;
-}
-
-function buildMockReport(): RiskReport {
-  return {
-    reportId: "mock-report-001",
-    mode: "mock",
-    riskLevel: "medium",
-    rangeStatus: "in_range",
-    recommendation: "hold",
-    summary:
-      "Mock DeFi Guardian report. Position appears stable, but volatility " +
-      "should be monitored.",
-    checks: [
-      {
-        name: "range",
-        status: "pass",
-        detail: "Position is currently marked as in range in mock mode.",
-      },
-      {
-        name: "liquidity",
-        status: "warn",
-        detail:
-          "Liquidity depth is mocked; real pool data is not connected yet.",
-      },
-    ],
-  };
-}
-
-function validateRiskReportPayload(
-  body: RiskReportRequest,
-): { ok: true } | { ok: false; missing: string[] } {
-  const missing: string[] = [];
-  if (
-    body.wallet === undefined ||
-    typeof body.wallet !== "string" ||
-    body.wallet.length === 0
-  ) {
-    missing.push("wallet");
-  }
-  if (!body.position || typeof body.position !== "object") {
-    missing.push("position");
-    return { ok: false, missing };
-  }
-  if (
-    body.position.protocol === undefined ||
-    typeof body.position.protocol !== "string"
-  ) {
-    missing.push("position.protocol");
-  }
-  if (
-    body.position.chain === undefined ||
-    typeof body.position.chain !== "string"
-  ) {
-    missing.push("position.chain");
-  }
-  if (
-    body.position.tokenId === undefined ||
-    typeof body.position.tokenId !== "string"
-  ) {
-    missing.push("position.tokenId");
-  }
-  return missing.length === 0 ? { ok: true } : { ok: false, missing };
-}
-
-// ---------------------------------------------------------------------------
 // Express + x402 wiring
 // ---------------------------------------------------------------------------
 
@@ -164,7 +80,7 @@ app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({ ok: true, service: "defi-guardian-paid-api" });
 });
 
-// Public mock endpoint — same response shape, no payment required.
+// Public mock endpoint, no payment required.
 app.post("/mock/defi-risk-report", (req: Request, res: Response) => {
   const validation = validateRiskReportPayload(req.body as RiskReportRequest);
   if (!validation.ok) {
@@ -174,7 +90,9 @@ app.post("/mock/defi-risk-report", (req: Request, res: Response) => {
     });
     return;
   }
-  res.status(200).json(buildMockReport());
+  res
+    .status(200)
+    .json(defiGuardianAdapter.analyzePosition(req.body as RiskReportRequest));
 });
 
 // x402-protected resource server. Only /paid/defi-risk-report is gated.
@@ -214,7 +132,9 @@ app.post("/paid/defi-risk-report", (req: Request, res: Response) => {
     });
     return;
   }
-  res.status(200).json(buildMockReport());
+  res
+    .status(200)
+    .json(defiGuardianAdapter.analyzePosition(req.body as RiskReportRequest));
 });
 
 // JSON 500 handler so unexpected throws don't leak HTML.
