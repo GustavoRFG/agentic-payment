@@ -11,7 +11,7 @@ function projectRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");
 }
 
-interface RenderOptions {
+export interface RenderOptions {
   limit: number;
   outputPath: string;
 }
@@ -541,8 +541,7 @@ function renderDashboard(summary: AuditSummary): string {
 `;
 }
 
-function run(): RenderResult {
-  const options = parseArgs(process.argv.slice(2));
+export function renderDashboardFile(options: RenderOptions): RenderResult {
   const summary = buildAuditSummary({ limit: options.limit });
   const html = renderDashboard(summary);
   const outputPath = options.outputPath;
@@ -553,6 +552,10 @@ function run(): RenderResult {
     html,
     hadAnyLogs: summary.files.seller.exists || summary.files.buyer.exists,
   };
+}
+
+function run(): RenderResult {
+  return renderDashboardFile(parseArgs(process.argv.slice(2)));
 }
 
 function isDirectEntry(): boolean {

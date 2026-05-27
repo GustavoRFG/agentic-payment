@@ -6,6 +6,7 @@ dist/
 debug/
 *.log
 logs/
+dashboard/exports/
 *.jsonl
 .awal-electron-user-data/
 .wallet-electron-user-data*/
