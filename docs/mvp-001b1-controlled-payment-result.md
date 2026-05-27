@@ -93,6 +93,48 @@ buyer-client/.env missing; no fresh testnet-only BUYER_PRIVATE_KEY configured.
 
 No paid report was returned in this run because payment execution was blocked.
 
+## CDP Faucet attempt status
+
+Date: 2026-05-27
+
+Current buyer address:
+`0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392`
+
+Latest wallet preflight:
+
+- Base Sepolia USDC is already funded: `20 USDC`.
+- Base Sepolia ETH is still missing: `0 ETH`.
+- USDC status: pass.
+- ETH status: missing Base Sepolia ETH for gas.
+- Payment execution: not performed by the wallet check script.
+
+Faucet route decision:
+
+- Alchemy, QuickNode, Chainstack, and thirdweb faucets were rejected for this
+  cycle because the task scope forbids those providers.
+- CDP Faucet was investigated using official Coinbase Developer Platform docs.
+- The TypeScript SDK route uses `@coinbase/cdp-sdk`.
+- The REST route is `POST https://api.cdp.coinbase.com/platform/v2/evm/faucet`.
+- The exact EVM faucet network name for Base Sepolia is `base-sepolia`.
+- The exact native ETH token value is `eth`.
+- CDP docs state that an external wallet address can be supplied directly to
+  `cdp.evm.requestFaucet({ address, network: "base-sepolia", token: "eth" })`;
+  it is not limited to CDP-created accounts.
+- Programmatic use requires a CDP account, `CDP_API_KEY_ID`,
+  `CDP_API_KEY_SECRET`, and `CDP_WALLET_SECRET`.
+- No local CDP credentials were present in the current process,
+  `buyer-client/.env`, or `seller-api/.env`.
+- Because credentials were missing, no CDP Faucet request was attempted.
+
+Safety confirmations for this CDP Faucet investigation:
+
+- No mainnet was used.
+- No USDT was used.
+- No X/Twitter connection was used.
+- No real funds were used.
+- No private key or API secret was printed.
+- No payment was attempted.
+
 ## Safety confirmations
 
 - No mainnet funds were used.
