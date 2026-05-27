@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<title>Agentic Payments Lab  Local x402 Audit Dashboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #0b0f15;
+    color: #e4e8ef;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 64px 24px;
+  }
+  header.page {
+    border-bottom: 1px solid #1d2430;
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+  header.page h1 {
+    margin: 0 0 4px 0;
+    font-size: 22px;
+    letter-spacing: 0.2px;
+  }
+  header.page .subtitle {
+    color: #9aa4b2;
+    font-size: 13px;
+  }
+  header.page .meta {
+    margin-top: 8px;
+    color: #707a89;
+    font-size: 12px;
+  }
+  .banner {
+    background: #1a1208;
+    border: 1px solid #4a2b00;
+    color: #f0b97a;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-bottom: 24px;
+    font-size: 13px;
+  }
+  section {
+    margin-bottom: 32px;
+  }
+  section > h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #9aa4b2;
+    margin: 0 0 12px 0;
+  }
+  .grid {
+    display: grid;
+    gap: 12px;
+  }
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+  .twocol {
+    grid-template-columns: 1fr 1fr;
+  }
+  .threecol {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .card {
+    background: #121823;
+    border: 1px solid #1d2430;
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .card h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #707a89;
+    margin: 0 0 8px 0;
+  }
+  .kpi .kpi-label {
+    color: #9aa4b2;
+    font-size: 12px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .kpi .kpi-value {
+    font-size: 26px;
+    font-weight: 600;
+    color: #f5f7fa;
+    margin-top: 6px;
+  }
+  .kpi .kpi-hint {
+    color: #5e6776;
+    font-size: 11px;
+    margin-top: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid #1d2430;
+    vertical-align: top;
+  }
+  thead th {
+    color: #9aa4b2;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 600;
+  }
+  tbody tr:hover { background: #161e2c; }
+  td.right, th.right { text-align: right; }
+  td.nowrap { white-space: nowrap; }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+  }
+  .muted { color: #5e6776; }
+  .empty {
+    color: #707a89;
+    font-size: 12px;
+    padding: 10px 4px;
+    font-style: italic;
+  }
+  footer.page {
+    border-top: 1px solid #1d2430;
+    padding-top: 16px;
+    margin-top: 32px;
+    color: #5e6776;
+    font-size: 12px;
+  }
+  .files {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: #9aa4b2;
+  }
+  .files .file-row { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .pill {
+    display: inline-block;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    background: #1d2430;
+    color: #9aa4b2;
+    margin-left: 6px;
+  }
+  .pill.ok { background: #103021; color: #5ec487; }
+  .pill.missing { background: #2a1414; color: #d97b7b; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header class="page">
+    <h1>Agentic Payments Lab</h1>
+    <div class="subtitle">Local x402 Audit Dashboard</div>
+    <div class="subtitle">Static local dashboard generated from JSONL audit summaries.</div>
+    <div class="meta">Generated at <span class="mono">2026-05-27T20:21:44.501Z</span></div>
+    <div class="files" style="margin-top:8px;">
+      <div class="file-row">seller log: D:\agentic-payments-lab\logs\seller-events.jsonl <span class="pill ok">exists</span></div>
+      <div class="file-row">buyer log: D:\agentic-payments-lab\logs\buyer-events.jsonl <span class="pill ok">exists</span></div>
+    </div>
+  </header>
+
+  
+
+  <section>
+    <h2>KPIs</h2>
+    <div class="grid kpi-grid">
+      
+    <div class="card kpi">
+      <div class="kpi-label">Seller events</div>
+      <div class="kpi-value">18</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Buyer events</div>
+      <div class="kpi-value">6</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Total 402 offers</div>
+      <div class="kpi-value">4</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Dry-run requests</div>
+      <div class="kpi-value">2</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Reports generated</div>
+      <div class="kpi-value">2</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Avg risk score</div>
+      <div class="kpi-value">100</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Unique request IDs</div>
+      <div class="kpi-value">4</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Correlated buyer/seller IDs</div>
+      <div class="kpi-value">2</div>
+      
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Malformed log lines</div>
+      <div class="kpi-value">0</div>
+      <div class="kpi-hint">seller=0, buyer=0</div>
+    </div>
+  
+    <div class="card kpi">
+      <div class="kpi-label">Errors</div>
+      <div class="kpi-value">0</div>
+      
+    </div>
+  
+    </div>
+  </section>
+
+  <section>
+    <h2>Reports</h2>
+    <div class="grid threecol">
+      <div class="card">
+        <h3>Risk scores</h3>
+        <table class="kv">
+          <tbody>
+            <tr><td>Average</td><td class="right">100</td></tr>
+            <tr><td>Min</td><td class="right">100</td></tr>
+            <tr><td>Max</td><td class="right">100</td></tr>
+            <tr><td>Total generated</td><td class="right">2</td></tr>
+            <tr><td>Paid (inferred)</td><td class="right">0</td></tr>
+            <tr><td>Mock (inferred)</td><td class="right">2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Risk level counts</h3>
+        
+    <table class="kv">
+      <thead><tr><th>Value</th><th class="right">Count</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">critical</td>
+          <td class="right">2</td>
+        </tr></tbody>
+    </table>
+  
+      </div>
+      <div class="card">
+        <h3>Recommendation counts</h3>
+        
+    <table class="kv">
+      <thead><tr><th>Value</th><th class="right">Count</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">urgent-review</td>
+          <td class="right">2</td>
+        </tr></tbody>
+    </table>
+  
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Payments</h2>
+    <div class="grid twocol">
+      <div class="card">
+        <h3>Networks</h3>
+        
+    <table class="kv">
+      <thead><tr><th>Value</th><th class="right">Count</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">eip155:84532</td>
+          <td class="right">12</td>
+        </tr></tbody>
+    </table>
+  
+      </div>
+      <div class="card">
+        <h3>Assets</h3>
+        
+    <table class="kv">
+      <thead><tr><th>Value</th><th class="right">Count</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">USDC</td>
+          <td class="right">12</td>
+        </tr></tbody>
+    </table>
+  
+      </div>
+      <div class="card">
+        <h3>Amount (atomic)</h3>
+        
+    <table class="kv">
+      <thead><tr><th>Value</th><th class="right">Count</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">1000</td>
+          <td class="right">12</td>
+        </tr></tbody>
+    </table>
+  
+      </div>
+      <div class="card">
+        <h3>Amount (USD)</h3>
+        
+    <table class="kv">
+      <thead><tr><th>Value</th><th class="right">Count</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">0.001</td>
+          <td class="right">12</td>
+        </tr></tbody>
+    </table>
+  
+      </div>
+      <div class="card">
+        <h3>Offer / dry-run totals</h3>
+        <table class="kv">
+          <tbody>
+            <tr><td>Total 402 offers</td><td class="right">4</td></tr>
+            <tr><td>Total dry-run outcomes</td><td class="right">2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Identity</h3>
+        <table class="kv">
+          <tbody>
+            <tr><td>Unique request IDs</td><td class="right">4</td></tr>
+            <tr><td>Unique wallets</td><td class="right">1</td></tr>
+            <tr><td>Correlated buyer/seller IDs</td><td class="right">2</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Recent seller events</h2>
+    <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Event</th>
+          <th>Request ID</th>
+          <th class="right">Status</th>
+          <th>Path</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:23.620Z</td>
+          <td>seller.response_finished</td>
+          <td class="mono">5e76443d-9d34-4378-a1f9-1d8abd3c7c0c</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:23.620Z</td>
+          <td>seller.payment_required</td>
+          <td class="mono">5e76443d-9d34-4378-a1f9-1d8abd3c7c0c</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:23.620Z</td>
+          <td>seller.request_received</td>
+          <td class="mono">5e76443d-9d34-4378-a1f9-1d8abd3c7c0c</td>
+          <td class="right mono">n/a</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:15.522Z</td>
+          <td>seller.response_finished</td>
+          <td class="mono">test-paid-unpaid-001</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:15.522Z</td>
+          <td>seller.payment_required</td>
+          <td class="mono">test-paid-unpaid-001</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:15.520Z</td>
+          <td>seller.request_received</td>
+          <td class="mono">test-paid-unpaid-001</td>
+          <td class="right mono">n/a</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:09.467Z</td>
+          <td>seller.response_finished</td>
+          <td class="mono">test-mock-001</td>
+          <td class="right mono">200</td>
+          <td class="mono">/mock/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:09.467Z</td>
+          <td>seller.report_generated</td>
+          <td class="mono">test-mock-001</td>
+          <td class="right mono">n/a</td>
+          <td class="mono">/mock/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:09.466Z</td>
+          <td>seller.request_received</td>
+          <td class="mono">test-mock-001</td>
+          <td class="right mono">n/a</td>
+          <td class="mono">/mock/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:12:47.902Z</td>
+          <td>seller.response_finished</td>
+          <td class="mono">e729fe15-7c3e-4c7d-b826-792b72bbeb03</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr></tbody>
+    </table>
+  </div>
+  </section>
+
+  <section>
+    <h2>Recent buyer events</h2>
+    <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Event</th>
+          <th>Request ID</th>
+          <th class="right">Status</th>
+          <th>Path</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:23.624Z</td>
+          <td>buyer.dry_run_completed</td>
+          <td class="mono">5e76443d-9d34-4378-a1f9-1d8abd3c7c0c</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:23.624Z</td>
+          <td>buyer.payment_requirements_received</td>
+          <td class="mono">5e76443d-9d34-4378-a1f9-1d8abd3c7c0c</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:23.582Z</td>
+          <td>buyer.request_started</td>
+          <td class="mono">5e76443d-9d34-4378-a1f9-1d8abd3c7c0c</td>
+          <td class="right mono">n/a</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:12:47.905Z</td>
+          <td>buyer.dry_run_completed</td>
+          <td class="mono">e729fe15-7c3e-4c7d-b826-792b72bbeb03</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:12:47.905Z</td>
+          <td>buyer.payment_requirements_received</td>
+          <td class="mono">e729fe15-7c3e-4c7d-b826-792b72bbeb03</td>
+          <td class="right mono">402</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:12:47.863Z</td>
+          <td>buyer.request_started</td>
+          <td class="mono">e729fe15-7c3e-4c7d-b826-792b72bbeb03</td>
+          <td class="right mono">n/a</td>
+          <td class="mono">/paid/defi-risk-report</td>
+        </tr></tbody>
+    </table>
+  </div>
+  </section>
+
+  <section>
+    <h2>Recent generated reports</h2>
+    <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Request ID</th>
+          <th>Report ID</th>
+          <th>Mode</th>
+          <th class="right">Risk</th>
+          <th>Level</th>
+          <th>Recommendation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:15:09.467Z</td>
+          <td class="mono">test-mock-001</td>
+          <td class="mono">mock-report-001</td>
+          <td>adapter-mock</td>
+          <td class="right mono">100</td>
+          <td>critical</td>
+          <td>urgent-review</td>
+        </tr>
+        <tr>
+          <td class="mono nowrap">2026-05-27T08:12:37.807Z</td>
+          <td class="mono">test-mock-001</td>
+          <td class="mono">mock-report-001</td>
+          <td>adapter-mock</td>
+          <td class="right mono">100</td>
+          <td>critical</td>
+          <td>urgent-review</td>
+        </tr></tbody>
+    </table>
+  </div>
+  </section>
+
+  <section>
+    <h2>Recent errors</h2>
+    <div class="card"><div class="empty">No errors recorded.</div></div>
+  </section>
+
+  <footer class="page">
+    No private keys, CDP secrets, .env contents, raw x402 signatures, or raw payment headers are rendered.
+    Dashboard built from sanitized summary fields only.
+  </footer>
+</div>
+</body>
+</html>

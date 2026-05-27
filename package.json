@@ -16,6 +16,8 @@
     "logs:summary:json": "npm --prefix seller-api exec -- tsx tools/log-summary.ts --json",
     "logs:tail:seller": "powershell -NoProfile -Command \"Get-Content -Wait logs/seller-events.jsonl\"",
     "logs:tail:buyer": "powershell -NoProfile -Command \"Get-Content -Wait logs/buyer-events.jsonl\"",
+    "dashboard:render": "npm --prefix seller-api exec -- tsx tools/render-dashboard.ts",
+    "dashboard:open": "powershell -NoProfile -Command \"Start-Process dashboard/index.html\"",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   }
 }

@@ -523,14 +523,45 @@ function printHuman(summary: ReturnType<typeof buildSummary>): void {
   console.log((summary.recent.errors.length ? summary.recent.errors.map(formatRecentError) : ["  - n/a"]).join("\n"));
 }
 
-const args = parseArgs(process.argv.slice(2));
-const root = projectRoot();
-const sellerLog = readJsonl(join(root, "logs", "seller-events.jsonl"));
-const buyerLog = readJsonl(join(root, "logs", "buyer-events.jsonl"));
-const summary = buildSummary(sellerLog, buyerLog, args.limit);
+export interface AuditSummaryOptions {
+  limit?: number;
+}
 
-if (args.json) {
-  console.log(JSON.stringify(summary, null, 2));
-} else {
-  printHuman(summary);
+export type AuditSummary = ReturnType<typeof buildSummary>;
+
+export function buildAuditSummary(options: AuditSummaryOptions = {}): AuditSummary {
+  const limit = typeof options.limit === "number" && Number.isFinite(options.limit) && options.limit >= 0
+    ? Math.trunc(options.limit)
+    : DEFAULT_LIMIT;
+  const root = projectRoot();
+  const sellerLog = readJsonl(join(root, "logs", "seller-events.jsonl"));
+  const buyerLog = readJsonl(join(root, "logs", "buyer-events.jsonl"));
+  return buildSummary(sellerLog, buyerLog, limit);
+}
+
+function runCli(): void {
+  const args = parseArgs(process.argv.slice(2));
+  const summary = buildAuditSummary({ limit: args.limit });
+
+  if (args.json) {
+    console.log(JSON.stringify(summary, null, 2));
+  } else {
+    printHuman(summary);
+  }
+}
+
+function isDirectEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  try {
+    return fileURLToPath(import.meta.url) === resolve(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectEntry()) {
+  runCli();
 }
