@@ -7,10 +7,12 @@
   "scripts": {
     "dev": "tsx src/call-paid-report.ts",
     "build": "tsc --noEmit",
+    "cdp:faucet": "tsx src/request-cdp-faucet.ts",
     "payment:check": "tsx src/check-payment-readiness.ts",
     "wallet:check": "tsx src/check-wallet-balances.ts"
   },
   "dependencies": {
+    "@coinbase/cdp-sdk": "^1.50.0",
     "@x402/evm": "^2.13.0",
     "@x402/fetch": "^2.13.0",
     "dotenv": "^17.0.0",

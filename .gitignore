@@ -11,3 +11,7 @@ mcp/
 .DS_Store
 .idea/
 .vscode/
+
+secrets/
+*.secret
+*_secret.txt

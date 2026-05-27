@@ -135,6 +135,23 @@ Safety confirmations for this CDP Faucet investigation:
 - No private key or API secret was printed.
 - No payment was attempted.
 
+## CDP Faucet ETH funding succeeded
+
+Date: 2026-05-27
+
+CDP Faucet sent Base Sepolia ETH to the external buyer address.
+
+- Transaction hash:
+  `0xb26bc526ae3c846a012b6764da24df61eb7d21e77f87f477bb7f54e54ea009d3`
+- Target address: `0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392`
+- Network: Base Sepolia (`eip155:84532`)
+- Faucet token: ETH
+- ETH status: pass
+- USDC status: pass
+- No x402 payment attempted yet.
+- Secrets were not printed.
+- Secrets were not committed.
+
 ## Safety confirmations
 
 - No mainnet funds were used.
