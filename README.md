@@ -154,13 +154,23 @@ KPIs surfaced:
 The dashboard is the canonical local view of "is the flow working and
 producing the evidence we expect?".
 
+`dashboard/index.html` is a **generated static artifact**, committed as the
+canonical sample output so GitHub visitors can see a representative dashboard.
+It is refreshed by `dashboard:render` and the demo, so its KPI numbers will
+drift between commits. Timestamped exports under `dashboard/exports/` are
+**local-only and git-ignored**.
+
 ## Screenshots
 
-Coming soon:
+- [Local audit dashboard](docs/screenshots/dashboard-local-audit.png) — the
+  static dashboard rendered from sanitized KPI fields.
+- Refresh instructions:
+  [docs/screenshots/README.md](docs/screenshots/README.md).
 
-- local audit dashboard
-- dry-run output
-- exported dashboard snapshot
+## Demo Checklist
+
+See [docs/public-demo-checklist.md](docs/public-demo-checklist.md) for the
+pre-recording / pre-presentation checklist and the safety statement.
 
 ## Safety Model
 
@@ -190,12 +200,12 @@ Coming soon:
 - There is no production auth, no billing dashboard, and no hosted seller
   endpoint yet.
 - There is no real user treasury, payment router, or agent integration yet.
-- No screenshots are committed yet (planned for the next milestone).
 
 ## Roadmap
 
-- **MVP 001I (this milestone)** — public demo README / pitch flow.
-- **MVP 001J** — clean demo artifacts, screenshots, and repo hygiene.
+- **MVP 001I** — public demo README / pitch flow.
+- **MVP 001J (this milestone)** — repo hygiene, screenshots, and public demo
+  polish.
 - **MVP 002** — connect the real DeFi Guardian engine in place of the mock
   adapter.
 - **MVP 003** — add a hosted seller endpoint (still testnet by default).
@@ -203,8 +213,9 @@ Coming soon:
 - **MVP 005** — prototype an AI Treasury / Payment Router that brokers
   payments on behalf of an agent.
 
-Immediate recommended next milestone given current repo state: **MVP 001J —
-repo hygiene, screenshots, and public demo polish**.
+Immediate recommended next milestone given current repo state: **MVP 002 —
+connect the real DeFi Guardian engine behind the existing mock adapter
+boundary**.
 
 ## Demo Pitch
 
@@ -237,6 +248,7 @@ completed milestones:
 - MVP 001F — minimal local dashboard page
 - MVP 001G — dashboard refresh / export workflow
 - MVP 001H — local demo script
-- MVP 001I — public demo README / pitch flow (this milestone)
+- MVP 001I — public demo README / pitch flow
+- MVP 001J — repo hygiene, screenshots, and public demo polish (this milestone)
 
 Milestone notes for each step live under [`docs/`](docs/).
