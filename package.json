@@ -21,7 +21,9 @@
     "dashboard:refresh": "npm run dashboard:render && npm run dashboard:open",
     "dashboard:export": "npm --prefix seller-api exec -- tsx tools/export-dashboard.ts",
     "dashboard:list-exports": "npm --prefix seller-api exec -- tsx tools/list-dashboard-exports.ts",
+    "snapshot:validate:sample": "npm --prefix seller-api exec -- tsx tools/validate-defi-guardian-snapshot.ts --file seller-api/src/fixtures/defiGuardianSnapshotV1.sample.json",
     "demo:local": "npm --prefix seller-api exec -- tsx tools/run-local-demo.ts",
+    "demo:real-file": "npm --prefix seller-api exec -- tsx tools/run-real-file-demo.ts",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   }
 }

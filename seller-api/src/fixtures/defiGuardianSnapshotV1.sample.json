@@ -1,0 +1,23 @@
+{
+  "snapshotVersion": "defi-guardian-snapshot-v1",
+  "generatedAt": "2026-05-30T00:00:00.000Z",
+  "source": "defi-guardian-local-sanitized-export",
+  "chainId": 56,
+  "positions": [
+    {
+      "protocol": "pancakeswap-v3",
+      "tokenId": "demo-real-file-001",
+      "chain": "bsc",
+      "pair": "CAKE/WBNB",
+      "walletAlias": "DEMO-WALLET",
+      "inRange": false,
+      "rangeStatus": "out_of_range",
+      "positionValueUsd": 420.5,
+      "estimatedCollectibleLpFeesUsd": 3.42,
+      "impermanentLossEstimatePct": 4.8,
+      "rangeRiskLevel": "HIGH",
+      "recommendedAction": "REVIEW_RANGE",
+      "healthFlags": ["manual-review", "out-of-range"]
+    }
+  ]
+}

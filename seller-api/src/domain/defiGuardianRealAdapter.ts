@@ -1,6 +1,12 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename } from "node:path";
-import { recommendationForRiskLevel, riskLevelForScore } from "./riskScoring";
+import {
+  DEFI_GUARDIAN_SNAPSHOT_V1,
+  forbiddenSnapshotPath,
+  parseDefiGuardianSnapshotV1Json,
+  type DefiGuardianSnapshotPositionV1,
+  type DefiGuardianSnapshotV1,
+} from "./defiGuardianSnapshotV1";
+import { recommendationForRiskLevel, scorePosition } from "./riskScoring";
 import type { DefiGuardianAdapterConfig } from "./defiGuardianAdapterMode";
 import type {
   CheckStatus,
@@ -13,233 +19,85 @@ import type {
   Severity,
 } from "./reportTypes";
 
-type JsonRecord = Record<string, unknown>;
-
 export type RealAdapterResult =
   | { ok: true; report: RiskReport }
   | { ok: false; warnings: string[] };
 
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asString(value: unknown): string | null {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim();
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-  return null;
-}
-
-function asNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  const parsed = Number(value.replace(/[$,%\s]/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function readString(record: JsonRecord, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = asString(record[key]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-function readNumber(record: JsonRecord, keys: string[]): number | null {
-  for (const key of keys) {
-    const value = asNumber(record[key]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-function requestPosition(body: RiskReportRequest): JsonRecord {
-  return isRecord(body.position) ? body.position : {};
+function requestPosition(body: RiskReportRequest): Record<string, unknown> {
+  return typeof body.position === "object" && body.position !== null
+    ? body.position
+    : {};
 }
 
 function requestedTokenId(body: RiskReportRequest): string | null {
-  return readString(requestPosition(body), ["tokenId", "token_id"]);
+  const value = requestPosition(body).tokenId;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function chainFromSnapshot(record: JsonRecord, body: RiskReportRequest): string {
-  const chain =
-    readString(record, ["chain", "chainLabel", "network"]) ??
-    readString(requestPosition(body), ["chain"]);
-  if (chain) return chain;
-  const chainId = readNumber(record, ["chainId", "chain_id"]);
-  if (chainId === 56) return "bsc";
-  return "unknown";
-}
-
-function pairFromSnapshot(record: JsonRecord, body: RiskReportRequest): string {
-  const pair = readString(record, ["pair"]);
-  if (pair) return pair;
-  const token0 = readString(record, ["token0Symbol", "token0_symbol", "token0"]);
-  const token1 = readString(record, ["token1Symbol", "token1_symbol", "token1"]);
-  if (token0 && token1) return `${token0}/${token1}`;
-  return readString(requestPosition(body), ["pair"]) ?? "unknown";
-}
-
-function rangeStatusFromSnapshot(record: JsonRecord): RangeStatus {
-  const explicit = readString(record, ["rangeStatus", "range_status"]);
-  if (explicit === "near_edge" || explicit === "out_of_range") return explicit;
-  if (explicit === "in_range") return explicit;
-
-  const state = (
-    readString(record, [
-      "state",
-      "status",
-      "currentState",
-      "rangeBehavior",
-      "rangeRisk",
-      "rangeRiskLevel",
-      "recommendation",
-      "recommendedAction",
-    ]) ?? ""
-  ).toUpperCase();
-  if (record.inRange === false || state.includes("OUT_OF_RANGE")) {
-    return "out_of_range";
+function readSnapshotFile(snapshotPath: string): {
+  ok: true;
+  snapshot: DefiGuardianSnapshotV1;
+} | { ok: false; warnings: string[] } {
+  const forbidden = forbiddenSnapshotPath(snapshotPath);
+  if (forbidden !== null) return { ok: false, warnings: [forbidden] };
+  if (!existsSync(snapshotPath)) {
+    return {
+      ok: false,
+      warnings: [`Snapshot path does not exist: ${snapshotPath}`],
+    };
   }
-  if (
-    state.includes("HIGH") ||
-    state.includes("REVIEW_RANGE") ||
-    state.includes("WATCH_CLOSELY") ||
-    state.includes("NEAR")
-  ) {
-    return "near_edge";
+
+  try {
+    const stats = statSync(snapshotPath);
+    if (!stats.isFile()) {
+      return { ok: false, warnings: [`Snapshot path is not a file: ${snapshotPath}`] };
+    }
+    const raw = readFileSync(snapshotPath, "utf8");
+    const parsed = parseDefiGuardianSnapshotV1Json(raw);
+    if (!parsed.ok) {
+      return { ok: false, warnings: parsed.errors };
+    }
+    return { ok: true, snapshot: parsed.snapshot };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, warnings: [`Unable to read snapshot file: ${message}`] };
   }
-  return "in_range";
 }
 
-function healthFlagsFromSnapshot(record: JsonRecord, rangeStatus: RangeStatus): string[] {
-  const flags = new Set<string>();
-  const state = (
-    readString(record, ["state", "status", "currentState", "recommendation"]) ?? ""
-  ).toUpperCase();
-  if (state.includes("ZERO_LIQUIDITY")) flags.add("zero-liquidity");
-  if (rangeStatus === "out_of_range") flags.add("out-of-range");
-  if (state.includes("REVIEW") || state.includes("UNKNOWN")) {
-    flags.add("manual-review");
-  }
-  return [...flags];
-}
-
-function normalizeSnapshotPosition(
-  record: JsonRecord,
+function selectPosition(
+  snapshot: DefiGuardianSnapshotV1,
   body: RiskReportRequest,
-  warnings: string[],
+): { ok: true; position: DefiGuardianSnapshotPositionV1 } | {
+  ok: false;
+  warnings: string[];
+} {
+  const tokenId = requestedTokenId(body);
+  if (tokenId === null) {
+    return { ok: false, warnings: ["Request position.tokenId was not provided."] };
+  }
+  const position = snapshot.positions.find((entry) => entry.tokenId === tokenId);
+  if (!position) {
+    return {
+      ok: false,
+      warnings: [`Snapshot does not contain requested tokenId "${tokenId}".`],
+    };
+  }
+  return { ok: true, position };
+}
+
+function normalizedPosition(
+  position: DefiGuardianSnapshotPositionV1,
 ): NormalizedPosition {
-  const request = requestPosition(body);
-  const rangeStatus = rangeStatusFromSnapshot(record);
-  const liquidityUsd = readNumber(record, [
-    "liquidityUsd",
-    "positionValueUsd",
-    "currentPositionValueUsd",
-    "estimatedTotalNavUsd",
-    "totalWalletEconomicValueUsd",
-    "lpPrincipalNavUsd",
-  ]);
-  const feesUsd = readNumber(record, [
-    "feesUsd",
-    "estimatedCollectibleLpFeesUsd",
-    "lpFeesUsd",
-    "pendingCakeUsd",
-    "pendingFarmCakeUsd",
-    "currentCollectibleLpFeesUsd",
-  ]);
-
-  if (liquidityUsd === null) {
-    warnings.push(
-      "Snapshot position did not include a known USD liquidity/value field.",
-    );
-  }
-  if (feesUsd === null) {
-    warnings.push("Snapshot position did not include a known fee USD field.");
-  }
-
   return {
-    protocol:
-      readString(record, ["protocol"]) ??
-      readString(request, ["protocol"]) ??
-      "defi-guardian",
-    chain: chainFromSnapshot(record, body),
-    tokenId:
-      readString(record, ["tokenId", "token_id", "id"]) ??
-      readString(request, ["tokenId", "token_id"]) ??
-      "unknown",
-    pair: pairFromSnapshot(record, body),
-    rangeStatus,
-    liquidityUsd: liquidityUsd ?? 0,
-    feesUsd: feesUsd ?? 0,
-    impermanentLossEstimatePct: readNumber(record, [
-      "impermanentLossEstimatePct",
-      "netVsHoldPct",
-      "netLpStrategyVsHoldPercent",
-      "grossLpPrincipalVsHoldPercent",
-    ]),
-    healthFlags: healthFlagsFromSnapshot(record, rangeStatus),
-  };
-}
-
-function clampScore(score: number): number {
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
-
-function riskFromSnapshot(
-  position: NormalizedPosition,
-  record: JsonRecord,
-  warnings: string[],
-): RiskAssessment {
-  let score = 35;
-  const drivers: string[] = [];
-
-  if (position.rangeStatus === "in_range") {
-    score -= 5;
-    drivers.push("DeFi Guardian snapshot marks the position in range.");
-  } else if (position.rangeStatus === "near_edge") {
-    score += 20;
-    drivers.push("DeFi Guardian snapshot marks the position near review range.");
-  } else {
-    score += 40;
-    drivers.push("DeFi Guardian snapshot marks the position out of range.");
-  }
-
-  if (position.healthFlags.includes("zero-liquidity")) {
-    score += 40;
-    drivers.push("DeFi Guardian snapshot marks zero liquidity.");
-  }
-  if (position.healthFlags.includes("manual-review")) {
-    score += 10;
-    drivers.push("DeFi Guardian snapshot includes a manual review signal.");
-  }
-  if (position.liquidityUsd > 0 && position.liquidityUsd < 500) {
-    score += 15;
-    drivers.push("Snapshot USD value is below the low-liquidity threshold.");
-  }
-
-  const rangeRisk = (readString(record, ["rangeRiskLevel", "rangeRisk"]) ?? "")
-    .toUpperCase();
-  if (rangeRisk === "HIGH") {
-    score += 20;
-    drivers.push("Snapshot range risk is HIGH.");
-  } else if (rangeRisk === "MODERATE" || rangeRisk === "MEDIUM") {
-    score += 10;
-    drivers.push("Snapshot range risk is moderate.");
-  }
-
-  if (warnings.length > 0) {
-    score += 5;
-    drivers.push("Some snapshot fields were missing or partially mapped.");
-  }
-
-  const finalScore = clampScore(score);
-  return {
-    score: finalScore,
-    level: riskLevelForScore(finalScore),
-    drivers,
+    protocol: position.protocol,
+    chain: position.chain,
+    tokenId: position.tokenId,
+    pair: position.pair,
+    rangeStatus: position.rangeStatus,
+    liquidityUsd: position.positionValueUsd,
+    feesUsd: position.estimatedCollectibleLpFeesUsd,
+    impermanentLossEstimatePct: position.impermanentLossEstimatePct ?? null,
+    healthFlags: position.healthFlags ?? [],
   };
 }
 
@@ -251,7 +109,6 @@ function rangeSeverity(status: RangeStatus): Severity {
 
 function liquiditySeverity(position: NormalizedPosition): Severity {
   if (position.healthFlags.includes("zero-liquidity")) return "critical";
-  if (position.liquidityUsd <= 0) return "high";
   if (position.liquidityUsd < 500) return "high";
   return "medium";
 }
@@ -263,12 +120,10 @@ function checkStatusForRange(status: RangeStatus): CheckStatus {
 }
 
 function recommendationFromSnapshot(
-  record: JsonRecord,
+  position: DefiGuardianSnapshotPositionV1,
   risk: RiskAssessment,
 ): RecommendationAction {
-  const raw = (
-    readString(record, ["recommendation", "recommendedAction", "humanAction"]) ?? ""
-  ).toUpperCase();
+  const raw = (position.recommendedAction ?? "").toUpperCase();
   if (raw.includes("URGENT") || raw.includes("NOW")) return "urgent-review";
   if (raw.includes("REVIEW") || raw.includes("RERANGE")) {
     return recommendationForRiskLevel("high");
@@ -280,118 +135,10 @@ function recommendationFromSnapshot(
   return recommendationForRiskLevel(risk.level);
 }
 
-function gatherPositionRecords(value: unknown, depth = 0): JsonRecord[] {
-  if (depth > 5) return [];
-  if (Array.isArray(value)) {
-    return value.filter(isRecord);
-  }
-  if (!isRecord(value)) return [];
-
-  const records: JsonRecord[] = [];
-  if (
-    readString(value, ["tokenId", "token_id", "id"]) !== null &&
-    (readString(value, ["protocol"]) !== null ||
-      readString(value, ["pair"]) !== null ||
-      typeof value.inRange === "boolean")
-  ) {
-    records.push(value);
-  }
-
-  for (const key of [
-    "positions",
-    "outOfRange",
-    "highRiskInRange",
-    "latestPositions",
-    "results",
-    "data",
-    "snapshot",
-    "portfolio",
-    "positionsResponse",
-    "rangeActions",
-    "rangeAdvisor",
-  ]) {
-    if (key in value) {
-      records.push(...gatherPositionRecords(value[key], depth + 1));
-    }
-  }
-  return records;
-}
-
-function selectPositionRecord(
-  payload: unknown,
-  body: RiskReportRequest,
-): { ok: true; record: JsonRecord } | { ok: false; warnings: string[] } {
-  const tokenId = requestedTokenId(body);
-  const records = gatherPositionRecords(payload);
-  if (records.length === 0) {
-    return {
-      ok: false,
-      warnings: [
-        "Snapshot did not contain a recognized positions array or position object.",
-      ],
-    };
-  }
-  if (tokenId === null) return { ok: true, record: records[0] as JsonRecord };
-
-  const match = records.find(
-    (record) => readString(record, ["tokenId", "token_id", "id"]) === tokenId,
-  );
-  if (match) return { ok: true, record: match };
-
-  return {
-    ok: false,
-    warnings: [
-      `Snapshot did not contain requested tokenId "${tokenId}".`,
-    ],
-  };
-}
-
-function forbiddenSnapshotPath(snapshotPath: string): string | null {
-  const normalized = snapshotPath.toLowerCase();
-  const fileName = basename(normalized);
-  if (fileName === ".env" || fileName.startsWith(".env.")) {
-    return "Refusing to read an env file as a DeFi Guardian snapshot.";
-  }
-  if (
-    normalized.includes("\\secrets\\") ||
-    normalized.includes("/secrets/") ||
-    fileName.includes("private") ||
-    fileName.includes("secret")
-  ) {
-    return "Refusing to read a path that looks like it may contain secrets.";
-  }
-  return null;
-}
-
-function readSnapshotFile(snapshotPath: string): {
-  ok: true;
-  payload: unknown;
-} | { ok: false; warnings: string[] } {
-  const forbidden = forbiddenSnapshotPath(snapshotPath);
-  if (forbidden !== null) return { ok: false, warnings: [forbidden] };
-  if (!existsSync(snapshotPath)) {
-    return {
-      ok: false,
-      warnings: [`Real DeFi Guardian snapshot path does not exist: ${snapshotPath}`],
-    };
-  }
-  try {
-    const stats = statSync(snapshotPath);
-    if (!stats.isFile()) {
-      return {
-        ok: false,
-        warnings: [`Real DeFi Guardian snapshot path is not a file: ${snapshotPath}`],
-      };
-    }
-    const raw = readFileSync(snapshotPath, "utf8");
-    return { ok: true, payload: JSON.parse(raw) as unknown };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      warnings: [`Unable to read or parse DeFi Guardian snapshot JSON: ${message}`],
-    };
-  }
+function confidenceForRisk(risk: RiskAssessment): "low" | "medium" | "high" {
+  if (risk.score >= 85) return "high";
+  if (risk.score >= 60) return "medium";
+  return "medium";
 }
 
 export function analyzePositionFromRealFile(
@@ -402,93 +149,88 @@ export function analyzePositionFromRealFile(
   if (config.snapshotPath === null) {
     return {
       ok: false,
-      warnings: [
-        ...warnings,
-        "Real DeFi Guardian snapshot path is not configured.",
-        "Falling back to adapter-mock.",
-      ],
+      warnings: [...warnings, "DEFI_GUARDIAN_SNAPSHOT_PATH is not configured."],
     };
   }
 
   const snapshot = readSnapshotFile(config.snapshotPath);
   if (!snapshot.ok) {
-    return {
-      ok: false,
-      warnings: [...warnings, ...snapshot.warnings, "Falling back to adapter-mock."],
-    };
+    return { ok: false, warnings: [...warnings, ...snapshot.warnings] };
   }
 
-  const selected = selectPositionRecord(snapshot.payload, body);
+  const selected = selectPosition(snapshot.snapshot, body);
   if (!selected.ok) {
-    return {
-      ok: false,
-      warnings: [...warnings, ...selected.warnings, "Falling back to adapter-mock."],
-    };
+    return { ok: false, warnings: [...warnings, ...selected.warnings] };
   }
 
-  const position = normalizeSnapshotPosition(selected.record, body, warnings);
-  const risk = riskFromSnapshot(position, selected.record, warnings);
-  const recommendation = recommendationFromSnapshot(selected.record, risk);
+  const normalized = normalizedPosition(selected.position);
+  const risk = scorePosition(normalized);
+  const recommendation = recommendationFromSnapshot(selected.position, risk);
+  const liquidity = liquiditySeverity(normalized);
 
   return {
     ok: true,
     report: {
-      reportId: `real-file-${position.tokenId}`,
+      reportId: `real-file-${selected.position.tokenId}`,
       mode: "adapter-real-file",
-      generatedAt: new Date().toISOString(),
-      wallet:
-        readString(selected.record, ["wallet", "effectiveWallet", "effective_wallet"]) ??
-        (typeof body.wallet === "string" ? body.wallet : ""),
+      adapter: {
+        requestedMode: "adapter-real-file",
+        resolvedMode: "adapter-real-file",
+        fallbackUsed: false,
+        snapshotVersion: DEFI_GUARDIAN_SNAPSHOT_V1,
+        source: "local-sanitized-json",
+      },
+      generatedAt: snapshot.snapshot.generatedAt,
+      wallet: typeof body.wallet === "string" ? body.wallet : "",
       position: {
-        protocol: position.protocol,
-        chain: position.chain,
-        tokenId: position.tokenId,
-        pair: position.pair,
+        protocol: selected.position.protocol,
+        chain: selected.position.chain,
+        tokenId: selected.position.tokenId,
+        pair: selected.position.pair,
       },
       risk,
       range: {
-        status: position.rangeStatus,
-        severity: rangeSeverity(position.rangeStatus),
+        status: selected.position.rangeStatus,
+        severity: rangeSeverity(selected.position.rangeStatus),
         explanation:
-          "Range status was mapped from a local DeFi Guardian JSON snapshot.",
+          "Range status was mapped from a sanitized DeFi Guardian snapshot v1 file.",
       },
       liquidity: {
-        estimatedUsd: position.liquidityUsd,
-        severity: liquiditySeverity(position),
+        estimatedUsd: selected.position.positionValueUsd,
+        severity: liquidity,
         explanation:
-          "Liquidity/value was mapped from a local DeFi Guardian JSON snapshot.",
+          "Position value was mapped from sanitized DeFi Guardian snapshot v1 data.",
       },
       fees: {
-        estimatedUsd: position.feesUsd,
+        estimatedUsd: selected.position.estimatedCollectibleLpFeesUsd,
         comment:
-          "Fee data was mapped from a local DeFi Guardian JSON snapshot when present.",
+          "Fee data was mapped from sanitized DeFi Guardian snapshot v1 data.",
       },
       recommendation: {
         action: recommendation,
-        confidence: warnings.length > 0 ? "medium" : "high",
+        confidence: confidenceForRisk(risk),
         rationale:
-          "Recommendation is derived from read-only DeFi Guardian snapshot fields.",
+          "Recommendation is derived from sanitized DeFi Guardian snapshot v1 fields.",
       },
       warnings: [
-        "Real adapter file mode is read-only and never executes transactions.",
+        "adapter-real-file uses a sanitized local JSON snapshot and never executes transactions.",
         "This report is not financial advice.",
-        ...warnings,
       ],
       checks: [
         {
-          name: "defi_guardian_snapshot",
-          status: warnings.length > 0 ? "warn" : "pass",
-          detail: `Loaded local snapshot file ${config.snapshotPath}.`,
+          name: "defi_guardian_snapshot_v1",
+          status: "pass",
+          detail: `Loaded ${DEFI_GUARDIAN_SNAPSHOT_V1} from configured path.`,
         },
         {
           name: "range",
-          status: checkStatusForRange(position.rangeStatus),
-          detail: `Snapshot range status mapped to ${position.rangeStatus}.`,
+          status: checkStatusForRange(selected.position.rangeStatus),
+          detail: `Snapshot range status is ${selected.position.rangeStatus}.`,
         },
         {
           name: "liquidity",
-          status: liquiditySeverity(position) === "critical" ? "fail" : "warn",
-          detail: `Snapshot USD value mapped to ${position.liquidityUsd}.`,
+          status: liquidity === "critical" ? "fail" : "warn",
+          detail: `Snapshot position value is ${selected.position.positionValueUsd}.`,
         },
       ],
     },

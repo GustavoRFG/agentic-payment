@@ -211,6 +211,11 @@ function createMockRiskReport(body: RiskReportRequest): RiskReport {
   return {
     reportId: "mock-report-001",
     mode: "adapter-mock",
+    adapter: {
+      requestedMode: "adapter-mock",
+      resolvedMode: "adapter-mock",
+      fallbackUsed: false,
+    },
     generatedAt: new Date().toISOString(),
     wallet: normalized.wallet,
     position: {
@@ -262,20 +267,30 @@ function createMockRiskReport(body: RiskReportRequest): RiskReport {
 
 function fallbackReport(
   body: RiskReportRequest,
-  mode: DefiGuardianReportMode,
+  requestedMode: DefiGuardianReportMode,
   warnings: string[],
 ): RiskReport {
   const report = createMockRiskReport(body);
+  const fallbackWarnings = [
+    "Real DeFi Guardian snapshot could not be loaded.",
+    ...warnings,
+    "Falling back to adapter-mock.",
+  ];
   return {
     ...report,
-    reportId: `${mode}-fallback-001`,
-    mode,
-    warnings: [...warnings, ...report.warnings],
+    reportId: `${requestedMode}-fallback-001`,
+    mode: "adapter-mock",
+    adapter: {
+      requestedMode,
+      resolvedMode: "adapter-mock",
+      fallbackUsed: true,
+    },
+    warnings: [...fallbackWarnings, ...report.warnings],
     checks: [
       {
         name: "defi_guardian_adapter",
         status: "warn",
-        detail: warnings.join(" "),
+        detail: fallbackWarnings.join(" "),
       },
       ...report.checks,
     ],

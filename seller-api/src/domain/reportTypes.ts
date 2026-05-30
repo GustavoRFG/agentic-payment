@@ -50,9 +50,18 @@ export interface RiskAssessment {
   drivers: string[];
 }
 
+export interface AdapterMetadata {
+  requestedMode: DefiGuardianReportMode;
+  resolvedMode: DefiGuardianReportMode;
+  fallbackUsed: boolean;
+  snapshotVersion?: string;
+  source?: string;
+}
+
 export interface RiskReport {
   reportId: string;
   mode: DefiGuardianReportMode;
+  adapter: AdapterMetadata;
   generatedAt: string;
   wallet: string;
   position: {

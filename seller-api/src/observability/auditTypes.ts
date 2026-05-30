@@ -23,6 +23,13 @@ export interface AuditPaymentSummary {
 export interface AuditReportSummary {
   reportId?: string;
   mode?: string;
+  adapter?: {
+    requestedMode?: string;
+    resolvedMode?: string;
+    fallbackUsed?: boolean;
+    snapshotVersion?: string;
+    source?: string;
+  };
   riskScore?: number;
   riskLevel?: string;
   recommendation?: string;

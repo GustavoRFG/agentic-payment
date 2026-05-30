@@ -125,6 +125,8 @@ mainnet wallet.
 | `npm.cmd run dashboard:open` | Open the current dashboard in the default browser. |
 | `npm.cmd run dashboard:export` | Snapshot the current dashboard under `dashboard/exports/<timestamp>/`. |
 | `npm.cmd run dashboard:list-exports` | List existing dashboard snapshots. |
+| `npm.cmd run snapshot:validate:sample` | Validate the committed sanitized DeFi Guardian snapshot v1 fixture. |
+| `npm.cmd run demo:real-file` | Run the deterministic sanitized snapshot through `adapter-real-file`; no payment is executed. |
 | `npm.cmd run seller:dev` | Run the seller in dev mode (used inside `demo:local`; manual use is optional). |
 | `npm.cmd run buyer:dev -- --dry-run` | Run the buyer in dry-run only; never signs. |
 
@@ -192,8 +194,8 @@ pre-recording / pre-presentation checklist and the safety statement.
 
 ## Current Limitations
 
-- The DeFi risk report is a mock adapter output, not a connection to a real
-  on-chain DeFi Guardian engine.
+- The DeFi risk report defaults to mock output. `adapter-real-file` currently
+  consumes only a committed sanitized fixture, not live DeFi Guardian data.
 - The dashboard is static, local, and refreshed only by an explicit command.
 - The controlled x402 payment path is validated on Base Sepolia testnet but is
   not part of the default `demo:local` flow.
@@ -206,9 +208,10 @@ pre-recording / pre-presentation checklist and the safety statement.
 - **MVP 001I** — public demo README / pitch flow.
 - **MVP 001J** — repo hygiene, screenshots, and public demo
   polish.
-- **MVP 002A (this milestone)** — DeFi Guardian discovery and adapter
-  contract.
-- **MVP 002B** — sanitized DeFi Guardian snapshot through `adapter-real-file`.
+- **MVP 002A** — DeFi Guardian discovery and adapter contract.
+- **MVP 002B (this milestone)** — sanitized DeFi Guardian snapshot v1 and
+  deterministic real-file demo.
+- **MVP 002C** — approved read-only local DeFi Guardian snapshot export.
 - **MVP 002** — connect the real DeFi Guardian engine in place of the mock
   adapter.
 - **MVP 003** — add a hosted seller endpoint (still testnet by default).
@@ -216,9 +219,9 @@ pre-recording / pre-presentation checklist and the safety statement.
 - **MVP 005** — prototype an AI Treasury / Payment Router that brokers
   payments on behalf of an agent.
 
-Immediate recommended next milestone given current repo state: **MVP 002B -
-generate a sanitized DeFi Guardian snapshot and feed it through
-`adapter-real-file`**.
+Immediate recommended next milestone given current repo state: **MVP 002C -
+add an approved read-only local DeFi Guardian snapshot exporter and test it
+with actual sanitized local data**.
 
 ## Demo Pitch
 
@@ -253,6 +256,8 @@ completed milestones:
 - MVP 001H — local demo script
 - MVP 001I — public demo README / pitch flow
 - MVP 001J — repo hygiene, screenshots, and public demo polish
-- MVP 002A - DeFi Guardian discovery and adapter contract (this milestone)
+- MVP 002A — DeFi Guardian discovery and adapter contract
+- MVP 002B — sanitized DeFi Guardian snapshot v1 and deterministic real-file
+  demo (this milestone)
 
 Milestone notes for each step live under [`docs/`](docs/).

@@ -162,6 +162,7 @@ function reportSummary(report: RiskReport) {
   return {
     reportId: report.reportId,
     mode: report.mode,
+    adapter: report.adapter,
     riskScore: report.risk.score,
     riskLevel: report.risk.level,
     recommendation: report.recommendation.action,
