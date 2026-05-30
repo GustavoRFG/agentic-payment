@@ -1,10 +1,13 @@
 import { defaultSamplePosition } from "../fixtures/samplePositions";
+import { getDefiGuardianAdapterConfig } from "./defiGuardianAdapterMode";
+import { analyzePositionFromRealFile } from "./defiGuardianRealAdapter";
 import {
   recommendationForRiskLevel,
   scorePosition,
 } from "./riskScoring";
 import type {
   CheckStatus,
+  DefiGuardianReportMode,
   NormalizedPosition,
   NormalizedRiskReportRequest,
   RangeStatus,
@@ -198,63 +201,110 @@ function liquidityCheck(
   };
 }
 
+function createMockRiskReport(body: RiskReportRequest): RiskReport {
+  const normalized = normalizeRequest(body);
+  const risk = scorePosition(normalized.position);
+  const action = recommendationForRiskLevel(risk.level);
+  const range = rangeCheck(normalized.position.rangeStatus);
+  const liquidity = liquidityCheck(normalized.position);
+
+  return {
+    reportId: "mock-report-001",
+    mode: "adapter-mock",
+    generatedAt: new Date().toISOString(),
+    wallet: normalized.wallet,
+    position: {
+      protocol: normalized.position.protocol,
+      chain: normalized.position.chain,
+      tokenId: normalized.position.tokenId,
+      pair: normalized.position.pair,
+    },
+    risk,
+    range: {
+      status: normalized.position.rangeStatus,
+      severity: rangeSeverity(normalized.position.rangeStatus),
+      explanation: rangeExplanation(normalized.position.rangeStatus),
+    },
+    liquidity: {
+      estimatedUsd: normalized.position.liquidityUsd,
+      severity: liquiditySeverity(normalized.position),
+      explanation:
+        "Liquidity is sufficient for a demo position, but real pool depth " +
+        "is not connected yet.",
+    },
+    fees: {
+      estimatedUsd: normalized.position.feesUsd,
+      comment: "Fee data is mocked until DeFi Guardian real integration.",
+    },
+    recommendation: {
+      action,
+      confidence: confidenceForScore(risk.score),
+      rationale: recommendationRationale(action),
+    },
+    warnings: [
+      "This is a mock adapter report, not financial advice.",
+      "No real on-chain position data was queried.",
+    ],
+    checks: [
+      {
+        name: "range",
+        status: range.status,
+        detail: range.detail,
+      },
+      {
+        name: "liquidity",
+        status: liquidity.status,
+        detail: liquidity.detail,
+      },
+    ],
+  };
+}
+
+function fallbackReport(
+  body: RiskReportRequest,
+  mode: DefiGuardianReportMode,
+  warnings: string[],
+): RiskReport {
+  const report = createMockRiskReport(body);
+  return {
+    ...report,
+    reportId: `${mode}-fallback-001`,
+    mode,
+    warnings: [...warnings, ...report.warnings],
+    checks: [
+      {
+        name: "defi_guardian_adapter",
+        status: "warn",
+        detail: warnings.join(" "),
+      },
+      ...report.checks,
+    ],
+  };
+}
+
 export const defiGuardianAdapter = {
   analyzePosition(body: RiskReportRequest): RiskReport {
-    const normalized = normalizeRequest(body);
-    const risk = scorePosition(normalized.position);
-    const action = recommendationForRiskLevel(risk.level);
-    const range = rangeCheck(normalized.position.rangeStatus);
-    const liquidity = liquidityCheck(normalized.position);
+    const config = getDefiGuardianAdapterConfig();
+    if (config.mode === "adapter-mock") {
+      const report = createMockRiskReport(body);
+      if (config.warnings.length === 0) return report;
+      return {
+        ...report,
+        warnings: [...config.warnings, ...report.warnings],
+      };
+    }
 
-    return {
-      reportId: "mock-report-001",
-      mode: "adapter-mock",
-      generatedAt: new Date().toISOString(),
-      wallet: normalized.wallet,
-      position: {
-        protocol: normalized.position.protocol,
-        chain: normalized.position.chain,
-        tokenId: normalized.position.tokenId,
-        pair: normalized.position.pair,
-      },
-      risk,
-      range: {
-        status: normalized.position.rangeStatus,
-        severity: rangeSeverity(normalized.position.rangeStatus),
-        explanation: rangeExplanation(normalized.position.rangeStatus),
-      },
-      liquidity: {
-        estimatedUsd: normalized.position.liquidityUsd,
-        severity: liquiditySeverity(normalized.position),
-        explanation:
-          "Liquidity is sufficient for a demo position, but real pool depth " +
-          "is not connected yet.",
-      },
-      fees: {
-        estimatedUsd: normalized.position.feesUsd,
-        comment: "Fee data is mocked until DeFi Guardian real integration.",
-      },
-      recommendation: {
-        action,
-        confidence: confidenceForScore(risk.score),
-        rationale: recommendationRationale(action),
-      },
-      warnings: [
-        "This is a mock adapter report, not financial advice.",
-        "No real on-chain position data was queried.",
-      ],
-      checks: [
-        {
-          name: "range",
-          status: range.status,
-          detail: range.detail,
-        },
-        {
-          name: "liquidity",
-          status: liquidity.status,
-          detail: liquidity.detail,
-        },
-      ],
-    };
+    if (config.mode === "adapter-real-file") {
+      const result = analyzePositionFromRealFile(body, config);
+      if (result.ok) return result.report;
+      return fallbackReport(body, config.mode, result.warnings);
+    }
+
+    return fallbackReport(body, config.mode, [
+      ...config.warnings,
+      "adapter-real-cli is reserved for a future read-only CLI integration.",
+      "No DeFi Guardian CLI command was executed.",
+      "Falling back to adapter-mock.",
+    ]);
   },
 };

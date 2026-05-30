@@ -188,7 +188,7 @@ pre-recording / pre-presentation checklist and the safety statement.
   ignored by git.
 - The lab does not call the production Coinbase Agentic Wallet, does not call
   `make_http_request_with_x402` in this milestone, and does not read or modify
-  `D:\defi_guardian`.
+  `D:\defi_guardian` except for the MVP 002A read-only discovery pass.
 
 ## Current Limitations
 
@@ -204,8 +204,11 @@ pre-recording / pre-presentation checklist and the safety statement.
 ## Roadmap
 
 - **MVP 001I** — public demo README / pitch flow.
-- **MVP 001J (this milestone)** — repo hygiene, screenshots, and public demo
+- **MVP 001J** — repo hygiene, screenshots, and public demo
   polish.
+- **MVP 002A (this milestone)** — DeFi Guardian discovery and adapter
+  contract.
+- **MVP 002B** — sanitized DeFi Guardian snapshot through `adapter-real-file`.
 - **MVP 002** — connect the real DeFi Guardian engine in place of the mock
   adapter.
 - **MVP 003** — add a hosted seller endpoint (still testnet by default).
@@ -213,9 +216,9 @@ pre-recording / pre-presentation checklist and the safety statement.
 - **MVP 005** — prototype an AI Treasury / Payment Router that brokers
   payments on behalf of an agent.
 
-Immediate recommended next milestone given current repo state: **MVP 002 —
-connect the real DeFi Guardian engine behind the existing mock adapter
-boundary**.
+Immediate recommended next milestone given current repo state: **MVP 002B -
+generate a sanitized DeFi Guardian snapshot and feed it through
+`adapter-real-file`**.
 
 ## Demo Pitch
 
@@ -249,6 +252,7 @@ completed milestones:
 - MVP 001G — dashboard refresh / export workflow
 - MVP 001H — local demo script
 - MVP 001I — public demo README / pitch flow
-- MVP 001J — repo hygiene, screenshots, and public demo polish (this milestone)
+- MVP 001J — repo hygiene, screenshots, and public demo polish
+- MVP 002A - DeFi Guardian discovery and adapter contract (this milestone)
 
 Milestone notes for each step live under [`docs/`](docs/).

@@ -2,6 +2,10 @@ export type RangeStatus = "in_range" | "near_edge" | "out_of_range";
 export type Severity = "low" | "medium" | "high" | "critical";
 export type CheckStatus = "pass" | "warn" | "fail";
 export type RiskLevel = "low" | "medium" | "high" | "critical";
+export type DefiGuardianReportMode =
+  | "adapter-mock"
+  | "adapter-real-file"
+  | "adapter-real-cli";
 export type RecommendationAction =
   | "hold"
   | "monitor"
@@ -48,7 +52,7 @@ export interface RiskAssessment {
 
 export interface RiskReport {
   reportId: string;
-  mode: "adapter-mock";
+  mode: DefiGuardianReportMode;
   generatedAt: string;
   wallet: string;
   position: {
