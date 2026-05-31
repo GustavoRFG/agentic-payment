@@ -127,6 +127,9 @@ mainnet wallet.
 | `npm.cmd run dashboard:list-exports` | List existing dashboard snapshots. |
 | `npm.cmd run snapshot:validate:sample` | Validate the committed sanitized DeFi Guardian snapshot v1 fixture. |
 | `npm.cmd run demo:real-file` | Run the deterministic sanitized snapshot through `adapter-real-file`; no payment is executed. |
+| `npm.cmd run snapshot:export:local` | Export a sanitized local snapshot from DeFi Guardian (read-only) into gitignored `runtime/`. |
+| `npm.cmd run snapshot:validate:local` | Validate the local exported snapshot against `defi-guardian-snapshot-v1`. |
+| `npm.cmd run demo:real-local-file` | Run the **actual** local sanitized snapshot through `adapter-real-file`; no payment is executed. See `docs/mvp-002c-local-defi-guardian-export.md`. |
 | `npm.cmd run seller:dev` | Run the seller in dev mode (used inside `demo:local`; manual use is optional). |
 | `npm.cmd run buyer:dev -- --dry-run` | Run the buyer in dry-run only; never signs. |
 
