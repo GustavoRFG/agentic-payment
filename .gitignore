@@ -8,6 +8,7 @@ debug/
 *.log
 logs/
 dashboard/exports/
+dashboard/index.html
 runtime/
 *.jsonl
 .awal-electron-user-data/
@@ -20,8 +21,3 @@ mcp/
 secrets/
 *.secret
 *_secret.txt
-
-# Root-level npm lockfile: the root package.json declares no dependencies, so
-# this lockfile is empty npm boilerplate. The real lockfiles under seller-api/
-# and buyer-client/ are tracked.
-/package-lock.json

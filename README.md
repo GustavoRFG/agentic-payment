@@ -145,9 +145,9 @@ units (`$0.001`), and is not part of the dry-run validation flow.
 
 ## Dashboard
 
-`dashboard/index.html` is a single self-contained file: embedded CSS, no
-JavaScript, no remote assets, no analytics. It is rendered from the same audit
-summary shape exposed by `logs:summary -- --json`.
+`dashboard/index.html` is a generated local file: embedded CSS, no JavaScript,
+no remote assets, no analytics. It is rendered from the same audit summary
+shape exposed by `logs:summary -- --json` and is intentionally not tracked.
 
 KPIs surfaced:
 
@@ -166,10 +166,8 @@ KPIs surfaced:
 The dashboard is the canonical local view of "is the flow working and
 producing the evidence we expect?".
 
-`dashboard/index.html` is a **generated static artifact**, committed as the
-canonical sample output so GitHub visitors can see a representative dashboard.
-It is refreshed by `dashboard:render` and the demo, so its KPI numbers will
-drift between commits. Timestamped exports under `dashboard/exports/` are
+The committed screenshot under `docs/screenshots/` is the stable representative
+dashboard artifact. Timestamped exports under `dashboard/exports/` are
 **local-only and git-ignored**.
 
 ## Screenshots
