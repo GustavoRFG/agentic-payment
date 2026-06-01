@@ -12,6 +12,8 @@
     "buyer:build": "npm --prefix buyer-client run build",
     "buyer:payment-check": "npm --prefix buyer-client run payment:check",
     "buyer:wallet-check": "npm --prefix buyer-client run wallet:check",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "logs:summary": "npm --prefix seller-api exec -- tsx tools/log-summary.ts",
     "logs:summary:json": "npm --prefix seller-api exec -- tsx tools/log-summary.ts --json",
     "logs:tail:seller": "powershell -NoProfile -Command \"Get-Content -Wait logs/seller-events.jsonl\"",
@@ -31,5 +33,9 @@
     "demo:paid-real-local-dry-run": "npm --prefix seller-api exec -- tsx tools/run-paid-real-local-dry-run.ts",
     "demo:paid-real-local-controlled": "npm --prefix seller-api exec -- tsx tools/run-paid-real-local-controlled-payment.ts",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^2.1.0"
   }
 }
