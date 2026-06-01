@@ -108,6 +108,20 @@ active tokenId, starts `seller-api` in `adapter-real-file` mode, validates the
 public report first, validates unpaid protected `HTTP 402`, then invokes the
 buyer payment path exactly once. Seller shutdown runs in `finally`.
 
+## Environment isolation hardening
+
+MVP 002D.1A.1 isolates child-process environments before any explicit payment
+approval:
+
+- the seller subprocess does not inherit buyer payment secrets from the parent
+  shell;
+- the snapshot refresh subprocess does not inherit payment secrets;
+- wallet-check and buyer-payment subprocesses omit inherited payment secrets and
+  allow `buyer-client` to load its own local testnet-only configuration inside
+  its own process;
+- the unauthorized self-test returns `PAYMENT_NOT_AUTHORIZED`;
+- no payment was executed during hardening.
+
 ## Confirmation token
 
 The exact token required to run the controlled payment is:

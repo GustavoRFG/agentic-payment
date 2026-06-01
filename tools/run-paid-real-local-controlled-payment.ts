@@ -26,6 +26,16 @@ const AMOUNT_ATOMIC = "1000";
 const AMOUNT_USD = "0.001";
 const MAX_ATTEMPTS = 1;
 const MAINNET_NETWORKS = new Set(["eip155:1", "eip155:8453"]);
+const SENSITIVE_ENV_NAMES = new Set([
+  "BUYER_PRIVATE_KEY",
+  "PRIVATE_KEY",
+  "CDP_API_KEY_ID",
+  "CDP_API_KEY_SECRET",
+  "CDP_WALLET_SECRET",
+  "WALLET_SECRET",
+  "MNEMONIC",
+  "SEED_PHRASE",
+]);
 
 type ResultKind = "CONTROLLED_PAYMENT_SUCCEEDED" | "PAYMENT_NOT_AUTHORIZED" | "BLOCKED" | "CONTROLLED_PAYMENT_FAILED";
 type StepState = "OK" | "FAILED" | "SKIPPED";
@@ -89,20 +99,55 @@ function snapshotPath(root: string): string {
   return resolve(root, "runtime", "defi-guardian-snapshots", "latest.json");
 }
 
-function safeEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+function sanitizedBaseEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (!key || key.startsWith("=") || typeof value !== "string") continue;
+    if (SENSITIVE_ENV_NAMES.has(key.toUpperCase())) continue;
     env[key] = value;
   }
+  return env;
+}
+
+function controlledDefaults(root: string): NodeJS.ProcessEnv {
   return {
-    ...env,
     PORT: String(PORT),
     SELLER_BASE_URL: BASE_URL,
     REPORT_PRICE_USD: "$0.001",
     X402_NETWORK: NETWORK,
     MAX_PAYMENT_USD: AMOUNT_USD,
     AGENTIC_AUDIT_LOG_DIR: join(root, "logs"),
+  };
+}
+
+function sellerEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...sanitizedBaseEnv(),
+    ...controlledDefaults(root),
+    ...extra,
+  };
+}
+
+function snapshotEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...sanitizedBaseEnv(),
+    ...controlledDefaults(root),
+    ...extra,
+  };
+}
+
+function walletCheckEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...sanitizedBaseEnv(),
+    ...controlledDefaults(root),
+    ...extra,
+  };
+}
+
+function buyerPaymentEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...sanitizedBaseEnv(),
+    ...controlledDefaults(root),
     ...extra,
   };
 }
@@ -151,7 +196,7 @@ async function runCaptured(args: string[], cwd: string, env: NodeJS.ProcessEnv):
 }
 
 async function refreshAndValidateSnapshot(root: string): Promise<void> {
-  const result = await runCaptured(["run", "snapshot:refresh:local"], root, safeEnv(root));
+  const result = await runCaptured(["run", "snapshot:refresh:local"], root, snapshotEnv(root));
   if (
     result.code !== 0 ||
     !result.output.includes("RESULT: AGENTIC_SNAPSHOT_EXPORTED") ||
@@ -198,7 +243,7 @@ function loadValidateSelect(file: string): SelectedPosition {
 
 async function checkWallet(root: string): Promise<void> {
   const buyerDir = join(root, "buyer-client");
-  const result = await runCaptured(["run", "wallet:check"], buyerDir, safeEnv(root));
+  const result = await runCaptured(["run", "wallet:check"], buyerDir, walletCheckEnv(root));
   const output = result.output;
   if (!output.includes(`Network: ${NETWORK}`)) {
     throw new ControlledPaymentError("BLOCKED", "mainnet network");
@@ -236,7 +281,7 @@ function startSeller(root: string, file: string): ChildProcessWithoutNullStreams
   const sellerDir = join(root, "seller-api");
   const seller = spawnNpm(["run", "dev"], {
     cwd: sellerDir,
-    env: safeEnv(root, {
+    env: sellerEnv(root, {
       DEFI_GUARDIAN_ADAPTER_MODE: "real-file",
       DEFI_GUARDIAN_SNAPSHOT_PATH: file,
     }),
@@ -365,7 +410,7 @@ async function runBuyerPaymentOnce(root: string, selected: SelectedPosition): Pr
   const result = await runCaptured(
     ["run", "dev", "--", "--pay"],
     buyerDir,
-    safeEnv(root, {
+    buyerPaymentEnv(root, {
       BUYER_REPORT_PROTOCOL: selected.protocol,
       BUYER_REPORT_CHAIN: selected.chain,
       BUYER_REPORT_TOKEN_ID: selected.tokenId,
