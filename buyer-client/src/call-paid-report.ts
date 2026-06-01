@@ -154,12 +154,17 @@ function paymentSummaryFromAccept(entry: AcceptEntry): AuditPaymentSummary {
 // ---------------------------------------------------------------------------
 
 const PAID_ROUTE = "/paid/defi-risk-report";
+const REQUEST_PROTOCOL = process.env.BUYER_REPORT_PROTOCOL ?? "pancakeswap";
+const REQUEST_CHAIN = process.env.BUYER_REPORT_CHAIN ?? "bsc";
+const REQUEST_TOKEN_ID = process.env.BUYER_REPORT_TOKEN_ID ?? "demo-position-001";
+const REQUEST_PAIR = process.env.BUYER_REPORT_PAIR;
 const REQUEST_BODY = {
   wallet: "0x0000000000000000000000000000000000000000",
   position: {
-    protocol: "pancakeswap",
-    chain: "bsc",
-    tokenId: "demo-position-001",
+    protocol: REQUEST_PROTOCOL,
+    chain: REQUEST_CHAIN,
+    tokenId: REQUEST_TOKEN_ID,
+    ...(REQUEST_PAIR ? { pair: REQUEST_PAIR } : {}),
   },
 };
 

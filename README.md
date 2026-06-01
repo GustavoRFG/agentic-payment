@@ -132,11 +132,16 @@ mainnet wallet.
 | `npm.cmd run snapshot:refresh:local` | Export then validate the local sanitized snapshot in one step (read-only). |
 | `npm.cmd run demo:real-local-file` | Run the **actual** local sanitized snapshot through `adapter-real-file`; no payment is executed. See `docs/mvp-002c-local-defi-guardian-export.md`. |
 | `npm.cmd run demo:paid-real-local-dry-run` | Serve the **actual** local snapshot through the x402-protected paid endpoint, hit it **without** payment for HTTP 402, and run the buyer dry-run. No payment, no signing. See `docs/mvp-002d0-paid-real-local-dry-run.md`. |
+| `npm.cmd run demo:paid-real-local-controlled -- --confirm ONE_BASE_SEPOLIA_PAYMENT` | Controlled one-payment gate for a real-local report. **DO NOT RUN WITHOUT EXPLICIT APPROVAL.** See `docs/mvp-002d1-controlled-real-local-payment-readiness.md`. |
 | `npm.cmd run seller:dev` | Run the seller in dev mode (used inside `demo:local`; manual use is optional). |
 | `npm.cmd run buyer:dev -- --dry-run` | Run the buyer in dry-run only; never signs. |
 
 Everything else (including any `--pay` path) is out of scope for the default
 demo and is intentionally left to a deliberate, manual session.
+
+The controlled real-local payment command is staged only for a future manual
+authorization step. It is Base Sepolia only, USDC only, exactly `1000` atomic
+units (`$0.001`), and is not part of the dry-run validation flow.
 
 ## Dashboard
 

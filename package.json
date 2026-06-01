@@ -29,6 +29,7 @@
     "demo:real-file": "npm --prefix seller-api exec -- tsx tools/run-real-file-demo.ts",
     "demo:real-local-file": "npm --prefix seller-api exec -- tsx tools/run-real-local-snapshot-demo.ts",
     "demo:paid-real-local-dry-run": "npm --prefix seller-api exec -- tsx tools/run-paid-real-local-dry-run.ts",
+    "demo:paid-real-local-controlled": "npm --prefix seller-api exec -- tsx tools/run-paid-real-local-controlled-payment.ts",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   }
 }
