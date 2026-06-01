@@ -1,19 +1,17 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtempSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
+import {
+  PAYMENT_AMOUNT_ATOMIC,
+  PAYMENT_AMOUNT_USD,
+  TESTNET_NETWORK,
+  sanitizeEnv,
+} from "../seller-api/src/config/safety.ts";
 import { defiGuardianAdapter } from "../seller-api/src/domain/defiGuardianAdapter.ts";
 import type { RiskReportRequest } from "../seller-api/src/domain/reportTypes.ts";
+import { projectRootFrom, runCommand } from "./_lib/child-process.ts";
+import { type SellerHarness, startSeller } from "./_lib/seller-harness.ts";
 
-const PORT = 4021;
-const BASE_URL = `http://localhost:${PORT}`;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const EXPECTED_NETWORK = "eip155:84532";
-const EXPECTED_AMOUNT_USD = "0.001";
-const EXPECTED_AMOUNT_ATOMIC = "1000";
 
 type ResultKind = "REAL_FILE_DEMO_SUCCEEDED" | "BLOCKED" | "DEMO_FAILED";
 type StepState = "OK" | "FAILED" | "SKIPPED";
@@ -27,11 +25,6 @@ interface DemoState {
   sellerStopped: boolean;
 }
 
-interface CommandResult {
-  stdout: string;
-  stderr: string;
-}
-
 class DemoError extends Error {
   constructor(
     readonly result: ResultKind,
@@ -41,194 +34,19 @@ class DemoError extends Error {
   }
 }
 
-function projectRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..");
-}
-
-function npmCommand(): string {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
-}
-
-function spawnNpm(
-  args: string[],
-  options: Parameters<typeof spawn>[2],
-): ChildProcessWithoutNullStreams {
-  if (process.platform === "win32") {
-    return spawn("cmd.exe", ["/d", "/s", "/c", npmCommand(), ...args], options);
-  }
-  return spawn(npmCommand(), args, options);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
-
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolvePort) => {
-    const server = createServer();
-    server.once("error", () => resolvePort(false));
-    server.listen(port, "127.0.0.1", () => {
-      server.close(() => resolvePort(true));
-    });
-  });
-}
-
-function safeChildEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const baseEnv: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key || key.startsWith("=") || typeof value !== "string") continue;
-    baseEnv[key] = value;
-  }
-  return {
-    ...baseEnv,
-    BUYER_PRIVATE_KEY: "",
-    CDP_API_KEY_ID: "",
-    CDP_API_KEY_SECRET: "",
-    CDP_WALLET_SECRET: "",
-    PORT: String(PORT),
-    SELLER_BASE_URL: BASE_URL,
-    SELLER_RECEIVER_ADDRESS: ZERO_ADDRESS,
-    REPORT_PRICE_USD: "$0.001",
-    X402_NETWORK: EXPECTED_NETWORK,
-    MAX_PAYMENT_USD: EXPECTED_AMOUNT_USD,
-    AGENTIC_AUDIT_LOG_DIR: join(root, "logs"),
-    ...extra,
-  };
-}
-
-function tail(text: string, max = 2400): string {
-  return text.length <= max ? text : text.slice(text.length - max);
-}
-
-function runCommand(
-  label: string,
-  cwd: string,
-  args: string[],
-  env: NodeJS.ProcessEnv,
-): Promise<CommandResult> {
-  return new Promise((resolveCommand, rejectCommand) => {
-    const child = spawnNpm(args, {
-      cwd,
-      env,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      rejectCommand(new DemoError("DEMO_FAILED", `${label} failed to start: ${error.message}`));
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolveCommand({ stdout, stderr });
-        return;
-      }
-      rejectCommand(
-        new DemoError(
-          "DEMO_FAILED",
-          `${label} exited with code ${code ?? "unknown"}.\n${tail(stdout + stderr)}`,
-        ),
-      );
-    });
-  });
-}
-
 function fixturePath(root: string): string {
-  return join(
-    root,
-    "seller-api",
-    "src",
-    "fixtures",
-    "defiGuardianSnapshotV1.sample.json",
-  );
+  return join(root, "seller-api", "src", "fixtures", "defiGuardianSnapshotV1.sample.json");
 }
 
-function startSeller(
-  root: string,
-  runtimeCwd: string,
-  snapshotPath: string,
-): ChildProcessWithoutNullStreams {
-  const seller = spawnNpm(
-    [
-      "--prefix",
-      join(root, "seller-api"),
-      "exec",
-      "--",
-      "tsx",
-      join(root, "seller-api", "src", "server.ts"),
-    ],
-    {
-      cwd: runtimeCwd,
-      env: safeChildEnv(root, {
-        DEFI_GUARDIAN_ADAPTER_MODE: "real-file",
-        DEFI_GUARDIAN_SNAPSHOT_PATH: snapshotPath,
-      }),
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-
-  let output = "";
-  seller.stdout.on("data", (chunk) => {
-    output += chunk.toString();
-  });
-  seller.stderr.on("data", (chunk) => {
-    output += chunk.toString();
-  });
-  seller.on("error", (error) => {
-    output += `\n${error.message}`;
-  });
-  Object.defineProperty(seller, "__demoOutput", {
-    value: () => output,
-    enumerable: false,
-  });
-  return seller;
-}
-
-function sellerOutput(seller: ChildProcessWithoutNullStreams): string {
-  const getter = (seller as unknown as { __demoOutput?: () => string }).__demoOutput;
-  return getter ? getter() : "";
-}
-
-async function stopSeller(seller: ChildProcessWithoutNullStreams | null): Promise<boolean> {
-  if (!seller || seller.exitCode !== null) return true;
-  if (process.platform === "win32") {
-    await new Promise<void>((resolveKill) => {
-      const killer = spawn("taskkill", ["/PID", String(seller.pid), "/T", "/F"], {
-        windowsHide: true,
-        stdio: "ignore",
-      });
-      killer.on("close", () => resolveKill());
-      killer.on("error", () => resolveKill());
-    });
-  } else {
-    seller.kill("SIGTERM");
-  }
-  await delay(500);
-  return seller.exitCode !== null || seller.killed;
-}
-
-async function waitForHealth(seller: ChildProcessWithoutNullStreams): Promise<void> {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    if (seller.exitCode !== null) {
-      throw new DemoError("BLOCKED", `seller failed to start.\n${tail(sellerOutput(seller))}`);
-    }
-    try {
-      const response = await fetch(`${BASE_URL}/health`);
-      if (response.status === 200) return;
-    } catch {
-      // Server may still be starting.
-    }
-    await delay(500);
-  }
-  throw new DemoError("BLOCKED", `seller health check timed out.\n${tail(sellerOutput(seller))}`);
+function childEnv(root: string, seller: SellerHarness): NodeJS.ProcessEnv {
+  return {
+    ...sanitizeEnv(),
+    AGENTIC_SKIP_DOTENV: "1",
+    SELLER_BASE_URL: seller.baseUrl,
+    X402_NETWORK: TESTNET_NETWORK,
+    MAX_PAYMENT_USD: PAYMENT_AMOUNT_USD,
+    AGENTIC_AUDIT_LOG_DIR: join(root, "logs"),
+  };
 }
 
 function demoRequest(tokenId = "demo-real-file-001"): RiskReportRequest {
@@ -242,8 +60,11 @@ function demoRequest(tokenId = "demo-real-file-001"): RiskReportRequest {
   };
 }
 
-async function postRealFileReport(timestamp: string): Promise<{ riskScore: number; action: string }> {
-  const response = await fetch(`${BASE_URL}/mock/defi-risk-report`, {
+async function postRealFileReport(
+  seller: SellerHarness,
+  timestamp: string,
+): Promise<{ riskScore: number; action: string }> {
+  const response = await fetch(`${seller.baseUrl}/mock/defi-risk-report`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -285,10 +106,10 @@ async function postRealFileReport(timestamp: string): Promise<{ riskScore: numbe
   };
 }
 
-async function runBuyerDryRun(root: string, runtimeCwd: string): Promise<void> {
+async function runBuyerDryRun(root: string, seller: SellerHarness): Promise<void> {
   const result = await runCommand(
     "buyer dry-run",
-    runtimeCwd,
+    root,
     [
       "--prefix",
       join(root, "buyer-client"),
@@ -298,13 +119,13 @@ async function runBuyerDryRun(root: string, runtimeCwd: string): Promise<void> {
       join(root, "buyer-client", "src", "call-paid-report.ts"),
       "--dry-run",
     ],
-    safeChildEnv(root),
+    childEnv(root, seller),
   );
   const output = `${result.stdout}\n${result.stderr}`;
   for (const marker of [
     "received HTTP 402",
-    `network:         ${EXPECTED_NETWORK}`,
-    `amount (atomic): ${EXPECTED_AMOUNT_ATOMIC}`,
+    `network:         ${TESTNET_NETWORK}`,
+    `amount (atomic): ${PAYMENT_AMOUNT_ATOMIC}`,
     "dry-run OK. No payment attempted.",
   ]) {
     if (!output.includes(marker)) {
@@ -374,8 +195,7 @@ function printSummary(result: ResultKind, state: DemoState, error?: unknown): vo
 }
 
 async function main(): Promise<number> {
-  const root = projectRoot();
-  const runtimeCwd = mkdtempSync(join(tmpdir(), "agentic-payments-lab-real-file-"));
+  const root = projectRootFrom(import.meta.url);
   const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
   const state: DemoState = {
     fallback: "SKIPPED",
@@ -385,7 +205,7 @@ async function main(): Promise<number> {
     render: "SKIPPED",
     sellerStopped: false,
   };
-  let seller: ChildProcessWithoutNullStreams | null = null;
+  let seller: SellerHarness | null = null;
   let result: ResultKind = "REAL_FILE_DEMO_SUCCEEDED";
   let failure: unknown;
 
@@ -393,22 +213,21 @@ async function main(): Promise<number> {
     validateMissingSnapshotFallback();
     state.fallback = "OK";
 
-    if (!(await isPortAvailable(PORT))) {
-      throw new DemoError("BLOCKED", `port ${PORT} is already in use before the demo starts.`);
-    }
-
-    seller = startSeller(root, runtimeCwd, fixturePath(root));
-    await waitForHealth(seller);
+    seller = await startSeller({
+      projectRoot: root,
+      adapterMode: "real-file",
+      snapshotPath: fixturePath(root),
+    });
     state.health = "OK";
 
-    const report = await postRealFileReport(timestamp);
+    const report = await postRealFileReport(seller, timestamp);
     state.realFileReport = "OK";
     console.log(`Real-file report OK: riskScore=${report.riskScore} recommendation=${report.action}`);
 
-    await runBuyerDryRun(root, runtimeCwd);
+    await runBuyerDryRun(root, seller);
     state.dryRun = "OK";
 
-    await runCommand("dashboard render", root, ["run", "dashboard:render"], safeChildEnv(root));
+    await runCommand("dashboard render", root, ["run", "dashboard:render"], childEnv(root, seller));
     state.render = "OK";
   } catch (error) {
     failure = error;
@@ -419,8 +238,12 @@ async function main(): Promise<number> {
     else if (state.dryRun === "SKIPPED") state.dryRun = "FAILED";
     else if (state.render === "SKIPPED") state.render = "FAILED";
   } finally {
-    await delay(500);
-    state.sellerStopped = await stopSeller(seller);
+    if (seller) {
+      await seller.stop();
+      state.sellerStopped = true;
+    } else {
+      state.sellerStopped = true;
+    }
   }
 
   printSummary(result, state, failure);
