@@ -129,7 +129,9 @@ mainnet wallet.
 | `npm.cmd run demo:real-file` | Run the deterministic sanitized snapshot through `adapter-real-file`; no payment is executed. |
 | `npm.cmd run snapshot:export:local` | Export a sanitized local snapshot from DeFi Guardian (read-only) into gitignored `runtime/`. |
 | `npm.cmd run snapshot:validate:local` | Validate the local exported snapshot against `defi-guardian-snapshot-v1`. |
+| `npm.cmd run snapshot:refresh:local` | Export then validate the local sanitized snapshot in one step (read-only). |
 | `npm.cmd run demo:real-local-file` | Run the **actual** local sanitized snapshot through `adapter-real-file`; no payment is executed. See `docs/mvp-002c-local-defi-guardian-export.md`. |
+| `npm.cmd run demo:paid-real-local-dry-run` | Serve the **actual** local snapshot through the x402-protected paid endpoint, hit it **without** payment for HTTP 402, and run the buyer dry-run. No payment, no signing. See `docs/mvp-002d0-paid-real-local-dry-run.md`. |
 | `npm.cmd run seller:dev` | Run the seller in dev mode (used inside `demo:local`; manual use is optional). |
 | `npm.cmd run buyer:dev -- --dry-run` | Run the buyer in dry-run only; never signs. |
 
