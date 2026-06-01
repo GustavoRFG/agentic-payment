@@ -14,11 +14,18 @@
  */
 
 import express, { type NextFunction, type Request, type Response } from "express";
-import dotenv from "dotenv";
 import { randomUUID } from "node:crypto";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
+import { loadEnvUnlessDisabled } from "./config/loadEnv";
+import {
+  PAYMENT_AMOUNT_ATOMIC,
+  PAYMENT_AMOUNT_USD,
+  PAYMENT_ASSET,
+  PAYMENT_PRICE_LABEL,
+  TESTNET_NETWORK,
+} from "./config/safety";
 import {
   defiGuardianAdapter,
   validateRiskReportPayload,
@@ -30,7 +37,7 @@ import type {
   AuditPositionSummary,
 } from "./observability/auditTypes";
 
-dotenv.config();
+loadEnvUnlessDisabled();
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -40,10 +47,10 @@ type Caip2Network = `${string}:${string}`;
 
 const PORT = Number.parseInt(process.env.PORT ?? "4021", 10);
 const SELLER_RECEIVER_ADDRESS = process.env.SELLER_RECEIVER_ADDRESS ?? "";
-const REPORT_PRICE_USD = process.env.REPORT_PRICE_USD ?? "$0.001";
+const REPORT_PRICE_USD = process.env.REPORT_PRICE_USD ?? PAYMENT_PRICE_LABEL;
 const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ?? "https://x402.org/facilitator";
-const NETWORK = (process.env.X402_NETWORK ?? "eip155:84532") as Caip2Network;
+const NETWORK = (process.env.X402_NETWORK ?? TESTNET_NETWORK) as Caip2Network;
 const SELLER_RECEIVER_ADDRESS_TYPED =
   SELLER_RECEIVER_ADDRESS as `0x${string}`;
 
@@ -60,9 +67,9 @@ function assertConfig(): void {
         "rejects non-dollar-prefixed prices.",
     );
   }
-  if (NETWORK !== "eip155:84532") {
+  if (NETWORK !== TESTNET_NETWORK) {
     problems.push(
-      `X402_NETWORK is "${NETWORK}"; MVP 001 is testnet only (eip155:84532).`,
+      `X402_NETWORK is "${NETWORK}"; MVP 001 is testnet only (${TESTNET_NETWORK}).`,
     );
   }
   if (problems.length > 0) {
@@ -146,7 +153,7 @@ function paymentSummaryFromResponse(
     const amountAtomic = accept.amount ?? accept.maxAmountRequired;
     return {
       network: accept.network,
-      asset: accept.extra?.name ?? "USDC",
+      asset: accept.extra?.name ?? PAYMENT_ASSET,
       amountAtomic,
       amountUsd: atomicUsdcToUsd(amountAtomic),
       mode: "required",
@@ -303,9 +310,9 @@ app.post("/paid/defi-risk-report", (req: Request, res: Response) => {
     position: positionFromBody(req.body as RiskReportRequest),
     payment: {
       network: NETWORK,
-      asset: "USDC",
-      amountAtomic: "1000",
-      amountUsd: "0.001",
+      asset: PAYMENT_ASSET,
+      amountAtomic: PAYMENT_AMOUNT_ATOMIC,
+      amountUsd: PAYMENT_AMOUNT_USD,
       mode: "accepted",
     },
     report: reportSummary(report),

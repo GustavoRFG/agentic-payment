@@ -5,7 +5,6 @@
  * from BUYER_PRIVATE_KEY, never prints the key, and never signs or pays.
  */
 
-import dotenv from "dotenv";
 import {
   createPublicClient,
   formatEther,
@@ -16,8 +15,9 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
+import { loadEnvUnlessDisabled } from "./config/loadEnv";
 
-dotenv.config();
+loadEnvUnlessDisabled();
 
 const EXPECTED_CHAIN_ID = 84532;
 const EXPECTED_NETWORK = "eip155:84532";

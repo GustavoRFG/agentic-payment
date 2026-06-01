@@ -13,6 +13,16 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  MAINNET_NETWORKS,
+  MAX_PAYMENT_ATTEMPTS,
+  PAYMENT_AMOUNT_ATOMIC,
+  PAYMENT_AMOUNT_USD,
+  PAYMENT_ASSET,
+  PAYMENT_PRICE_LABEL,
+  TESTNET_NETWORK,
+  sanitizeEnv,
+} from "../seller-api/src/config/safety.ts";
 import { parseDefiGuardianSnapshotV1Json } from "../seller-api/src/domain/defiGuardianSnapshotV1.ts";
 import type { RiskReportRequest } from "../seller-api/src/domain/reportTypes.ts";
 
@@ -20,22 +30,11 @@ const CONFIRM_TOKEN = "ONE_BASE_SEPOLIA_PAYMENT";
 const PORT = 4021;
 const BASE_URL = `http://localhost:${PORT}`;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const NETWORK = "eip155:84532";
-const ASSET = "USDC";
-const AMOUNT_ATOMIC = "1000";
-const AMOUNT_USD = "0.001";
-const MAX_ATTEMPTS = 1;
-const MAINNET_NETWORKS = new Set(["eip155:1", "eip155:8453"]);
-const SENSITIVE_ENV_NAMES = new Set([
-  "BUYER_PRIVATE_KEY",
-  "PRIVATE_KEY",
-  "CDP_API_KEY_ID",
-  "CDP_API_KEY_SECRET",
-  "CDP_WALLET_SECRET",
-  "WALLET_SECRET",
-  "MNEMONIC",
-  "SEED_PHRASE",
-]);
+const NETWORK = TESTNET_NETWORK;
+const ASSET = PAYMENT_ASSET;
+const AMOUNT_ATOMIC = PAYMENT_AMOUNT_ATOMIC;
+const AMOUNT_USD = PAYMENT_AMOUNT_USD;
+const MAX_ATTEMPTS = MAX_PAYMENT_ATTEMPTS;
 
 type ResultKind = "CONTROLLED_PAYMENT_SUCCEEDED" | "PAYMENT_NOT_AUTHORIZED" | "BLOCKED" | "CONTROLLED_PAYMENT_FAILED";
 type StepState = "OK" | "FAILED" | "SKIPPED";
@@ -100,20 +99,14 @@ function snapshotPath(root: string): string {
 }
 
 function sanitizedBaseEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key || key.startsWith("=") || typeof value !== "string") continue;
-    if (SENSITIVE_ENV_NAMES.has(key.toUpperCase())) continue;
-    env[key] = value;
-  }
-  return env;
+  return sanitizeEnv();
 }
 
 function controlledDefaults(root: string): NodeJS.ProcessEnv {
   return {
     PORT: String(PORT),
     SELLER_BASE_URL: BASE_URL,
-    REPORT_PRICE_USD: "$0.001",
+    REPORT_PRICE_USD: PAYMENT_PRICE_LABEL,
     X402_NETWORK: NETWORK,
     MAX_PAYMENT_USD: AMOUNT_USD,
     AGENTIC_AUDIT_LOG_DIR: join(root, "logs"),

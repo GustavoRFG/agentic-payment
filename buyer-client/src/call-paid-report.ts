@@ -16,15 +16,15 @@
  * Strictly testnet — no mainnet, no real funds.
  */
 
-import dotenv from "dotenv";
 import { randomUUID } from "node:crypto";
 import { privateKeyToAccount } from "viem/accounts";
 import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import { loadEnvUnlessDisabled } from "./config/loadEnv";
 import { writeBuyerAuditEvent } from "./observability/auditLogger";
 import type { AuditPaymentSummary } from "./observability/auditTypes";
 
-dotenv.config();
+loadEnvUnlessDisabled();
 
 // ---------------------------------------------------------------------------
 // Argument parsing
