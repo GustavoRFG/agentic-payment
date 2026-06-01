@@ -33,7 +33,7 @@ export interface NormalizedPosition {
   tokenId: string;
   pair: string;
   rangeStatus: RangeStatus;
-  liquidityUsd: number;
+  liquidityUsd?: number;
   feesUsd: number;
   impermanentLossEstimatePct: number | null;
   healthFlags: string[];
@@ -77,7 +77,7 @@ export interface RiskReport {
     explanation: string;
   };
   liquidity: {
-    estimatedUsd: number;
+    estimatedUsd: number | null;
     severity: Severity;
     explanation: string;
   };

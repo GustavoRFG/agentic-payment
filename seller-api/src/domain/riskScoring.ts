@@ -40,7 +40,10 @@ export function scorePosition(position: NormalizedPosition): RiskAssessment {
     drivers.push("Position is out of range.");
   }
 
-  if (position.liquidityUsd >= 1000) {
+  if (position.liquidityUsd === undefined) {
+    score += 3;
+    drivers.push("Pool liquidity unknown.");
+  } else if (position.liquidityUsd >= 1000) {
     score -= 5;
     drivers.push("Mocked liquidity is at or above the demo threshold.");
   } else if (position.liquidityUsd < 500) {
@@ -77,7 +80,11 @@ export function scorePosition(position: NormalizedPosition): RiskAssessment {
     drivers.push("Out-of-range health flag present.");
   }
 
-  drivers.push("Liquidity depth is mocked.");
+  drivers.push(
+    position.liquidityUsd === undefined
+      ? "Liquidity depth was not provided by the snapshot."
+      : "Liquidity depth is mocked.",
+  );
 
   const finalScore = clampScore(score);
   return {

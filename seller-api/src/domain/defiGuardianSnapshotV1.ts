@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { FORBIDDEN_SNAPSHOT_PATTERNS } from "../config/safety";
 
 export const DEFI_GUARDIAN_SNAPSHOT_V1 =
   "defi-guardian-snapshot-v1" as const;
@@ -22,6 +23,7 @@ export interface DefiGuardianSnapshotPositionV1 {
   inRange: boolean;
   rangeStatus: "in_range" | "near_edge" | "out_of_range";
   positionValueUsd: number;
+  poolLiquidityUsd?: number;
   estimatedCollectibleLpFeesUsd: number;
   impermanentLossEstimatePct?: number | null;
   rangeRiskLevel?: "LOW" | "MODERATE" | "HIGH" | "UNKNOWN";
@@ -36,20 +38,6 @@ export type SnapshotValidationResult =
 const RANGE_STATUSES = new Set(["in_range", "near_edge", "out_of_range"]);
 const RANGE_RISK_LEVELS = new Set(["LOW", "MODERATE", "HIGH", "UNKNOWN"]);
 
-const SECRET_PATTERNS = [
-  /CDP_API/i,
-  /CDP_WALLET/i,
-  /BUYER_PRIVATE_KEY/i,
-  /PRIVATE_KEY/i,
-  /MNEMONIC/i,
-  /SEED_PHRASE/i,
-  /wallet_secret/i,
-  /authorization/i,
-  /cookie/i,
-  /paymentHeader/i,
-  /signature/i,
-];
-
 export function forbiddenSnapshotPath(snapshotPath: string): string | null {
   const normalized = snapshotPath.toLowerCase();
   const fileName = basename(normalized);
@@ -57,6 +45,8 @@ export function forbiddenSnapshotPath(snapshotPath: string): string | null {
     return "Refusing to read an env file as a DeFi Guardian snapshot.";
   }
   if (
+    normalized.startsWith("secrets/") ||
+    normalized.startsWith("secrets\\") ||
     normalized.includes("\\secrets\\") ||
     normalized.includes("/secrets/") ||
     fileName.includes("private") ||
@@ -80,7 +70,7 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 function hasSecretMarkerText(value: string): boolean {
-  return SECRET_PATTERNS.some((pattern) => pattern.test(value));
+  return FORBIDDEN_SNAPSHOT_PATTERNS.some((pattern) => pattern.test(value));
 }
 
 export function detectSecretMarkers(value: unknown): boolean {
@@ -121,6 +111,7 @@ function validatePosition(
   const inRange = value.inRange;
   const rangeStatus = value.rangeStatus;
   const positionValueUsd = value.positionValueUsd;
+  const poolLiquidityUsd = value.poolLiquidityUsd;
   const estimatedCollectibleLpFeesUsd = value.estimatedCollectibleLpFeesUsd;
   const impermanentLossEstimatePct = value.impermanentLossEstimatePct;
   const rangeRiskLevel = value.rangeRiskLevel;
@@ -140,6 +131,12 @@ function validatePosition(
   }
   if (!isFiniteNumber(positionValueUsd) || positionValueUsd < 0) {
     errors.push(`${prefix}.positionValueUsd must be a non-negative number.`);
+  }
+  if (
+    poolLiquidityUsd !== undefined &&
+    (!isFiniteNumber(poolLiquidityUsd) || poolLiquidityUsd < 0)
+  ) {
+    errors.push(`${prefix}.poolLiquidityUsd must be a non-negative number when present.`);
   }
   if (
     !isFiniteNumber(estimatedCollectibleLpFeesUsd) ||
@@ -201,6 +198,7 @@ function validatePosition(
     inRange,
     rangeStatus: rangeStatus as DefiGuardianSnapshotPositionV1["rangeStatus"],
     positionValueUsd,
+    ...(isFiniteNumber(poolLiquidityUsd) ? { poolLiquidityUsd } : {}),
     estimatedCollectibleLpFeesUsd,
     ...(impermanentLossEstimatePct === undefined
       ? {}

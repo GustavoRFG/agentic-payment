@@ -97,7 +97,7 @@ function normalizeRequest(
       rangeStatus: normalizeRangeStatus(position.rangeStatus),
       liquidityUsd: normalizeNumber(
         position.liquidityUsd,
-        defaultSamplePosition.liquidityUsd,
+        defaultSamplePosition.liquidityUsd ?? 0,
       ),
       feesUsd: normalizeNumber(position.feesUsd, defaultSamplePosition.feesUsd),
       impermanentLossEstimatePct: normalizeOptionalNumber(
@@ -126,6 +126,7 @@ function rangeExplanation(status: RangeStatus): string {
 
 function liquiditySeverity(position: NormalizedPosition): Severity {
   if (position.healthFlags.includes("zero-liquidity")) return "critical";
+  if (position.liquidityUsd === undefined) return "medium";
   if (position.liquidityUsd < 500) return "high";
   return "medium";
 }
@@ -189,6 +190,12 @@ function liquidityCheck(
       detail: "Position includes a zero-liquidity flag in mock data.",
     };
   }
+  if (position.liquidityUsd === undefined) {
+    return {
+      status: "warn",
+      detail: "Pool liquidity is unknown.",
+    };
+  }
   if (position.liquidityUsd < 500) {
     return {
       status: "warn",
@@ -231,7 +238,7 @@ function createMockRiskReport(body: RiskReportRequest): RiskReport {
       explanation: rangeExplanation(normalized.position.rangeStatus),
     },
     liquidity: {
-      estimatedUsd: normalized.position.liquidityUsd,
+      estimatedUsd: normalized.position.liquidityUsd ?? null,
       severity: liquiditySeverity(normalized.position),
       explanation:
         "Liquidity is sufficient for a demo position, but real pool depth " +

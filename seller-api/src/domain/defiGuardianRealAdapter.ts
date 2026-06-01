@@ -94,7 +94,7 @@ function normalizedPosition(
     tokenId: position.tokenId,
     pair: position.pair,
     rangeStatus: position.rangeStatus,
-    liquidityUsd: position.positionValueUsd,
+    liquidityUsd: position.poolLiquidityUsd,
     feesUsd: position.estimatedCollectibleLpFeesUsd,
     impermanentLossEstimatePct: position.impermanentLossEstimatePct ?? null,
     healthFlags: position.healthFlags ?? [],
@@ -109,6 +109,7 @@ function rangeSeverity(status: RangeStatus): Severity {
 
 function liquiditySeverity(position: NormalizedPosition): Severity {
   if (position.healthFlags.includes("zero-liquidity")) return "critical";
+  if (position.liquidityUsd === undefined) return "medium";
   if (position.liquidityUsd < 500) return "high";
   return "medium";
 }
@@ -196,10 +197,12 @@ export function analyzePositionFromRealFile(
           "Range status was mapped from a sanitized DeFi Guardian snapshot v1 file.",
       },
       liquidity: {
-        estimatedUsd: selected.position.positionValueUsd,
+        estimatedUsd: selected.position.poolLiquidityUsd ?? null,
         severity: liquidity,
         explanation:
-          "Position value was mapped from sanitized DeFi Guardian snapshot v1 data.",
+          selected.position.poolLiquidityUsd === undefined
+            ? "Pool liquidity was not provided by sanitized DeFi Guardian snapshot v1 data."
+            : "Pool liquidity was mapped from sanitized DeFi Guardian snapshot v1 data.",
       },
       fees: {
         estimatedUsd: selected.position.estimatedCollectibleLpFeesUsd,
@@ -230,7 +233,10 @@ export function analyzePositionFromRealFile(
         {
           name: "liquidity",
           status: liquidity === "critical" ? "fail" : "warn",
-          detail: `Snapshot position value is ${selected.position.positionValueUsd}.`,
+          detail:
+            selected.position.poolLiquidityUsd === undefined
+              ? "Snapshot pool liquidity is unknown."
+              : `Snapshot pool liquidity is ${selected.position.poolLiquidityUsd}.`,
         },
       ],
     },
