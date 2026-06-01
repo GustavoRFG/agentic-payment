@@ -1,66 +1,62 @@
-# MVP 003A.1 - Real-Local Regression After Scoring Fix
+# MVP 003A.1B - Fresh Real-Local Regression With MongoDB Available
 
 Date: 2026-06-01
 Branch: `mvp-003a-consolidation`
 
 ## Result
 
-`MVP_003A1_REAL_LOCAL_REGRESSION_BLOCKED`
+`MVP_003A1_REAL_LOCAL_REGRESSION_PASSED`
 
-The downstream real-local regression passed against the existing sanitized
-snapshot, but the full requested gate cannot be marked passed because
-`npm.cmd run snapshot:refresh:local` failed before writing a fresh snapshot.
-The failure was a local dependency issue: DeFi Guardian's read-only exporter
-attempted to ping MongoDB at `localhost:27017`, and no MongoDB listener/service
-was available.
+The fresh real-local snapshot gate now passes with the existing local MongoDB
+container running. The exporter remained read-only: it emitted a sanitized
+snapshot, detected no secrets, performed no MongoDB writes, made no RPC calls,
+and attempted no transactions.
 
 No payment path, signing path, broadcast path, wallet secret, `.env`, RPC
 configuration, or transaction path was modified or executed.
+
+## MongoDB Availability
+
+- MongoDB listener: available on `0.0.0.0:27017` and `localhost:27017`
+- MongoDB container: `defi_guardian_mongo`, image `mongo:7`, port `27017->27017`
 
 ## Commands
 
 | Command | Result |
 | --- | --- |
 | `npm.cmd test` | Pass: 6 files, 23 tests |
-| `npm.cmd run snapshot:refresh:local` | Blocked: MongoDB connection refused on `localhost:27017` |
+| `npm.cmd run snapshot:refresh:local` | Pass: fresh sanitized snapshot exported and validated |
 | `npm.cmd run snapshot:validate:local` | Pass: `SNAPSHOT_VALID`, 4 positions, no secrets |
-| `npm.cmd run demo:real-local-file` | Pass: `REAL_LOCAL_FILE_DEMO_SUCCEEDED` |
-| `npm.cmd run demo:paid-real-local-dry-run` | Pass: `PAID_REAL_LOCAL_DRY_RUN_SUCCEEDED` |
+| `npm.cmd run demo:real-local-file` | Pass: `REAL_LOCAL_FILE_DEMO_SUCCEEDED`, no fallback |
+| `npm.cmd run demo:paid-real-local-dry-run` | Pass: `PAID_REAL_LOCAL_DRY_RUN_SUCCEEDED`, HTTP 402 unpaid |
 | `npm.cmd run logs:summary` | Pass: 0 malformed lines, 0 redaction warnings |
 | `seller-api`: `npm.cmd run build` | Pass: `tsc --noEmit` |
 | `buyer-client`: `npm.cmd run build` | Pass: `tsc --noEmit` |
 | `netstat -ano | Select-String -Pattern ':4021'` | Pass: no output, no listener |
 
-## Snapshot Evidence
+## Fresh Snapshot Evidence
 
-- Existing snapshot: `runtime/defi-guardian-snapshots/latest.json`
-- Snapshot generated at: `2026-06-01T04:12:26.098Z`
+- Snapshot path: `runtime/defi-guardian-snapshots/latest.json`
+- Fresh snapshot timestamp: `2026-06-01T20:46:25.981Z`
 - Snapshot version: `defi-guardian-snapshot-v1`
 - Snapshot source: `defi-guardian-local-sanitized-export`
-- Snapshot positions: 4
+- Positions exported: 4
 - Token IDs: `6840401`, `6840680`, `6870599`, `6870615`
 - Secrets detected by validator: No
+- RPC called by exporter: No
+- MongoDB writes by exporter: No
+- Transactions attempted by exporter: No
 
-The refresh command did not update this file during this regression; its
-timestamp remained unchanged.
+## Scoring Evidence
 
-## Scoring Fix Evidence
-
-The current adapter maps `poolLiquidityUsd` to normalized pool liquidity. It no
-longer maps `positionValueUsd` to pool liquidity. The current snapshot omits
-`poolLiquidityUsd`, so pool liquidity is explicit as unknown:
-
-- liquidity estimated USD: `null`
-- liquidity explanation: `Pool liquidity was not provided by sanitized DeFi Guardian snapshot v1 data.`
-- risk driver: `Pool liquidity unknown.`
-- risk driver: `Liquidity depth was not provided by the snapshot.`
+The fresh snapshot omits `poolLiquidityUsd`, so pool liquidity remains explicit
+as unknown. The adapter does not use `positionValueUsd` as pool liquidity.
 
 `demo:real-local-file` selected:
 
 - selected alias: `RX 3900`
 - selected tokenId: `6840401`
-- old risk score if documented: previous local logs show `100` for this tokenId after the old mapping
-- new risk score: `88`
+- risk score: `88`
 - pool liquidity: unknown
 - recommendation: `rebalance-review`
 - adapter-real-file fallback used: No
@@ -69,8 +65,7 @@ longer maps `positionValueUsd` to pool liquidity. The current snapshot omits
 
 - selected alias: `carteira recuperada / Chrome principal`
 - selected tokenId: `6840680`
-- old risk score if documented: `60` in `docs/mvp-002d0-paid-real-local-dry-run.md`
-- new risk score: `48`
+- risk score: `48`
 - pool liquidity: unknown
 - recommendation: `rebalance-review`
 - adapter-real-file fallback used: No
@@ -92,8 +87,7 @@ longer maps `positionValueUsd` to pool liquidity. The current snapshot omits
 - Mainnet used: No
 - USDT payment rail used: No
 - Secrets printed: No
-- MongoDB writes: No
-- MongoDB read attempted: Yes, by `snapshot:refresh:local`; blocked because no local MongoDB was listening
+- MongoDB writes by exporter: No
 - RPC called: No
 - Valid controlled-payment confirmation token used: No
 - Prohibited command executed: No
@@ -104,8 +98,8 @@ The controlled payment command was not run:
 npm.cmd run demo:paid-real-local-controlled -- --confirm ONE_BASE_SEPOLIA_PAYMENT
 ```
 
-## Follow-Up Required
+## Recommended Next Step
 
-To mark this gate fully passed, rerun `npm.cmd run snapshot:refresh:local` in an
-environment where the read-only DeFi Guardian persisted analytics MongoDB is
-available, then rerun the downstream validation and dry-run commands.
+MVP 003B - Replace the bespoke controlled-payment script with one gated
+integration test and execute exactly one Base Sepolia USDC payment only after
+explicit approval.
