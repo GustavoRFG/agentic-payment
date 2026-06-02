@@ -68,6 +68,45 @@ performs only the unpaid HTTP 402 requirements check and exits without signing.
 
 No payment was executed during MVP 003B.0.1.
 
+## One Payment-Bearing HTTP Request Guard
+
+MVP 003B.0.2 hardens the boundary one layer deeper. The installed `@x402/fetch`
+wrapper performs its own internal HTTP protocol sequence for a single buyer
+invocation:
+
+```text
+initial unpaid request → HTTP 402 → paid follow-up request
+```
+
+The follow-up request carries the payment signature in one outbound header,
+which (for the installed x402 version) is `PAYMENT-SIGNATURE` for protocol v2
+(the current default) or `X-PAYMENT` for protocol v1. The wrapper also contains
+an internal branch that could, in principle, emit a second payment-bearing
+request. To make that impossible:
+
+- the buyer calls `fetchWithPayment` once (boundary 2, the paid invocation guard);
+- the raw `fetch` passed into `@x402/fetch` is wrapped by a guarded fetch
+  (`createPaymentBearingRequestGuard()`), so every outbound request is inspected;
+- the initial unpaid request carries no payment header and is allowed;
+- exactly one payment-bearing follow-up request is allowed;
+- a second payment-bearing HTTP request is refused with
+  `refusing more than one payment-bearing HTTP request`;
+- the guard inspects header *names* only — payment header values (signatures,
+  authorization payloads) are never read or logged; only a safe count
+  (`payment-bearing HTTP requests: 1`) is printed after a successful response;
+- `maxPaymentBearingRequests` defaults to the centralized `MAX_PAYMENT_ATTEMPTS`
+  (`1`) in `shared/payment-safety.ts`.
+
+The three one-payment boundaries are distinct and all fixed at `1`:
+
+```text
+wrapper process invocation max     = 1
+buyer fetchWithPayment invocation  = 1
+payment-bearing HTTP request max   = 1
+```
+
+No payment was executed in MVP 003B.0.2.
+
 ## Workflow
 
 When explicitly enabled, the test:

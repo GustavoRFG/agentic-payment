@@ -30,6 +30,7 @@ import { loadEnvUnlessDisabled } from "./config/loadEnv";
 import { writeBuyerAuditEvent } from "./observability/auditLogger";
 import type { AuditPaymentSummary } from "./observability/auditTypes";
 import { createPaidInvocationGuard } from "./paid-invocation-guard";
+import { createPaymentBearingRequestGuard } from "./payment-bearing-request-guard";
 
 loadEnvUnlessDisabled();
 
@@ -358,7 +359,19 @@ async function runPay(): Promise<number> {
   const signer = privateKeyToAccount(PRIVATE_KEY as `0x${string}`);
   const client = new x402Client();
   registerExactEvmScheme(client, { signer });
-  const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+
+  // Guard the raw fetch passed into @x402/fetch so that no internal library
+  // branch (including its retry path) can emit more than one payment-bearing
+  // HTTP request. The initial unpaid request carries no payment header and is
+  // allowed; the first paid follow-up is allowed; any further payment-bearing
+  // request is refused. Header values (signatures) are never inspected/logged.
+  const paymentBearingGuard = createPaymentBearingRequestGuard();
+  const guardedFetch: typeof fetch = async (input, init) => {
+    paymentBearingGuard.inspect(init?.headers);
+    return fetch(input, init);
+  };
+
+  const fetchWithPayment = wrapFetchWithPayment(guardedFetch, client);
   paidInvocationGuard.assertNext();
   const response = await fetchWithPayment(`${SELLER_BASE_URL}${PAID_ROUTE}`, {
     method: "POST",
@@ -369,6 +382,10 @@ async function runPay(): Promise<number> {
     body: JSON.stringify(REQUEST_BODY),
   });
   console.log(`[buyer-client] final response HTTP ${response.status}`);
+  // Safe count only — never the header value, signature, or payload.
+  console.log(
+    `payment-bearing HTTP requests: ${paymentBearingGuard.getPaymentBearingRequests()}`,
+  );
   const text = await response.text();
   console.log(text);
   return response.status >= 200 && response.status < 300 ? 0 : 7;

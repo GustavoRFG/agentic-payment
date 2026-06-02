@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createPaidInvocationGuard } from "../../buyer-client/src/paid-invocation-guard";
+import { createPaymentBearingRequestGuard } from "../../buyer-client/src/payment-bearing-request-guard";
 import {
   MAINNET_NETWORKS,
   sanitizeEnv,
@@ -29,7 +30,19 @@ const enabled =
   process.env.ENABLE_CONTROLLED_PAYMENT === "1" &&
   process.env.CONTROLLED_PAYMENT_CONFIRMATION === "ONE_BASE_SEPOLIA_PAYMENT";
 
+// Three distinct one-payment boundaries, each fixed at 1. They are NOT the same
+// thing, and MVP 003B.0.2 makes the third explicit:
+//   wrapper process invocation max      = 1  (the integration spawns the buyer
+//                                              process exactly once)
+//   buyer fetchWithPayment invocation   = 1  (paidInvocationGuard.assertNext()
+//                                              guards the single wrapped call)
+//   payment-bearing HTTP request max    = 1  (createPaymentBearingRequestGuard()
+//                                              caps payment-header-bearing fetches,
+//                                              including any internal x402 retry)
+const WRAPPER_PROCESS_INVOCATIONS_MAX = 1 as const;
 const WRAPPER_PAYMENT_INVOCATIONS = 1 as const;
+const BUYER_FETCH_WITH_PAYMENT_INVOCATIONS_MAX = 1 as const;
+const PAYMENT_BEARING_HTTP_REQUESTS_MAX = 1 as const;
 const describeControlled = enabled ? describe : describe.skip;
 
 interface AcceptEntry {
@@ -226,14 +239,32 @@ async function runBuyerPaymentPathOnce(
 describeControlled("controlled Base Sepolia payment integration gate", () => {
   it("executes exactly one opt-in x402 payment and returns a paid real-local report", async () => {
     expect(enabled).toBe(true);
+    expect(WRAPPER_PROCESS_INVOCATIONS_MAX).toBe(1);
     expect(WRAPPER_PAYMENT_INVOCATIONS).toBe(1);
+    expect(BUYER_FETCH_WITH_PAYMENT_INVOCATIONS_MAX).toBe(MAX_PAYMENT_ATTEMPTS);
+    expect(PAYMENT_BEARING_HTTP_REQUESTS_MAX).toBe(MAX_PAYMENT_ATTEMPTS);
     expect(MAX_PAYMENT_ATTEMPTS).toBe(1);
 
+    // Boundary 2: the buyer refuses a second wrapped fetchWithPayment call.
     const buyerGuard = createPaidInvocationGuard();
     expect(buyerGuard.assertNext()).toBe(MAX_PAYMENT_ATTEMPTS);
     expect(() => buyerGuard.assertNext()).toThrow(
       "refusing more than one controlled payment invocation",
     );
+
+    // Boundary 3: the buyer refuses a second payment-bearing HTTP request, even
+    // if an internal x402 branch tried to emit one. Synthetic header only; no
+    // payment, no signature, no network call.
+    const paymentBearingGuard = createPaymentBearingRequestGuard();
+    paymentBearingGuard.inspect({ "Content-Type": "application/json" });
+    expect(paymentBearingGuard.getPaymentBearingRequests()).toBe(0);
+    paymentBearingGuard.inspect({ "PAYMENT-SIGNATURE": "SYNTHETIC-NOT-A-REAL-SIGNATURE" });
+    expect(paymentBearingGuard.getPaymentBearingRequests()).toBe(
+      PAYMENT_BEARING_HTTP_REQUESTS_MAX,
+    );
+    expect(() =>
+      paymentBearingGuard.inspect({ "X-PAYMENT": "SYNTHETIC-NOT-A-REAL-SIGNATURE" }),
+    ).toThrow("refusing more than one payment-bearing HTTP request");
 
     const { generatedAt, positions, selected } = loadSnapshotAndSelectActivePosition();
     let seller: SellerHarness | null = null;
