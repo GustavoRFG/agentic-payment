@@ -4,15 +4,18 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { createPaidInvocationGuard } from "../../buyer-client/src/paid-invocation-guard";
 import {
   MAINNET_NETWORKS,
+  sanitizeEnv,
+} from "../../seller-api/src/config/safety";
+import {
   MAX_PAYMENT_ATTEMPTS,
   PAYMENT_AMOUNT_ATOMIC,
   PAYMENT_AMOUNT_USD,
   PAYMENT_ASSET,
   TESTNET_NETWORK,
-  sanitizeEnv,
-} from "../../seller-api/src/config/safety";
+} from "../../shared/payment-safety";
 import {
   forbiddenSnapshotPath,
   parseDefiGuardianSnapshotV1Json,
@@ -26,6 +29,7 @@ const enabled =
   process.env.ENABLE_CONTROLLED_PAYMENT === "1" &&
   process.env.CONTROLLED_PAYMENT_CONFIRMATION === "ONE_BASE_SEPOLIA_PAYMENT";
 
+const WRAPPER_PAYMENT_INVOCATIONS = 1 as const;
 const describeControlled = enabled ? describe : describe.skip;
 
 interface AcceptEntry {
@@ -221,6 +225,16 @@ async function runBuyerPaymentPathOnce(
 
 describeControlled("controlled Base Sepolia payment integration gate", () => {
   it("executes exactly one opt-in x402 payment and returns a paid real-local report", async () => {
+    expect(enabled).toBe(true);
+    expect(WRAPPER_PAYMENT_INVOCATIONS).toBe(1);
+    expect(MAX_PAYMENT_ATTEMPTS).toBe(1);
+
+    const buyerGuard = createPaidInvocationGuard();
+    expect(buyerGuard.assertNext()).toBe(MAX_PAYMENT_ATTEMPTS);
+    expect(() => buyerGuard.assertNext()).toThrow(
+      "refusing more than one controlled payment invocation",
+    );
+
     const { generatedAt, positions, selected } = loadSnapshotAndSelectActivePosition();
     let seller: SellerHarness | null = null;
     let paymentAttempts = 0;
@@ -230,7 +244,7 @@ describeControlled("controlled Base Sepolia payment integration gate", () => {
       const publicReport = await assertPublicRealFileReport(seller, selected);
       const payment = await assertProtectedUnpaidRequirements(seller, selected);
 
-      paymentAttempts += 1;
+      paymentAttempts += WRAPPER_PAYMENT_INVOCATIONS;
       expect(paymentAttempts).toBe(MAX_PAYMENT_ATTEMPTS);
       await runBuyerPaymentPathOnce(seller, selected);
 

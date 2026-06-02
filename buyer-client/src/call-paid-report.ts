@@ -17,12 +17,19 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { privateKeyToAccount } from "viem/accounts";
 import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import {
+  PAYMENT_AMOUNT_USD,
+  TESTNET_NETWORK,
+} from "../../shared/payment-safety";
 import { loadEnvUnlessDisabled } from "./config/loadEnv";
 import { writeBuyerAuditEvent } from "./observability/auditLogger";
 import type { AuditPaymentSummary } from "./observability/auditTypes";
+import { createPaidInvocationGuard } from "./paid-invocation-guard";
 
 loadEnvUnlessDisabled();
 
@@ -58,8 +65,10 @@ function parseFlags(argv: readonly string[]): CliFlags {
 const SELLER_BASE_URL = (
   process.env.SELLER_BASE_URL ?? "http://localhost:4021"
 ).replace(/\/+$/, "");
-const MAX_PAYMENT_USD = Number.parseFloat(process.env.MAX_PAYMENT_USD ?? "0.001");
-const EXPECTED_NETWORK = process.env.X402_NETWORK ?? "eip155:84532";
+const MAX_PAYMENT_USD = Number.parseFloat(
+  process.env.MAX_PAYMENT_USD ?? PAYMENT_AMOUNT_USD,
+);
+const EXPECTED_NETWORK = process.env.X402_NETWORK ?? TESTNET_NETWORK;
 const PRIVATE_KEY = process.env.BUYER_PRIVATE_KEY ?? "";
 
 // USDC on Base Sepolia carries 6 decimals. This mirrors the asset metadata
@@ -309,6 +318,7 @@ async function runDryRun(): Promise<number> {
 }
 
 async function runPay(): Promise<number> {
+  const paidInvocationGuard = createPaidInvocationGuard();
   const requestId = randomUUID();
   console.log("[buyer-client] --pay requested. Performing pre-flight first.");
   const { envelope } = await preflightPaymentRequirements(requestId);
@@ -349,6 +359,7 @@ async function runPay(): Promise<number> {
   const client = new x402Client();
   registerExactEvmScheme(client, { signer });
   const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+  paidInvocationGuard.assertNext();
   const response = await fetchWithPayment(`${SELLER_BASE_URL}${PAID_ROUTE}`, {
     method: "POST",
     headers: {
@@ -376,7 +387,17 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error("[buyer-client] error:", (error as Error).message);
-  process.exitCode = 1;
-});
+function isDirectCliEntrypoint(): boolean {
+  const entrypoint = process.argv[1];
+  return (
+    entrypoint !== undefined &&
+    import.meta.url === pathToFileURL(resolve(entrypoint)).href
+  );
+}
+
+if (isDirectCliEntrypoint()) {
+  main().catch((error) => {
+    console.error("[buyer-client] error:", (error as Error).message);
+    process.exitCode = 1;
+  });
+}

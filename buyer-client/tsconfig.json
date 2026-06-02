@@ -11,7 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": ".."
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "../shared/**/*.ts"]
 }

@@ -30,8 +30,8 @@ Do not run this without explicit user approval.
 
 ## Safety Invariants
 
-The integration test imports the existing invariants from
-`seller-api/src/config/safety.ts`:
+The buyer, seller safety config, and controlled integration test import the
+shared payment invariants from `shared/payment-safety.ts`:
 
 ```text
 network = eip155:84532
@@ -45,6 +45,28 @@ The test asserts the seller's HTTP 402 payment requirements match those exact
 values before the buyer path is allowed to run.
 
 There is no mainnet fallback, no retry loop, and no amount escalation.
+
+## Single Paid Invocation Hardening
+
+MVP 003B.0.1 makes the one-payment boundary explicit inside the buyer before
+the controlled payment is approved.
+
+The integration wrapper invokes the buyer payment process exactly once. The
+buyer also has its own paid invocation guard and calls it immediately before
+the single `fetchWithPayment(...)` invocation in the `--pay` branch.
+
+`maxAttempts` is centralized in `shared/payment-safety.ts` and remains fixed at
+`1`. A second paid invocation in the same guarded flow is refused with
+`refusing more than one controlled payment invocation`.
+
+No retry loop exists in the buyer. The x402 fetch wrapper performs the protocol
+request sequence for one invocation, but the buyer does not add another loop,
+fallback, or amount escalation around it.
+
+The dry-run path does not create or consume a paid invocation guard. It still
+performs only the unpaid HTTP 402 requirements check and exits without signing.
+
+No payment was executed during MVP 003B.0.1.
 
 ## Workflow
 
