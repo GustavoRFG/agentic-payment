@@ -12,7 +12,10 @@ dashboard/index.html
 runtime/
 *.jsonl
 .awal-electron-user-data/
+.awal-electron-user-data*/
 .wallet-electron-user-data*/
+buyer-client/.env
+seller-api/.env
 mcp/
 .DS_Store
 .idea/
