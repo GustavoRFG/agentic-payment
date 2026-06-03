@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { RiskReportRequest } from "../../seller-api/src/domain/reportTypes";
+import type { RiskReportRequest } from "../../seller-api/src/adapters/defi-guardian/reportTypes";
 import { startSeller, type SellerHarness } from "../../tools/_lib/seller-harness";
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -17,7 +17,14 @@ export function tempAuditLogDir(): string {
 }
 
 export function fixtureSnapshotPath(): string {
-  return join(projectRoot(), "seller-api", "src", "fixtures", "defiGuardianSnapshotV1.sample.json");
+  return join(
+    projectRoot(),
+    "seller-api",
+    "src",
+    "adapters",
+    "defi-guardian",
+    "defiGuardianSnapshotV1.sample.json",
+  );
 }
 
 export function validRequest(tokenId = "demo-position-001"): RiskReportRequest {

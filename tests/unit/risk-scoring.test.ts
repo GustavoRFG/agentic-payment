@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { scorePosition } from "../../seller-api/src/domain/riskScoring";
-import type { NormalizedPosition } from "../../seller-api/src/domain/reportTypes";
+import { scorePosition } from "../../seller-api/src/adapters/defi-guardian/riskScoring";
+import type { NormalizedPosition } from "../../seller-api/src/adapters/defi-guardian/reportTypes";
 
 function position(overrides: Partial<NormalizedPosition> = {}): NormalizedPosition {
   return {

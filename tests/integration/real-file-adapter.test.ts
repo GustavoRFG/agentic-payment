@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { forbiddenSnapshotPath } from "../../seller-api/src/domain/defiGuardianSnapshotV1";
+import { forbiddenSnapshotPath } from "../../seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1";
 import type { SellerHarness } from "../../tools/_lib/seller-harness";
 import {
   fixtureSnapshotPath,

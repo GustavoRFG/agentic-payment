@@ -1,4 +1,4 @@
-import type { NormalizedPosition } from "../domain/reportTypes";
+import type { NormalizedPosition } from "./reportTypes";
 
 export const defaultSamplePosition: NormalizedPosition = {
   protocol: "pancakeswap",

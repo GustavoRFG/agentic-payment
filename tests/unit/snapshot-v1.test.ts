@@ -4,7 +4,7 @@ import {
   detectSecretMarkers,
   forbiddenSnapshotPath,
   validateDefiGuardianSnapshotV1,
-} from "../../seller-api/src/domain/defiGuardianSnapshotV1";
+} from "../../seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1";
 
 function validSnapshot() {
   return {

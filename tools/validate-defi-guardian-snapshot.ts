@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   forbiddenSnapshotPath,
   parseDefiGuardianSnapshotV1Json,
-} from "../seller-api/src/domain/defiGuardianSnapshotV1.ts";
+} from "../seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1.ts";
 
 function projectRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");

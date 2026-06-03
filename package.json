@@ -23,7 +23,7 @@
     "dashboard:refresh": "npm run dashboard:render && npm run dashboard:open",
     "dashboard:export": "npm --prefix seller-api exec -- tsx tools/export-dashboard.ts",
     "dashboard:list-exports": "npm --prefix seller-api exec -- tsx tools/list-dashboard-exports.ts",
-    "snapshot:validate:sample": "npm --prefix seller-api exec -- tsx tools/validate-defi-guardian-snapshot.ts --file seller-api/src/fixtures/defiGuardianSnapshotV1.sample.json",
+    "snapshot:validate:sample": "npm --prefix seller-api exec -- tsx tools/validate-defi-guardian-snapshot.ts --file seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1.sample.json",
     "snapshot:export:local": "npm --prefix seller-api exec -- tsx tools/export-local-defi-guardian-snapshot.ts",
     "snapshot:validate:local": "npm --prefix seller-api exec -- tsx tools/validate-defi-guardian-snapshot.ts --file runtime/defi-guardian-snapshots/latest.json",
     "snapshot:refresh:local": "npm run snapshot:export:local && npm run snapshot:validate:local",

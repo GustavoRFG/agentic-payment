@@ -1,4 +1,4 @@
-import { defaultSamplePosition } from "../fixtures/samplePositions";
+import { defaultSamplePosition } from "./samplePositions";
 import { getDefiGuardianAdapterConfig } from "./defiGuardianAdapterMode";
 import { analyzePositionFromRealFile } from "./defiGuardianRealAdapter";
 import {

@@ -21,8 +21,8 @@ import {
   forbiddenSnapshotPath,
   parseDefiGuardianSnapshotV1Json,
   type DefiGuardianSnapshotPositionV1,
-} from "../../seller-api/src/domain/defiGuardianSnapshotV1";
-import type { RiskReportRequest } from "../../seller-api/src/domain/reportTypes";
+} from "../../seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1";
+import type { RiskReportRequest } from "../../seller-api/src/adapters/defi-guardian/reportTypes";
 import type { SellerHarness } from "../../tools/_lib/seller-harness";
 import { projectRoot, startTestSeller, ZERO_ADDRESS } from "./_helpers";
 

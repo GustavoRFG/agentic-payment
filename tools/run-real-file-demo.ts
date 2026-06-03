@@ -6,8 +6,8 @@ import {
   TESTNET_NETWORK,
   sanitizeEnv,
 } from "../seller-api/src/config/safety.ts";
-import { defiGuardianAdapter } from "../seller-api/src/domain/defiGuardianAdapter.ts";
-import type { RiskReportRequest } from "../seller-api/src/domain/reportTypes.ts";
+import { defiGuardianAdapter } from "../seller-api/src/adapters/defi-guardian/defiGuardianAdapter.ts";
+import type { RiskReportRequest } from "../seller-api/src/adapters/defi-guardian/reportTypes.ts";
 import { projectRootFrom, runCommand } from "./_lib/child-process.ts";
 import { type SellerHarness, startSeller } from "./_lib/seller-harness.ts";
 
@@ -35,7 +35,14 @@ class DemoError extends Error {
 }
 
 function fixturePath(root: string): string {
-  return join(root, "seller-api", "src", "fixtures", "defiGuardianSnapshotV1.sample.json");
+  return join(
+    root,
+    "seller-api",
+    "src",
+    "adapters",
+    "defi-guardian",
+    "defiGuardianSnapshotV1.sample.json",
+  );
 }
 
 function childEnv(root: string, seller: SellerHarness): NodeJS.ProcessEnv {

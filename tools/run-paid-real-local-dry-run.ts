@@ -16,8 +16,8 @@ import {
   TESTNET_NETWORK,
   sanitizeEnv,
 } from "../seller-api/src/config/safety.ts";
-import { parseDefiGuardianSnapshotV1Json } from "../seller-api/src/domain/defiGuardianSnapshotV1.ts";
-import type { RiskReportRequest } from "../seller-api/src/domain/reportTypes.ts";
+import { parseDefiGuardianSnapshotV1Json } from "../seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1.ts";
+import type { RiskReportRequest } from "../seller-api/src/adapters/defi-guardian/reportTypes.ts";
 import { projectRootFrom, runCommand } from "./_lib/child-process.ts";
 import { type SellerHarness, startSeller } from "./_lib/seller-harness.ts";
 

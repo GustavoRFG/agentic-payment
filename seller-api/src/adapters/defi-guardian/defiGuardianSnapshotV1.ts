@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { FORBIDDEN_SNAPSHOT_PATTERNS } from "../config/safety";
+import { FORBIDDEN_SNAPSHOT_PATTERNS } from "../../config/safety";
 
 export const DEFI_GUARDIAN_SNAPSHOT_V1 =
   "defi-guardian-snapshot-v1" as const;

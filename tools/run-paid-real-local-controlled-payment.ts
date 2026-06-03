@@ -23,8 +23,8 @@ import {
   TESTNET_NETWORK,
   sanitizeEnv,
 } from "../seller-api/src/config/safety.ts";
-import { parseDefiGuardianSnapshotV1Json } from "../seller-api/src/domain/defiGuardianSnapshotV1.ts";
-import type { RiskReportRequest } from "../seller-api/src/domain/reportTypes.ts";
+import { parseDefiGuardianSnapshotV1Json } from "../seller-api/src/adapters/defi-guardian/defiGuardianSnapshotV1.ts";
+import type { RiskReportRequest } from "../seller-api/src/adapters/defi-guardian/reportTypes.ts";
 
 const CONFIRM_TOKEN = "ONE_BASE_SEPOLIA_PAYMENT";
 const PORT = 4021;
