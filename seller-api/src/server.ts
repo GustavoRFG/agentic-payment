@@ -25,12 +25,19 @@ import {
   PAYMENT_ASSET,
   PAYMENT_PRICE_LABEL,
   TESTNET_NETWORK,
+  TEXT_ANALYSIS_API_KEY_ENV_NAME,
 } from "./config/safety";
 import {
   defiGuardianAdapter,
   validateRiskReportPayload,
-} from "./domain/defiGuardianAdapter";
-import type { RiskReport, RiskReportRequest } from "./domain/reportTypes";
+} from "./adapters/defi-guardian/defiGuardianAdapter";
+import type {
+  RiskReport,
+  RiskReportRequest,
+} from "./adapters/defi-guardian/reportTypes";
+import { analyzeText } from "./adapters/text-analysis/analyzer";
+import { validateTextAnalysisRequest } from "./adapters/text-analysis/validate";
+import type { TextAnalysisRequest } from "./adapters/text-analysis/types";
 import { writeSellerAuditEvent } from "./observability/auditLogger";
 import type {
   AuditPaymentSummary,
@@ -72,6 +79,14 @@ function assertConfig(): void {
       `X402_NETWORK is "${NETWORK}"; MVP 001 is testnet only (${TESTNET_NETWORK}).`,
     );
   }
+  if (
+    !process.env[TEXT_ANALYSIS_API_KEY_ENV_NAME] &&
+    process.env.AGENTIC_SKIP_DOTENV !== "1"
+  ) {
+    problems.push(
+      `${TEXT_ANALYSIS_API_KEY_ENV_NAME} is required for the text-analysis adapter.`,
+    );
+  }
   if (problems.length > 0) {
     console.error("[seller-api] configuration problems:");
     for (const message of problems) console.error("  - " + message);
@@ -88,6 +103,7 @@ assertConfig();
 const REPORT_PATHS = new Set([
   "/mock/defi-risk-report",
   "/paid/defi-risk-report",
+  "/paid/analyze-text",
 ]);
 
 function requestIdFromHeader(req: Request): string {
@@ -176,6 +192,10 @@ function reportSummary(report: RiskReport) {
   };
 }
 
+function textAnalysisRequestFromLocals(res: Response): TextAnalysisRequest {
+  return res.locals.textAnalysisRequest as TextAnalysisRequest;
+}
+
 // ---------------------------------------------------------------------------
 // Express + x402 wiring
 // ---------------------------------------------------------------------------
@@ -261,7 +281,23 @@ app.post("/mock/defi-risk-report", (req: Request, res: Response) => {
   res.status(200).json(report);
 });
 
-// x402-protected resource server. Only /paid/defi-risk-report is gated.
+app.post(
+  "/paid/analyze-text",
+  (req: Request, res: Response, next: NextFunction) => {
+    const validation = validateTextAnalysisRequest(req.body);
+    if (!validation.ok) {
+      res.status(400).json({
+        error: "invalid_request",
+        missing_fields: validation.missing,
+      });
+      return;
+    }
+    res.locals.textAnalysisRequest = validation.data;
+    next();
+  },
+);
+
+// x402-protected resource server.
 const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 const resourceServer = new x402ResourceServer(facilitatorClient).register(
   NETWORK,
@@ -283,10 +319,53 @@ app.use(
         description: "Mock DeFi Guardian risk report for a wallet/position.",
         mimeType: "application/json",
       },
+      "POST /paid/analyze-text": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: REPORT_PRICE_USD,
+            network: NETWORK,
+            payTo: SELLER_RECEIVER_ADDRESS_TYPED,
+          },
+        ],
+        description: "Analyze text with Claude: summary, sentiment, and entities.",
+        mimeType: "application/json",
+      },
     },
     resourceServer,
   ),
 );
+
+app.post("/paid/analyze-text", async (req: Request, res: Response) => {
+  const requestId = String(res.locals.auditRequestId);
+  const result = await analyzeText(textAnalysisRequestFromLocals(res), requestId);
+  writeSellerAuditEvent({
+    eventType: "seller.report_generated",
+    requestId,
+    method: req.method,
+    path: req.path,
+    payment: {
+      network: NETWORK,
+      asset: PAYMENT_ASSET,
+      amountAtomic: PAYMENT_AMOUNT_ATOMIC,
+      amountUsd: PAYMENT_AMOUNT_USD,
+      mode: "accepted",
+    },
+    report: {
+      reportId: requestId,
+      mode: "adapter-text-analysis",
+      adapter: {
+        requestedMode: "adapter-text-analysis",
+        resolvedMode: "adapter-text-analysis",
+        fallbackUsed: false,
+      },
+      riskScore: 0,
+      riskLevel: "low",
+      recommendation: "n/a",
+    },
+  });
+  res.status(200).json(result);
+});
 
 // Once the middleware accepts a payment, this handler runs.
 app.post("/paid/defi-risk-report", (req: Request, res: Response) => {
