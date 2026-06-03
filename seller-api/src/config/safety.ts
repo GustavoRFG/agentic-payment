@@ -10,6 +10,7 @@ export {
 export const MAINNET_NETWORKS = new Set(["eip155:1", "eip155:8453"]);
 
 export const SENSITIVE_ENV_NAMES = new Set([
+  "ANTHROPIC_API_KEY",
   "BUYER_PRIVATE_KEY",
   "PRIVATE_KEY",
   "CDP_API_KEY_ID",
