@@ -119,6 +119,7 @@ function sellerEnv(options: Required<Pick<SellerHarnessOptions, "projectRoot">> 
     REPORT_PRICE_USD: PAYMENT_PRICE_LABEL,
     X402_NETWORK: TESTNET_NETWORK,
     MAX_PAYMENT_USD: PAYMENT_AMOUNT_USD,
+    AGENTIC_TEXT_ANALYSIS_MOCK: "1",
     AGENTIC_AUDIT_LOG_DIR:
       options.auditLogDir ?? mkdtempSync(join(tmpdir(), "agentic-payments-lab-seller-logs-")),
     DEFI_GUARDIAN_ADAPTER_MODE: adapterMode,
