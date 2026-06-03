@@ -1,19 +1,16 @@
 /**
- * Agentic Payments Lab — buyer-client (MVP 001).
+ * Agentic Payments Lab - buyer-client.
  *
- * Calls the seller's /paid/defi-risk-report endpoint and walks through the
+ * Calls the seller's /paid/analyze-text endpoint and walks through the
  * x402 protocol. By default this script runs in **dry-run** mode: it issues
  * a plain unsigned request, expects HTTP 402, decodes the PAYMENT-REQUIRED
- * response header, prints the payment requirements, compares the required
- * amount against MAX_PAYMENT_USD, and exits without signing anything.
+ * response header, prints the payment requirements, and exits without
+ * authorizing payment.
  *
- * A real testnet payment is only attempted when the user passes BOTH
- *   --pay
- * AND a valid BUYER_PRIVATE_KEY in .env. The buyer still refuses if the
- * server requires more than MAX_PAYMENT_USD, and the entire flow is locked
- * to Base Sepolia (X402_NETWORK=eip155:84532).
+ * A real testnet payment is only attempted when the user passes --pay
+ * AND a valid buyer private key is configured in .env. Locked to Base Sepolia.
  *
- * Strictly testnet — no mainnet, no real funds.
+ * Strictly testnet - no mainnet, no real funds.
  */
 
 import { randomUUID } from "node:crypto";
@@ -163,19 +160,16 @@ function paymentSummaryFromAccept(entry: AcceptEntry): AuditPaymentSummary {
 // Buyer flows
 // ---------------------------------------------------------------------------
 
-const PAID_ROUTE = "/paid/defi-risk-report";
-const REQUEST_PROTOCOL = process.env.BUYER_REPORT_PROTOCOL ?? "pancakeswap";
-const REQUEST_CHAIN = process.env.BUYER_REPORT_CHAIN ?? "bsc";
-const REQUEST_TOKEN_ID = process.env.BUYER_REPORT_TOKEN_ID ?? "demo-position-001";
-const REQUEST_PAIR = process.env.BUYER_REPORT_PAIR;
+const PAID_ROUTE = "/paid/analyze-text";
+const SAMPLE_TEXT =
+  process.env.BUYER_SAMPLE_TEXT ??
+  "Anthropic released Claude 4 in 2025, expanding its model lineup with " +
+    "faster inference and improved reasoning. The release was well received " +
+    "by developers building AI-powered applications.";
+const ANALYSIS_MODE = process.env.BUYER_ANALYSIS_MODE ?? "full";
 const REQUEST_BODY = {
-  wallet: "0x0000000000000000000000000000000000000000",
-  position: {
-    protocol: REQUEST_PROTOCOL,
-    chain: REQUEST_CHAIN,
-    tokenId: REQUEST_TOKEN_ID,
-    ...(REQUEST_PAIR ? { pair: REQUEST_PAIR } : {}),
-  },
+  text: SAMPLE_TEXT,
+  mode: ANALYSIS_MODE,
 };
 
 async function preflightPaymentRequirements(requestId: string): Promise<{
@@ -210,8 +204,10 @@ async function preflightPaymentRequirements(requestId: string): Promise<{
 
 async function runDryRun(): Promise<number> {
   const requestId = randomUUID();
-  console.log("[buyer-client] dry-run mode — no signing, no payment.");
+  console.log("[buyer-client] dry-run mode - no payment authorization.");
   console.log(`[buyer-client] target: POST ${SELLER_BASE_URL}${PAID_ROUTE}`);
+  console.log(`[buyer-client] mode: ${ANALYSIS_MODE}`);
+  console.log(`[buyer-client] text length: ${SAMPLE_TEXT.length} chars`);
   console.log(`[buyer-client] MAX_PAYMENT_USD ceiling: $${MAX_PAYMENT_USD}`);
   await writeBuyerAuditEvent({
     eventType: "buyer.request_started",
