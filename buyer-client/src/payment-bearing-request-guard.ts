@@ -34,6 +34,8 @@ const X402_PAYMENT_HEADER_NAMES: readonly string[] = [
 export interface PaymentBearingRequestGuard {
   /** Inspect one outbound request's headers; throws if it would exceed the cap. */
   inspect(headers?: HeadersInit): void;
+  /** Inspect both fetch input and init headers for payment-bearing requests. */
+  inspectRequest(input: RequestInfo | URL, init?: RequestInit): void;
   /** Number of payment-bearing requests observed so far. */
   getPaymentBearingRequests(): number;
 }
@@ -94,6 +96,14 @@ export function createPaymentBearingRequestGuard(
 
       if (paymentBearingRequests > maxPaymentBearingRequests) {
         throw new Error("refusing more than one payment-bearing HTTP request");
+      }
+    },
+
+    inspectRequest(input: RequestInfo | URL, init?: RequestInit): void {
+      this.inspect(init?.headers);
+
+      if (input instanceof Request) {
+        this.inspect(input.headers);
       }
     },
 

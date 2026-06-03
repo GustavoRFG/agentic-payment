@@ -363,7 +363,7 @@ async function runPay(): Promise<number> {
   // request is refused. Header values (signatures) are never inspected/logged.
   const paymentBearingGuard = createPaymentBearingRequestGuard();
   const guardedFetch: typeof fetch = async (input, init) => {
-    paymentBearingGuard.inspect(init?.headers);
+    paymentBearingGuard.inspectRequest(input, init);
     return fetch(input, init);
   };
 

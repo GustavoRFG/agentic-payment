@@ -68,6 +68,20 @@ describe("payment-bearing request guard", () => {
     expect(guard.getPaymentBearingRequests()).toBe(1);
   });
 
+  it("detects payment headers attached to a Request object", () => {
+    const request = new Request("http://localhost:4021/paid/analyze-text", {
+      method: "POST",
+      headers: {
+        "PAYMENT-SIGNATURE": SYNTHETIC_PAYMENT_VALUE,
+      },
+    });
+
+    const guard = createPaymentBearingRequestGuard();
+    guard.inspectRequest(request);
+
+    expect(guard.getPaymentBearingRequests()).toBe(1);
+  });
+
   it("works with a Record<string, string> input", () => {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
