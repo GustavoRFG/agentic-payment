@@ -8,6 +8,13 @@ import type {
 const MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 512;
 
+function adapterMockEnabled(): boolean {
+  return (
+    process.env.AGENTIC_ADAPTER_MOCK === "1" ||
+    process.env.AGENTIC_TEXT_ANALYSIS_MOCK === "1"
+  );
+}
+
 function buildPrompt(text: string, mode: AnalysisMode): string {
   const parts: string[] = [
     "Analyze the following text and respond ONLY with a valid JSON object.",
@@ -68,7 +75,7 @@ export async function analyzeText(
   req: TextAnalysisRequest,
   requestId: string,
 ): Promise<TextAnalysisResult> {
-  if (process.env.AGENTIC_TEXT_ANALYSIS_MOCK === "1") {
+  if (adapterMockEnabled()) {
     return mockTextAnalysis(req, requestId);
   }
 
