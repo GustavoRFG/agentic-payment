@@ -110,8 +110,11 @@ function sellerEnv(options: Required<Pick<SellerHarnessOptions, "projectRoot">> 
     throw new Error(`refusing to start seller with inherited mainnet X402_NETWORK=${process.env.X402_NETWORK}`);
   }
   const adapterMode = options.adapterMode ?? "mock";
+  const env = sanitizeEnv();
+  delete env.X402_USE_MAINNET;
+  delete env.X402_NETWORK;
   return {
-    ...sanitizeEnv(),
+    ...env,
     AGENTIC_SKIP_DOTENV: "1",
     PORT: String(port),
     SELLER_BASE_URL: `http://localhost:${port}`,
@@ -119,7 +122,7 @@ function sellerEnv(options: Required<Pick<SellerHarnessOptions, "projectRoot">> 
     REPORT_PRICE_USD: PAYMENT_PRICE_LABEL,
     X402_NETWORK: TESTNET_NETWORK,
     MAX_PAYMENT_USD: PAYMENT_AMOUNT_USD,
-    AGENTIC_TEXT_ANALYSIS_MOCK: "1",
+    AGENTIC_ADAPTER_MOCK: "1",
     AGENTIC_AUDIT_LOG_DIR:
       options.auditLogDir ?? mkdtempSync(join(tmpdir(), "agentic-payments-lab-seller-logs-")),
     DEFI_GUARDIAN_ADAPTER_MODE: adapterMode,
