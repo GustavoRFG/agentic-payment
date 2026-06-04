@@ -1,13 +1,19 @@
 export {
   ACTIVE_NETWORK,
+  MAINNET_FACILITATOR_URL,
   MAINNET_NETWORK,
+  MAINNET_USDC_ADDRESS,
   MAX_PAYMENT_ATTEMPTS,
   PAYMENT_AMOUNT_ATOMIC,
   PAYMENT_AMOUNT_USD,
   PAYMENT_ASSET,
   PAYMENT_PRICE_LABEL,
+  TESTNET_FACILITATOR_URL,
   TESTNET_NETWORK,
+  TESTNET_USDC_ADDRESS,
+  activeFacilitatorUrl,
   activePaymentNetwork,
+  activeUsdcAddress,
 } from "../../../shared/payment-safety";
 
 import {

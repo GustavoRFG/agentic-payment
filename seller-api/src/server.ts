@@ -23,13 +23,13 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { loadEnvUnlessDisabled } from "./config/loadEnv";
 import {
-  ACTIVE_NETWORK,
   MAINNET_NETWORK,
   PAYMENT_AMOUNT_ATOMIC,
   PAYMENT_AMOUNT_USD,
   PAYMENT_ASSET,
   PAYMENT_PRICE_LABEL,
   TEXT_ANALYSIS_API_KEY_ENV_NAME,
+  activeFacilitatorUrl,
   activePaymentNetwork,
   isPaymentNetworkAllowed,
 } from "./config/safety";
@@ -73,15 +73,8 @@ type Caip2Network = `${string}:${string}`;
 const PORT = Number.parseInt(process.env.PORT ?? "4021", 10);
 const SELLER_RECEIVER_ADDRESS = process.env.SELLER_RECEIVER_ADDRESS ?? "";
 const REPORT_PRICE_USD = process.env.REPORT_PRICE_USD ?? PAYMENT_PRICE_LABEL;
-const NETWORK = (
-  process.env.X402_USE_MAINNET === undefined
-    ? ACTIVE_NETWORK
-    : activePaymentNetwork()
-) as Caip2Network;
-const FACILITATOR_URL =
-  NETWORK === MAINNET_NETWORK
-    ? "https://api.cdp.coinbase.com/platform/v2/x402"
-    : "https://x402.org/facilitator";
+const NETWORK = activePaymentNetwork() as Caip2Network;
+const FACILITATOR_URL = activeFacilitatorUrl();
 const SELLER_RECEIVER_ADDRESS_TYPED =
   SELLER_RECEIVER_ADDRESS as `0x${string}`;
 

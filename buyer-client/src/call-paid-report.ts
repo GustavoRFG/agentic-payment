@@ -7,10 +7,9 @@
  * response header, prints the payment requirements, and exits without
  * authorizing payment.
  *
- * A real testnet payment is only attempted when the user passes --pay
- * AND a valid buyer private key is configured in .env. Locked to Base Sepolia.
- *
- * Strictly testnet - no mainnet, no real funds.
+ * A payment is only attempted when the user passes --pay AND a valid buyer
+ * private key is configured in .env. Mainnet additionally requires
+ * MAINNET_PAYMENT_CONFIRMATION=ONE_BASE_MAINNET_PAYMENT.
  */
 
 import { randomUUID } from "node:crypto";
@@ -20,8 +19,10 @@ import { privateKeyToAccount } from "viem/accounts";
 import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import {
+  MAINNET_NETWORK,
   PAYMENT_AMOUNT_USD,
-  TESTNET_NETWORK,
+  activePaymentNetwork,
+  activeUsdcAddress,
 } from "../../shared/payment-safety";
 import { loadEnvUnlessDisabled } from "./config/loadEnv";
 import { writeBuyerAuditEvent } from "./observability/auditLogger";
@@ -66,8 +67,11 @@ const SELLER_BASE_URL = (
 const MAX_PAYMENT_USD = Number.parseFloat(
   process.env.MAX_PAYMENT_USD ?? PAYMENT_AMOUNT_USD,
 );
-const EXPECTED_NETWORK = process.env.X402_NETWORK ?? TESTNET_NETWORK;
+const EXPECTED_NETWORK = activePaymentNetwork();
+const EXPECTED_USDC_ADDRESS = activeUsdcAddress();
 const PRIVATE_KEY = process.env.BUYER_PRIVATE_KEY ?? "";
+const MAINNET_PAYMENT_CONFIRMATION =
+  process.env.MAINNET_PAYMENT_CONFIRMATION ?? "";
 
 // USDC on Base Sepolia carries 6 decimals. This mirrors the asset metadata
 // the seller advertises in the PAYMENT-REQUIRED header.
@@ -87,7 +91,7 @@ interface AcceptEntry {
   maxTimeoutSeconds?: number;
   description?: string;
   mimeType?: string;
-  extra?: { name?: string; version?: string };
+  extra?: Record<string, unknown> & { name?: string; version?: string };
 }
 
 interface PaymentRequiredEnvelope {
@@ -125,15 +129,36 @@ function atomicToUsd(amount: string | undefined, decimals: number): number {
   }
 }
 
+function paymentAssetAddress(entry: AcceptEntry): string | undefined {
+  const candidates = [
+    entry.asset,
+    entry.extra?.asset,
+    entry.extra?.assetAddress,
+    entry.extra?.tokenAddress,
+    entry.extra?.contractAddress,
+  ];
+  return candidates.find((value): value is string => {
+    return typeof value === "string" && value.startsWith("0x");
+  });
+}
+
+function isExpectedPaymentRail(entry: AcceptEntry): boolean {
+  return (
+    entry.network === EXPECTED_NETWORK &&
+    paymentAssetAddress(entry)?.toLowerCase() ===
+      EXPECTED_USDC_ADDRESS.toLowerCase()
+  );
+}
+
 function summarizeAccept(entry: AcceptEntry): string {
   const amount = entry.amount ?? entry.maxAmountRequired ?? "?";
   const usd = atomicToUsd(amount, USDC_DECIMALS);
-  const usdLabel = Number.isFinite(usd) ? `≈ $${usd.toFixed(6)}` : "(unknown)";
+  const usdLabel = Number.isFinite(usd) ? `~ $${usd.toFixed(6)}` : "(unknown)";
   return [
     `  scheme:          ${entry.scheme ?? "?"}`,
     `  network:         ${entry.network ?? "?"}`,
     `  amount (atomic): ${amount}  ${usdLabel}`,
-    `  asset:           ${entry.asset ?? "?"}`,
+    `  asset:           ${paymentAssetAddress(entry) ?? "?"}`,
     `  payTo:           ${entry.payTo ?? "?"}`,
     `  maxTimeoutSecs:  ${entry.maxTimeoutSeconds ?? "?"}`,
     entry.extra?.name
@@ -208,6 +233,8 @@ async function runDryRun(): Promise<number> {
   console.log(`[buyer-client] target: POST ${SELLER_BASE_URL}${PAID_ROUTE}`);
   console.log(`[buyer-client] mode: ${ANALYSIS_MODE}`);
   console.log(`[buyer-client] text length: ${SAMPLE_TEXT.length} chars`);
+  console.log(`[buyer-client] expected network: ${EXPECTED_NETWORK}`);
+  console.log(`[buyer-client] expected USDC: ${EXPECTED_USDC_ADDRESS}`);
   console.log(`[buyer-client] MAX_PAYMENT_USD ceiling: $${MAX_PAYMENT_USD}`);
   await writeBuyerAuditEvent({
     eventType: "buyer.request_started",
@@ -256,16 +283,16 @@ async function runDryRun(): Promise<number> {
     console.log(summarizeAccept(entry));
   }
 
-  // Pick the cheapest entry on the expected network for the max-amount gate.
-  const onNetwork = accepts.filter((a) => a.network === EXPECTED_NETWORK);
-  if (onNetwork.length === 0) {
+  // Pick the cheapest entry on the expected network and USDC asset for the max-amount gate.
+  const onExpectedRail = accepts.filter(isExpectedPaymentRail);
+  if (onExpectedRail.length === 0) {
     console.error(
-      `[buyer-client] no accept entry matches X402_NETWORK=${EXPECTED_NETWORK}; ` +
-        "aborting (testnet-only safety).",
+      `[buyer-client] no accept entry matches network=${EXPECTED_NETWORK} ` +
+        `asset=${EXPECTED_USDC_ADDRESS}; refusing.`,
     );
     return 3;
   }
-  const cheapest = onNetwork.reduce((a, b) => {
+  const cheapest = onExpectedRail.reduce((a, b) => {
     const aUsd = atomicToUsd(a.amount ?? a.maxAmountRequired, USDC_DECIMALS);
     const bUsd = atomicToUsd(b.amount ?? b.maxAmountRequired, USDC_DECIMALS);
     return aUsd <= bUsd ? a : b;
@@ -286,7 +313,7 @@ async function runDryRun(): Promise<number> {
     payment,
   });
   console.log("[buyer-client] max-amount check:");
-  console.log(`  required (USD ≈): $${requiredUsd.toFixed(6)}`);
+  console.log(`  required (USD ~): $${requiredUsd.toFixed(6)}`);
   console.log(`  ceiling   (USD):  $${MAX_PAYMENT_USD}`);
   if (!Number.isFinite(requiredUsd)) {
     console.error("[buyer-client] required amount unparseable; refusing.");
@@ -315,19 +342,32 @@ async function runDryRun(): Promise<number> {
 }
 
 async function runPay(): Promise<number> {
+  if (
+    EXPECTED_NETWORK === MAINNET_NETWORK &&
+    MAINNET_PAYMENT_CONFIRMATION !== "ONE_BASE_MAINNET_PAYMENT"
+  ) {
+    console.error(
+      "[buyer-client] mainnet --pay requires " +
+        "MAINNET_PAYMENT_CONFIRMATION=ONE_BASE_MAINNET_PAYMENT.",
+    );
+    console.log("RESULT: MAINNET_PAYMENT_NOT_AUTHORIZED");
+    return 8;
+  }
+
   const paidInvocationGuard = createPaidInvocationGuard();
   const requestId = randomUUID();
   console.log("[buyer-client] --pay requested. Performing pre-flight first.");
   const { envelope } = await preflightPaymentRequirements(requestId);
   const accepts = envelope.accepts ?? [];
-  const onNetwork = accepts.filter((a) => a.network === EXPECTED_NETWORK);
-  if (onNetwork.length === 0) {
+  const onExpectedRail = accepts.filter(isExpectedPaymentRail);
+  if (onExpectedRail.length === 0) {
     console.error(
-      `[buyer-client] seller does not offer ${EXPECTED_NETWORK}; refusing.`,
+      `[buyer-client] seller does not offer network=${EXPECTED_NETWORK} ` +
+        `asset=${EXPECTED_USDC_ADDRESS}; refusing.`,
     );
     return 3;
   }
-  const cheapest = onNetwork.reduce((a, b) => {
+  const cheapest = onExpectedRail.reduce((a, b) => {
     const aUsd = atomicToUsd(a.amount ?? a.maxAmountRequired, USDC_DECIMALS);
     const bUsd = atomicToUsd(b.amount ?? b.maxAmountRequired, USDC_DECIMALS);
     return aUsd <= bUsd ? a : b;
@@ -345,13 +385,13 @@ async function runPay(): Promise<number> {
   }
   if (!PRIVATE_KEY.startsWith("0x") || PRIVATE_KEY.length < 66) {
     console.error(
-      "[buyer-client] BUYER_PRIVATE_KEY is not set to a real testnet key. " +
-        "Create a fresh Base Sepolia wallet, fund it with testnet USDC, and " +
+      "[buyer-client] BUYER_PRIVATE_KEY is not set to a real dedicated key. " +
+        "Create a fresh dedicated wallet, fund it intentionally, and " +
         "set BUYER_PRIVATE_KEY in .env before retrying with --pay.",
     );
     return 6;
   }
-  console.log("[buyer-client] signing one Base Sepolia testnet x402 payment…");
+  console.log(`[buyer-client] signing one x402 payment on ${EXPECTED_NETWORK}...`);
   const signer = privateKeyToAccount(PRIVATE_KEY as `0x${string}`);
   const client = new x402Client();
   registerExactEvmScheme(client, { signer });
@@ -378,7 +418,7 @@ async function runPay(): Promise<number> {
     body: JSON.stringify(REQUEST_BODY),
   });
   console.log(`[buyer-client] final response HTTP ${response.status}`);
-  // Safe count only — never the header value, signature, or payload.
+  // Safe count only - never the header value, signature, or payload.
   console.log(
     `payment-bearing HTTP requests: ${paymentBearingGuard.getPaymentBearingRequests()}`,
   );
