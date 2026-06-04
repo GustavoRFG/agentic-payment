@@ -1,9 +1,17 @@
 export {
+  ACTIVE_NETWORK,
+  MAINNET_NETWORK,
   MAX_PAYMENT_ATTEMPTS,
   PAYMENT_AMOUNT_ATOMIC,
   PAYMENT_AMOUNT_USD,
   PAYMENT_ASSET,
   PAYMENT_PRICE_LABEL,
+  TESTNET_NETWORK,
+  activePaymentNetwork,
+} from "../../../shared/payment-safety";
+
+import {
+  MAINNET_NETWORK,
   TESTNET_NETWORK,
 } from "../../../shared/payment-safety";
 
@@ -38,6 +46,17 @@ export const FORBIDDEN_SNAPSHOT_PATTERNS: RegExp[] = [
 
 export function isMainnetNetwork(network: string | undefined): boolean {
   return network !== undefined && MAINNET_NETWORKS.has(network);
+}
+
+export function isPaymentNetworkAllowed(network: string): boolean {
+  if (network === TESTNET_NETWORK) return true;
+  if (
+    network === MAINNET_NETWORK &&
+    process.env.X402_USE_MAINNET === "1"
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function sanitizeEnv(
