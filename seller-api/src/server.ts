@@ -20,8 +20,10 @@ import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import type { RouteConfig } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
+import type { FacilitatorConfig } from "@x402/core/server";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { loadEnvUnlessDisabled } from "./config/loadEnv";
+import { createCdpFacilitatorConfig } from "./config/cdpFacilitator";
 import {
   MAINNET_NETWORK,
   PAYMENT_AMOUNT_ATOMIC,
@@ -99,6 +101,18 @@ function assertConfig(): void {
     problems.push(
       `Payment network "${NETWORK}" is not allowed without explicit opt-in.`,
     );
+  }
+  if (NETWORK === MAINNET_NETWORK) {
+    if (!process.env.CDP_API_KEY_ID) {
+      problems.push(
+        "CDP_API_KEY_ID is required to authenticate the CDP facilitator on mainnet.",
+      );
+    }
+    if (!process.env.CDP_API_KEY_SECRET) {
+      problems.push(
+        "CDP_API_KEY_SECRET is required to authenticate the CDP facilitator on mainnet.",
+      );
+    }
   }
   const adapterMockEnabled =
     process.env.AGENTIC_ADAPTER_MOCK === "1" ||
@@ -399,7 +413,19 @@ app.post(
 );
 
 // x402-protected resource server.
-const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+//
+// Testnet uses the unauthenticated public facilitator. Mainnet uses the
+// Coinbase CDP facilitator, which requires authenticated requests — without
+// auth its getSupported endpoint returns HTTP 401 during middleware init.
+const USE_MAINNET = NETWORK === MAINNET_NETWORK;
+const facilitatorConfig: FacilitatorConfig = USE_MAINNET
+  ? createCdpFacilitatorConfig(
+      FACILITATOR_URL,
+      process.env.CDP_API_KEY_ID!,
+      process.env.CDP_API_KEY_SECRET!,
+    )
+  : { url: FACILITATOR_URL };
+const facilitatorClient = new HTTPFacilitatorClient(facilitatorConfig);
 const resourceServer = new x402ResourceServer(facilitatorClient).register(
   NETWORK,
   new ExactEvmScheme(),
