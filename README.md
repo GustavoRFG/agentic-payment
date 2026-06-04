@@ -3,9 +3,10 @@
 > An experimental commerce layer for AI agents.
 
 A minimal, working demonstration of machine-to-machine payments:
-an AI agent autonomously discovers a paid API, pays **$0.001 USDC**
-on Base Sepolia, and receives a real Claude-powered text analysis
-no account, no subscription, no OAuth.
+an AI agent autonomously discovers a paid API, pays USDC on Base
+Sepolia by default or Base mainnet by explicit opt-in, and receives a
+real Claude-powered text/code service response with no account, no
+subscription, no OAuth.
 
 ## What this proves
 
@@ -16,7 +17,7 @@ agent sends text
    POST /paid/analyze-text
    HTTP 402 with payment conditions
    agent verifies price fits budget
-   agent signs and pays 0.001 USDC on Base Sepolia
+   agent signs and pays USDC on Base Sepolia or opt-in Base mainnet
    seller validates via Coinbase x402 facilitator
    seller calls Claude Haiku
    agent receives JSON: summary + sentiment + entities
@@ -30,22 +31,28 @@ The payment is the credential.
 | Layer | Technology |
 |---|---|
 | Payment protocol | [x402](https://x402.org) |
-| Payment network | Base Sepolia (testnet) |
+| Payment network | Base Sepolia (testnet) by default; Base mainnet opt-in |
 | Payment asset | USDC |
 | Seller framework | Express + `@x402/express` |
 | Buyer client | `@x402/fetch` + viem |
 | AI analysis | Claude Haiku (`claude-haiku-4-5`) via Anthropic API |
 | Wallet | Coinbase Developer Platform (CDP) |
-| Tests | Vitest 45 unit + integration tests |
+| Tests | Vitest unit + integration tests |
 
 ## Endpoints
 
-| Endpoint | Auth | Description |
-|---|---|---|
-| `GET /health` | none | Liveness check |
-| `POST /mock/defi-risk-report` | none | DeFi risk report (mock, no payment) |
-| `POST /paid/defi-risk-report` | x402 USDC | DeFi risk report (paid demo) |
-| `POST /paid/analyze-text` | x402 USDC | Text analysis via Claude |
+| Endpoint | Auth | Price | Description |
+|---|---|---:|---|
+| `GET /health` | none | - | Liveness check |
+| `POST /mock/defi-risk-report` | none | - | DeFi risk report (mock, no payment) |
+| `POST /paid/analyze-text` | x402 USDC | $0.001 | Text analysis via Claude Haiku |
+| `POST /paid/analyze-code` | x402 USDC | $0.002 | Code bug/improvement analysis via Claude Haiku |
+| `POST /paid/summarize` | x402 USDC | $0.001 | Text summary points via Claude Haiku |
+| `POST /paid/extract-data` | x402 USDC | $0.002 | Field extraction via Claude Haiku |
+| `POST /paid/translate` | x402 USDC | $0.001 | Translation and source-language detection via Claude Haiku |
+
+The legacy `POST /paid/defi-risk-report` endpoint remains available for
+older demos, but it is not part of the published text/code service catalog.
 
 ## Quick start
 
@@ -83,6 +90,12 @@ npm run dev -- --pay
 # pays 0.001 USDC, receives Claude analysis
 ```
 
+## Networks
+
+By default the server runs on Base Sepolia (testnet) for safe development.
+Set `X402_USE_MAINNET=1` in the seller `.env` to switch to Base mainnet
+with real USDC. Mainnet uses the CDP production facilitator.
+
 ## Example response
 
 ```json
@@ -107,7 +120,8 @@ npm run dev -- --pay
 
 ## Safety design
 
-- Locked to Base Sepolia: no mainnet fallback
+- Defaults to Base Sepolia: Base mainnet requires `X402_USE_MAINNET=1`
+- Ethereum mainnet (`eip155:1`) and other networks remain blocked
 - `MAX_PAYMENT_ATTEMPTS = 1`: no retry, no escalation
 - Payment-bearing HTTP requests capped at 1 per invocation
 - Controlled payment integration test skipped by default

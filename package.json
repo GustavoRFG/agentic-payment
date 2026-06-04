@@ -2,7 +2,7 @@
   "name": "agentic-payments-lab",
   "private": true,
   "version": "0.1.0",
-  "description": "Agentic Payments Lab — controlled x402 buyer/seller prototypes for paid DeFi intelligence endpoints (MVP 001, testnet only).",
+  "description": "Agentic Payments Lab — controlled x402 buyer/seller prototypes for paid AI services.",
   "scripts": {
     "seller:install": "npm --prefix seller-api install",
     "seller:dev": "npm --prefix seller-api run dev",
