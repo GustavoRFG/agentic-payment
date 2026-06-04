@@ -69,3 +69,26 @@ Meaning:
 An AI-agent-compatible buyer paid real USDC on Base mainnet to access a protected
 AI analysis endpoint, and the seller released the Claude-generated result only
 after successful settlement.
+
+## On-chain proof
+
+Transaction hash:
+`0x0b85893d3ac4322f6d5993d622deebf24fae18968d97883d48d738e5d2e4290c`
+
+Block:
+`46905982`
+
+Status:
+`success`
+
+Token transfer:
+`0.001 USDC`
+
+From:
+`0xf75d...F392`
+
+To:
+`0x2986...fe71`
+
+Verification:
+Public Base mainnet ERC-20 settlement confirmed.
