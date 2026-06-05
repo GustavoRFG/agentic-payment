@@ -90,6 +90,16 @@ npm run dev -- --pay
 # pays 0.001 USDC, receives Claude analysis
 ```
 
+## MCP gateway
+
+A local MCP gateway exposes the paid text-analysis endpoint to MCP-compatible
+agents:
+
+- `inspect_analyze_text_price` - inspect x402 requirements without paying
+- `analyze_text_paid` - pay once and receive Claude-powered analysis
+
+MVP 007A defaults to Base Sepolia and blocks MCP mainnet payments.
+
 ## Networks
 
 By default the server runs on Base Sepolia (testnet) for safe development.

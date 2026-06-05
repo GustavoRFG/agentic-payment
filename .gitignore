@@ -16,6 +16,7 @@ runtime/
 .wallet-electron-user-data*/
 buyer-client/.env
 seller-api/.env
+mcp-gateway/.env
 mcp/
 .DS_Store
 .idea/

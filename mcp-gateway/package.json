@@ -1,0 +1,24 @@
+{
+  "name": "agentic-paid-mcp-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local stdio MCP gateway for paid x402 text analysis.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@x402/evm": "^2.13.0",
+    "@x402/fetch": "^2.13.0",
+    "dotenv": "^17.0.0",
+    "viem": "^2.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.0"
+  }
+}
