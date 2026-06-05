@@ -150,7 +150,15 @@ agentic-payments-lab/
 
 ## Results
 
-Two real x402 payments confirmed on Base Sepolia testnet.
-Audit log: `logs/seller-events.jsonl`, `logs/buyer-events.jsonl`.
+- Two real x402 payments confirmed on Base Sepolia testnet.
+- One real x402 payment confirmed on Base mainnet.
+- Mainnet settlement: `0.001 USDC` transferred from a buyer wallet to a distinct seller wallet.
+- The protected `/paid/analyze-text` endpoint returned a real Claude Haiku response only after successful settlement.
+- Public on-chain proof: [`docs/mvp-006-mainnet-payment-proof.md`](docs/mvp-006-mainnet-payment-proof.md)
 
-Built in 2 days. Tested. No errors.
+Audit logs are stored locally in:
+
+- `logs/seller-events.jsonl`
+- `logs/buyer-events.jsonl`
+
+Built as an experimental agent-commerce lab with testnet and mainnet validation.
