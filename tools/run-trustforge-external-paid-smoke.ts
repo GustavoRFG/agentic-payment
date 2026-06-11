@@ -1,14 +1,18 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_ENV,
   defaultExternalPaidReadinessRunDir,
-  liveReadinessDependencies,
   requestFromPaidPolicy,
   runExternalPaidProbe,
   writeExternalPaidReadinessArtifacts,
   type ExternalPaidExecutionRequest,
   type ExternalPaidProbeMode,
 } from "./trustforge/external-x402-paid-executor";
+import {
+  livePaidDependencies,
+  liveReadinessDependencies,
+} from "./trustforge/external-x402-live-bindings";
 import {
   resolveExternalX402GetProbePolicy,
 } from "./trustforge/external-x402-get-policy";
@@ -21,7 +25,7 @@ interface CliArgs {
   executePaid: boolean;
 }
 
-function parseArgs(argv: readonly string[]): CliArgs {
+export function parseArgs(argv: readonly string[]): CliArgs {
   const args: CliArgs = {
     policyId: "",
     readinessOnly: false,
@@ -68,11 +72,11 @@ function parseArgs(argv: readonly string[]): CliArgs {
   return args;
 }
 
-function modeFromArgs(args: CliArgs): ExternalPaidProbeMode {
+export function modeFromArgs(args: CliArgs): ExternalPaidProbeMode {
   return args.executePaid ? "execute-paid" : "readiness-only";
 }
 
-function requestFromArgs(args: CliArgs): ExternalPaidExecutionRequest {
+export function requestFromArgs(args: CliArgs): ExternalPaidExecutionRequest {
   const policy = resolveExternalX402GetProbePolicy(args.policyId);
   return requestFromPaidPolicy(policy, {
     readinessOnly: args.readinessOnly,
@@ -82,20 +86,27 @@ function requestFromArgs(args: CliArgs): ExternalPaidExecutionRequest {
   });
 }
 
-async function main(): Promise<number> {
+export function dependenciesForMode(mode: ExternalPaidProbeMode) {
+  return mode === "readiness-only"
+    ? liveReadinessDependencies()
+    : livePaidDependencies();
+}
+
+export async function main(): Promise<number> {
   let runDir = defaultExternalPaidReadinessRunDir();
   try {
     const args = parseArgs(process.argv.slice(2));
     runDir = args.runDir ?? runDir;
     const policy = resolveExternalX402GetProbePolicy(args.policyId);
     const request = requestFromArgs(args);
+    const mode = modeFromArgs(args);
     const result = await runExternalPaidProbe(
       {
         policy,
         request,
-        mode: modeFromArgs(args),
+        mode,
       },
-      liveReadinessDependencies(),
+      dependenciesForMode(mode),
     );
     await writeExternalPaidReadinessArtifacts(runDir, policy, result);
 
@@ -136,11 +147,13 @@ async function main(): Promise<number> {
   }
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((error) => {
-    console.error("[trustforge-external-paid-smoke] fatal:", (error as Error).message);
-    process.exitCode = 1;
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error) => {
+      console.error("[trustforge-external-paid-smoke] fatal:", (error as Error).message);
+      process.exitCode = 1;
+    });
+}

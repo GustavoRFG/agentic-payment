@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createPaidInvocationGuard } from "../../buyer-client/src/paid-invocation-guard";
-import { createPaymentBearingRequestGuard } from "../../buyer-client/src/payment-bearing-request-guard";
+import {
+  createPaidInvocationGuard,
+  type PaidInvocationGuard,
+} from "../../buyer-client/src/paid-invocation-guard";
+import {
+  createPaymentBearingRequestGuard,
+  type PaymentBearingRequestGuard,
+} from "../../buyer-client/src/payment-bearing-request-guard";
 import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import {
   compareUsdcDecimal,
@@ -24,12 +30,14 @@ export type ExternalPaidProbeState =
   | "INIT"
   | "POLICY_VALIDATED"
   | "UNPAID_HANDSHAKE_CONFIRMED"
-  | "GROUND_TRUTH_CONFIRMED"
+  | "GROUND_TRUTH_BEFORE_CONFIRMED"
   | "ARMING_CONFIRMED"
   | "WALLET_LOAD_STARTED"
   | "WALLET_READY"
   | "PAYMENT_ATTEMPTED"
   | "PAYMENT_RESPONSE_RECEIVED"
+  | "RECEIPT_OR_SETTLEMENT_EVIDENCE_VALIDATED"
+  | "GROUND_TRUTH_AFTER_CONFIRMED"
   | "SEMANTIC_VERIFICATION_COMPLETED"
   | "PASS"
   | "FAIL_CLOSED_BEFORE_WALLET_LOAD"
@@ -70,6 +78,7 @@ export interface GroundTruthResult {
 export interface WalletHandle {
   readonly walletFingerprint: string;
   readonly publicAddress?: string;
+  readonly signer?: unknown;
 }
 
 export interface PaidResponse {
@@ -77,23 +86,40 @@ export interface PaidResponse {
   readonly responseHeadersSanitized: Record<string, string>;
   readonly responseBodySanitized: unknown;
   readonly responseBodySha256: string;
+  readonly responseBodyParseable?: boolean;
   readonly observedChainId?: string | number | null;
   readonly actualAmountUsdc?: string | null;
+  readonly network?: string | null;
+  readonly asset?: string | null;
   readonly transactionHash?: string | null;
-  readonly receipt?: unknown;
-  readonly paymentEvidence?: unknown;
+  readonly receipt?: unknown | null;
+  readonly settlementEvidence?: unknown | null;
+  readonly paymentEvidence?: unknown | null;
+  readonly paymentInvocationCount?: number;
+  readonly paymentBearingRequestCount?: number;
+  readonly totalHttpRequestCount?: number;
+}
+
+export interface ExternalPaidRequestContext {
+  readonly paidInvocationGuard: PaidInvocationGuard;
+  readonly paymentBearingGuard: PaymentBearingRequestGuard;
 }
 
 export interface ExternalPaidProbeDependencies {
   readonly inspectHandshake: (
     policy: ExternalX402GetProbePolicy,
   ) => Promise<ExternalHandshakeInspection>;
-  readonly verifyGroundTruth: () => Promise<GroundTruthResult>;
-  readonly loadWallet: () => Promise<WalletHandle>;
+  readonly verifyGroundTruthBefore: () => Promise<GroundTruthResult>;
+  readonly verifyGroundTruthAfter: () => Promise<GroundTruthResult>;
+  readonly loadWallet: (
+    policy: ExternalX402GetProbePolicy,
+    inspection: ExternalHandshakeInspection,
+  ) => Promise<WalletHandle>;
   readonly performPaidRequest: (
     policy: ExternalX402GetProbePolicy,
     wallet: WalletHandle,
     inspection: ExternalHandshakeInspection,
+    context: ExternalPaidRequestContext,
   ) => Promise<PaidResponse>;
   readonly now?: () => Date;
 }
@@ -118,12 +144,15 @@ export interface ExternalPaidProbeResult {
   readonly readinessOnly: boolean;
   readonly executePaid: boolean;
   readonly handshake: ExternalHandshakeInspection | null;
+  readonly groundTruthBefore: GroundTruthResult | null;
+  readonly groundTruthAfter: GroundTruthResult | null;
   readonly groundTruth: GroundTruthResult | null;
   readonly paidResponse: PaidResponse | null;
   readonly walletFingerprint: string | null;
   readonly walletLoadStarted: boolean;
   readonly paymentAttempted: boolean;
   readonly paymentAttempts: number;
+  readonly paymentBearingRequests: number;
   readonly retryUsed: false;
   readonly fallbackUsed: false;
   readonly schedulerUsed: false;
@@ -300,12 +329,15 @@ function result(
     readinessOnly: options.mode === "readiness-only",
     executePaid: options.mode === "execute-paid",
     handshake: null,
+    groundTruthBefore: null,
+    groundTruthAfter: null,
     groundTruth: null,
     paidResponse: null,
     walletFingerprint: null,
     walletLoadStarted: false,
     paymentAttempted: false,
     paymentAttempts: 0,
+    paymentBearingRequests: 0,
     retryUsed: false,
     fallbackUsed: false,
     schedulerUsed: false,
@@ -323,11 +355,14 @@ export async function runExternalPaidProbe(
   const states: ExternalPaidProbeState[] = ["INIT"];
   const now = dependencies.now ?? (() => new Date());
   let handshake: ExternalHandshakeInspection | null = null;
-  let groundTruth: GroundTruthResult | null = null;
+  let groundTruthBefore: GroundTruthResult | null = null;
+  let groundTruthAfter: GroundTruthResult | null = null;
   let wallet: WalletHandle | null = null;
   let walletLoadStarted = false;
   let paidResponse: PaidResponse | null = null;
   let paymentAttempts = 0;
+  let paymentBearingRequests = 0;
+  let paymentBearingGuard: PaymentBearingRequestGuard | null = null;
 
   try {
     validateExternalPaidExecutionRequest(options.policy, options.request);
@@ -345,43 +380,55 @@ export async function runExternalPaidProbe(
       });
     }
 
-    groundTruth = await dependencies.verifyGroundTruth();
-    validateGroundTruth(groundTruth);
-    transition(states, "GROUND_TRUTH_CONFIRMED");
+    groundTruthBefore = await dependencies.verifyGroundTruthBefore();
+    validateGroundTruth(groundTruthBefore);
+    transition(states, "GROUND_TRUTH_BEFORE_CONFIRMED");
     validateExternalPaidArming(options.request);
     transition(states, "ARMING_CONFIRMED");
 
     transition(states, "WALLET_LOAD_STARTED");
     walletLoadStarted = true;
-    wallet = await dependencies.loadWallet();
+    wallet = await dependencies.loadWallet(options.policy, handshake);
     transition(states, "WALLET_READY");
 
     const paidInvocationGuard = createPaidInvocationGuard(1);
-    const paymentBearingGuard = createPaymentBearingRequestGuard(1);
+    paymentBearingGuard = createPaymentBearingRequestGuard(1);
     paidInvocationGuard.assertNext();
     paymentAttempts = paidInvocationGuard.getAttempts();
     transition(states, "PAYMENT_ATTEMPTED");
-    paidResponse = await dependencies.performPaidRequest(options.policy, wallet, handshake);
+    paidResponse = await dependencies.performPaidRequest(options.policy, wallet, handshake, {
+      paidInvocationGuard,
+      paymentBearingGuard,
+    });
     paymentAttempts = paidInvocationGuard.getAttempts();
-    if (paymentAttempts > 1 || paymentBearingGuard.getPaymentBearingRequests() > 1) {
+    paymentBearingRequests = paymentBearingGuard.getPaymentBearingRequests();
+    if (paymentAttempts > 1 || paymentBearingRequests > 1) {
       throw new Error("payment attempt cap exceeded");
+    }
+    if (paymentBearingRequests !== 1) {
+      throw new Error("expected exactly one payment-bearing HTTP request");
     }
     transition(states, "PAYMENT_RESPONSE_RECEIVED");
 
-    const observed = normalizeChainId(paidResponse.observedChainId);
-    if (observed !== 1) {
-      throw new Error("paid response chain id did not match Ethereum mainnet");
-    }
+    validatePaidResponseForPolicy(options.policy, handshake, paidResponse);
+    transition(states, "RECEIPT_OR_SETTLEMENT_EVIDENCE_VALIDATED");
+    groundTruthAfter = await dependencies.verifyGroundTruthAfter();
+    validateGroundTruth(groundTruthAfter);
+    transition(states, "GROUND_TRUTH_AFTER_CONFIRMED");
     transition(states, "SEMANTIC_VERIFICATION_COMPLETED");
     transition(states, "PASS");
     return result(options, states, "PASS", {
       handshake,
-      groundTruth,
+      groundTruthBefore,
+      groundTruthAfter,
+      groundTruth: groundTruthBefore,
       paidResponse,
       walletFingerprint: wallet.walletFingerprint,
       walletLoadStarted,
       paymentAttempted: true,
       paymentAttempts,
+      paymentBearingRequests,
+      paymentHeadersSentLive: paymentBearingRequests > 0,
       createdAtUtc: now().toISOString(),
     });
   } catch (error) {
@@ -396,19 +443,25 @@ export async function runExternalPaidProbe(
     transition(states, status);
     return result(options, states, status, {
       handshake,
-      groundTruth,
+      groundTruthBefore,
+      groundTruthAfter,
+      groundTruth: groundTruthBefore,
       paidResponse,
       walletFingerprint: wallet?.walletFingerprint ?? null,
       walletLoadStarted,
       paymentAttempted: afterPayment,
       paymentAttempts,
+      paymentBearingRequests:
+        paymentBearingGuard?.getPaymentBearingRequests() ?? paymentBearingRequests,
+      paymentHeadersSentLive:
+        (paymentBearingGuard?.getPaymentBearingRequests() ?? paymentBearingRequests) > 0,
       error: message,
       createdAtUtc: now().toISOString(),
     });
   }
 }
 
-function normalizeChainId(value: PaidResponse["observedChainId"]): number | null {
+export function normalizeChainId(value: PaidResponse["observedChainId"]): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value === "string") {
@@ -417,6 +470,66 @@ function normalizeChainId(value: PaidResponse["observedChainId"]): number | null
     return Number.isInteger(parsed) ? parsed : null;
   }
   return null;
+}
+
+function hasEvidence(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return Object.keys(value as Record<string, unknown>).length > 0;
+  }
+  return true;
+}
+
+export function validatePaidResponseForPolicy(
+  policy: ExternalX402GetProbePolicy,
+  inspection: ExternalHandshakeInspection,
+  response: PaidResponse,
+): void {
+  if (response.httpStatus !== 200) {
+    throw new Error(`paid response HTTP status ${response.httpStatus}, expected 200`);
+  }
+  if (response.responseBodyParseable === false) {
+    throw new Error("paid response body was not parseable");
+  }
+  if (!response.actualAmountUsdc) {
+    throw new Error("paid response missing actual spend");
+  }
+  if (compareUsdcDecimal(response.actualAmountUsdc, policy.maxTotalSpendUsdc) > 0) {
+    throw new Error("paid response actual spend exceeds total cap");
+  }
+  if (compareUsdcDecimal(response.actualAmountUsdc, policy.maxPricePerCallUsdc) > 0) {
+    throw new Error("paid response actual spend exceeds per-call cap");
+  }
+  if (compareUsdcDecimal(response.actualAmountUsdc, inspection.quoteUsdc) > 0) {
+    throw new Error("paid response actual spend exceeds live quote");
+  }
+  if (response.network !== policy.allowedNetwork) {
+    throw new Error("paid response network mismatch");
+  }
+  if (response.asset !== policy.allowedAsset) {
+    throw new Error("paid response asset mismatch");
+  }
+  if (normalizeChainId(response.observedChainId) !== 1) {
+    throw new Error("paid response chain id did not match Ethereum mainnet");
+  }
+  if (!hasEvidence(response.paymentEvidence)) {
+    throw new Error("paid response missing payment evidence");
+  }
+  if (!hasEvidence(response.receipt) && !hasEvidence(response.settlementEvidence)) {
+    throw new Error("paid response missing receipt or settlement evidence");
+  }
+  if (
+    response.paymentInvocationCount !== undefined &&
+    response.paymentInvocationCount > 1
+  ) {
+    throw new Error("paid response reported more than one payment invocation");
+  }
+  if (
+    response.paymentBearingRequestCount !== undefined &&
+    response.paymentBearingRequestCount > 1
+  ) {
+    throw new Error("paid response reported more than one payment-bearing request");
+  }
 }
 
 export function defaultExternalPaidReadinessRunDir(date = new Date()): string {
@@ -456,18 +569,24 @@ export async function writeExternalPaidReadinessArtifacts(
       `policy_id: ${policy.policyId}`,
       `state_path: ${resultValue.states.join(" -> ")}`,
       `status: ${resultValue.status}`,
-      "payment_attempted: no",
-      "wallet_used: no",
+      `payment_attempted: ${resultValue.paymentAttempted ? "yes" : "no"}`,
+      `wallet_used: ${resultValue.walletFingerprint ? "yes" : "no"}`,
+      `payment_attempts: ${resultValue.paymentAttempts}`,
+      `payment_bearing_requests: ${resultValue.paymentBearingRequests}`,
+      `error: ${resultValue.error ?? "null"}`,
       "",
     ].join("\n"),
   );
   await writeJson(join(runDir, "01_policy.json"), policy);
   await writeJson(join(runDir, "02_unpaid_handshake.json"), resultValue.handshake);
-  await writeJson(join(runDir, "03_ground_truth_before.json"), {
-    readiness_only: resultValue.readinessOnly,
-    executed: false,
-    future_paid_gate: "required_before_wallet_load",
-  });
+  await writeJson(
+    join(runDir, "03_ground_truth_before.json"),
+    resultValue.groundTruthBefore ?? {
+      readiness_only: resultValue.readinessOnly,
+      executed: false,
+      future_paid_gate: "required_before_wallet_load",
+    },
+  );
   await writeJson(join(runDir, "04_arming_summary_sanitized.json"), {
     execute_paid_flag: resultValue.executePaid,
     arming_env_present: false,
@@ -481,22 +600,45 @@ export async function writeExternalPaidReadinessArtifacts(
   await writeJson(join(runDir, "06_paid_request_summary_sanitized.json"), {
     attempted: resultValue.paymentAttempted,
     attempts: resultValue.paymentAttempts,
+    payment_bearing_requests: resultValue.paymentBearingRequests,
     retry_used: resultValue.retryUsed,
     fallback_used: resultValue.fallbackUsed,
     payment_headers_sent_live: resultValue.paymentHeadersSentLive,
   });
-  await writeText(join(runDir, "07_paid_response_status.txt"), "not_applicable_readiness_only\n");
-  await writeJson(join(runDir, "08_paid_response_headers_sanitized.json"), {});
-  await writeJson(join(runDir, "09_paid_response_body_sanitized.json"), {});
-  await writeJson(join(runDir, "10_payment_evidence_sanitized.json"), {});
-  await writeJson(join(runDir, "11_receipt_sanitized.json"), {});
-  await writeJson(join(runDir, "12_ground_truth_after.json"), {
-    executed: false,
-    readiness_only: resultValue.readinessOnly,
-  });
+  await writeText(
+    join(runDir, "07_paid_response_status.txt"),
+    resultValue.paidResponse
+      ? `${resultValue.paidResponse.httpStatus}\n`
+      : "not_applicable_or_not_received\n",
+  );
+  await writeJson(
+    join(runDir, "08_paid_response_headers_sanitized.json"),
+    resultValue.paidResponse?.responseHeadersSanitized ?? {},
+  );
+  await writeJson(
+    join(runDir, "09_paid_response_body_sanitized.json"),
+    resultValue.paidResponse?.responseBodySanitized ?? {},
+  );
+  await writeJson(
+    join(runDir, "10_payment_evidence_sanitized.json"),
+    resultValue.paidResponse?.paymentEvidence ?? {},
+  );
+  await writeJson(
+    join(runDir, "11_receipt_sanitized.json"),
+    resultValue.paidResponse?.receipt ??
+      resultValue.paidResponse?.settlementEvidence ??
+      {},
+  );
+  await writeJson(
+    join(runDir, "12_ground_truth_after.json"),
+    resultValue.groundTruthAfter ?? {
+      executed: false,
+      readiness_only: resultValue.readinessOnly,
+    },
+  );
   await writeJson(join(runDir, "13_probe_run.json"), {
     schema_name: "trustforge_paid_probe_run_readiness",
-    schema_version: "0.0.1-readiness",
+    schema_version: "0.0.2-one-shot",
     policy_id: policy.policyId,
     service_id: policy.serviceId,
     readiness_only: resultValue.readinessOnly,
@@ -504,7 +646,18 @@ export async function writeExternalPaidReadinessArtifacts(
     state_path: resultValue.states,
     payment_attempted: resultValue.paymentAttempted,
     payment_attempts: resultValue.paymentAttempts,
+    payment_bearing_requests: resultValue.paymentBearingRequests,
+    wallet_fingerprint: resultValue.walletFingerprint,
+    actual_amount_usdc: resultValue.paidResponse?.actualAmountUsdc ?? null,
+    http_status_after_payment: resultValue.paidResponse?.httpStatus ?? null,
+    transaction_hash: resultValue.paidResponse?.transactionHash ?? null,
+    receipt_present: hasEvidence(resultValue.paidResponse?.receipt),
+    settlement_evidence_present: hasEvidence(resultValue.paidResponse?.settlementEvidence),
+    ground_truth_before: resultValue.groundTruthBefore,
+    ground_truth_after: resultValue.groundTruthAfter,
     body_sha256: resultValue.handshake?.responseBodySha256 ?? sha256(""),
+    paid_body_sha256: resultValue.paidResponse?.responseBodySha256 ?? null,
+    error: resultValue.error,
   });
   await writeText(
     join(runDir, "14_paid_smoke_report.md"),
@@ -518,9 +671,18 @@ export async function writeExternalPaidReadinessArtifacts(
       `quote_usdc: ${resultValue.handshake?.quoteUsdc ?? "null"}`,
       `network: ${resultValue.handshake?.network ?? "null"}`,
       `asset: ${resultValue.handshake?.asset ?? "null"}`,
-      "wallet_loaded: no",
-      "payment_attempted: no",
-      "settlement_attempted: no",
+      `wallet_loaded: ${resultValue.walletFingerprint ? "yes" : "no"}`,
+      `payment_attempted: ${resultValue.paymentAttempted ? "yes" : "no"}`,
+      `payment_attempts: ${resultValue.paymentAttempts}`,
+      `payment_bearing_requests: ${resultValue.paymentBearingRequests}`,
+      `http_status_after_payment: ${resultValue.paidResponse?.httpStatus ?? "null"}`,
+      `actual_spend_usdc: ${resultValue.paidResponse?.actualAmountUsdc ?? "null"}`,
+      `receipt_present: ${hasEvidence(resultValue.paidResponse?.receipt) ? "yes" : "no"}`,
+      `settlement_evidence_present: ${hasEvidence(resultValue.paidResponse?.settlementEvidence) ? "yes" : "no"}`,
+      `ground_truth_before: ${resultValue.groundTruthBefore?.chainIdHex ?? "null"}`,
+      `ground_truth_after: ${resultValue.groundTruthAfter?.chainIdHex ?? "null"}`,
+      `settlement_attempted: ${resultValue.paymentAttempted ? "unknown_or_captured_by_transport" : "no"}`,
+      `error: ${resultValue.error ?? "null"}`,
       "",
     ].join("\n"),
   );
@@ -534,9 +696,12 @@ export async function writeExternalPaidReadinessArtifacts(
       `quote_usdc: ${resultValue.handshake?.quoteUsdc ?? "null"}`,
       `network: ${resultValue.handshake?.network ?? "null"}`,
       `asset: ${resultValue.handshake?.asset ?? "null"}`,
-      "payment_attempted: no",
-      "wallet_used: no",
-      "settlement_attempted: no",
+      `payment_attempted: ${resultValue.paymentAttempted ? "yes" : "no"}`,
+      `payment_attempts: ${resultValue.paymentAttempts}`,
+      `payment_bearing_requests: ${resultValue.paymentBearingRequests}`,
+      `wallet_used: ${resultValue.walletFingerprint ? "yes" : "no"}`,
+      `settlement_attempted: ${resultValue.paymentAttempted ? "unknown_or_captured_by_transport" : "no"}`,
+      `error: ${resultValue.error ?? "null"}`,
       "",
     ].join("\n"),
   );
@@ -545,7 +710,10 @@ export async function writeExternalPaidReadinessArtifacts(
 export function liveReadinessDependencies(): ExternalPaidProbeDependencies {
   return {
     inspectHandshake: (policy) => inspectExternalX402GetHandshake(policy),
-    verifyGroundTruth: async () => {
+    verifyGroundTruthBefore: async () => {
+      throw new Error("ground truth is not executed in readiness-only mode");
+    },
+    verifyGroundTruthAfter: async () => {
       throw new Error("ground truth is not executed in readiness-only mode");
     },
     loadWallet: async () => {

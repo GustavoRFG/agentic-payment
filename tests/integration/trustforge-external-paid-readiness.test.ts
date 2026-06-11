@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
   requestFromPaidPolicy,
   runExternalPaidProbe,
   writeExternalPaidReadinessArtifacts,
+  type ExternalPaidRequestContext,
 } from "../../tools/trustforge/external-x402-paid-executor";
 import { ONESOURCE_ETHEREUM_CHAIN_ID_POLICY } from "../../tools/trustforge/external-x402-get-policy";
 import type { ExternalHandshakeInspection } from "../../tools/trustforge/external-x402-get-adapter";
@@ -50,7 +52,10 @@ function handshake(): ExternalHandshakeInspection {
 describe("TrustForge external paid readiness integration", () => {
   it("runs readiness-only without wallet load, paid request, or payment headers", async () => {
     const inspectHandshake = vi.fn(async () => handshake());
-    const verifyGroundTruth = vi.fn(async () => {
+    const verifyGroundTruthBefore = vi.fn(async () => {
+      throw new Error("should not run in readiness-only");
+    });
+    const verifyGroundTruthAfter = vi.fn(async () => {
       throw new Error("should not run in readiness-only");
     });
     const loadWallet = vi.fn(async () => {
@@ -72,7 +77,8 @@ describe("TrustForge external paid readiness integration", () => {
       },
       {
         inspectHandshake,
-        verifyGroundTruth,
+        verifyGroundTruthBefore,
+        verifyGroundTruthAfter,
         loadWallet,
         performPaidRequest,
       },
@@ -80,7 +86,8 @@ describe("TrustForge external paid readiness integration", () => {
 
     expect(result.status).toBe("PASS");
     expect(inspectHandshake).toHaveBeenCalledTimes(1);
-    expect(verifyGroundTruth).not.toHaveBeenCalled();
+    expect(verifyGroundTruthBefore).not.toHaveBeenCalled();
+    expect(verifyGroundTruthAfter).not.toHaveBeenCalled();
     expect(loadWallet).not.toHaveBeenCalled();
     expect(performPaidRequest).not.toHaveBeenCalled();
     expect(result.paymentAttempts).toBe(0);
@@ -96,6 +103,81 @@ describe("TrustForge external paid readiness integration", () => {
       "04_arming_summary_sanitized.json",
       "05_wallet_summary_sanitized.json",
       "06_paid_request_summary_sanitized.json",
+      "13_probe_run.json",
+      "14_paid_smoke_report.md",
+      "RESULT.txt",
+    ]) {
+      expect(existsSync(join(runDir, file))).toBe(true);
+    }
+  });
+
+  it("writes evidence files for a post-payment failure without retry", async () => {
+    const result = await runExternalPaidProbe(
+      {
+        policy: POLICY,
+        request: requestFromPaidPolicy(POLICY, {
+          readinessOnly: false,
+          executePaid: true,
+          runId: "run_fail_after_payment",
+          armingEnvValue: TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
+        }),
+        mode: "execute-paid",
+      },
+      {
+        inspectHandshake: vi.fn(async () => handshake()),
+        verifyGroundTruthBefore: vi.fn(async () => ({
+          ok: true,
+          chainIdHex: "0x1",
+          chainIdDecimal: 1,
+        })),
+        verifyGroundTruthAfter: vi.fn(async () => ({
+          ok: true,
+          chainIdHex: "0x1",
+          chainIdDecimal: 1,
+        })),
+        loadWallet: vi.fn(async () => ({
+          walletFingerprint: "wallet-fp",
+          publicAddress: "0x0000000000000000000000000000000000000001",
+        })),
+        performPaidRequest: vi.fn(async (
+          _policy,
+          _wallet,
+          _inspection,
+          context: ExternalPaidRequestContext,
+        ) => {
+          context.paymentBearingGuard.inspect({ "PAYMENT-SIGNATURE": "mock" });
+          return {
+            httpStatus: 500,
+            responseHeadersSanitized: { "content-type": "application/json" },
+            responseBodySanitized: { error: "seller failure" },
+            responseBodySha256: "failed-body",
+            responseBodyParseable: true,
+            observedChainId: null,
+            actualAmountUsdc: "0.001",
+            network: "eip155:8453",
+            asset: "USDC",
+            receipt: { tx: "0xabc" },
+            settlementEvidence: { tx: "0xabc" },
+            paymentEvidence: { tx: "0xabc" },
+          };
+        }),
+      },
+    );
+
+    expect(result.status).toBe("FAIL_AFTER_PAYMENT");
+    expect(result.paymentAttempts).toBe(1);
+    expect(result.paymentBearingRequests).toBe(1);
+
+    const runDir = mkdtempSync(join(tmpdir(), "trustforge-paid-failure-"));
+    await writeExternalPaidReadinessArtifacts(runDir, POLICY, result);
+    for (const file of [
+      "06_paid_request_summary_sanitized.json",
+      "07_paid_response_status.txt",
+      "08_paid_response_headers_sanitized.json",
+      "09_paid_response_body_sanitized.json",
+      "10_payment_evidence_sanitized.json",
+      "11_receipt_sanitized.json",
+      "12_ground_truth_after.json",
       "13_probe_run.json",
       "14_paid_smoke_report.md",
       "RESULT.txt",

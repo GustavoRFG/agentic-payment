@@ -5,10 +5,12 @@ import {
   requestFromPaidPolicy,
   runExternalPaidProbe,
   sanitizeForExternalPaidEvidence,
+  validatePaidResponseForPolicy,
   validateExternalPaidArming,
   validateExternalPaidExecutionRequest,
   validateInspectionForPaidPolicy,
   type ExternalPaidProbeDependencies,
+  type ExternalPaidRequestContext,
   type PaidResponse,
 } from "../../tools/trustforge/external-x402-paid-executor";
 import {
@@ -66,9 +68,14 @@ function paidResponse(
     responseBodySha256: "paid-body",
     observedChainId: "0x1",
     actualAmountUsdc: "0.001",
+    network: "eip155:8453",
+    asset: "USDC",
     transactionHash: "0xabc",
     receipt: { ok: true },
+    settlementEvidence: { ok: true },
     paymentEvidence: { ok: true },
+    paymentInvocationCount: 1,
+    paymentBearingRequestCount: 1,
     ...overrides,
   };
 }
@@ -78,7 +85,13 @@ function deps(
 ): ExternalPaidProbeDependencies {
   return {
     inspectHandshake: vi.fn(async () => handshake()),
-    verifyGroundTruth: vi.fn(async () => ({
+    verifyGroundTruthBefore: vi.fn(async () => ({
+      ok: true,
+      chainIdHex: "0x1",
+      chainIdDecimal: 1,
+      sources: ["mock"],
+    })),
+    verifyGroundTruthAfter: vi.fn(async () => ({
       ok: true,
       chainIdHex: "0x1",
       chainIdDecimal: 1,
@@ -88,7 +101,15 @@ function deps(
       walletFingerprint: "wallet-fp",
       publicAddress: "0x0000000000000000000000000000000000000001",
     })),
-    performPaidRequest: vi.fn(async () => paidResponse()),
+    performPaidRequest: vi.fn(async (
+      _policy,
+      _wallet,
+      _inspection,
+      context: ExternalPaidRequestContext,
+    ) => {
+      context.paymentBearingGuard.inspect({ "PAYMENT-SIGNATURE": "mock" });
+      return paidResponse();
+    }),
     now: () => new Date("2026-06-11T00:00:00.000Z"),
     ...overrides,
   };
@@ -231,7 +252,7 @@ describe("TrustForge external paid executor gate order", () => {
 
   it("does not load wallet when ground truth fails", async () => {
     const d = deps({
-      verifyGroundTruth: vi.fn(async () => ({
+      verifyGroundTruthBefore: vi.fn(async () => ({
         ok: false,
         chainIdHex: "0x2",
         chainIdDecimal: 2,
@@ -257,7 +278,7 @@ describe("TrustForge external paid executor gate order", () => {
       d,
     );
 
-    expect(result.states).toContain("GROUND_TRUTH_CONFIRMED");
+    expect(result.states).toContain("GROUND_TRUTH_BEFORE_CONFIRMED");
     expect(result.status).toBe("FAIL_CLOSED_BEFORE_WALLET_LOAD");
     expect(d.loadWallet).not.toHaveBeenCalled();
   });
@@ -273,17 +294,26 @@ describe("TrustForge external paid executor one-shot behavior", () => {
 
     expect(result.status).toBe("PASS");
     expect(result.paymentAttempts).toBe(1);
+    expect(result.paymentBearingRequests).toBe(1);
     expect(d.performPaidRequest).toHaveBeenCalledTimes(1);
   });
 
   it.each([
     ["post-payment failure", async () => { throw new Error("paid failed"); }],
     ["post-payment timeout", async () => { throw new Error("paid timeout"); }],
-    ["missing receipt", async () => paidResponse({ receipt: null })],
+    ["missing receipt", async (_context: ExternalPaidRequestContext) => paidResponse({ receipt: null })],
     ["incorrect response", async () => paidResponse({ observedChainId: "0x2" })],
   ])("does not retry on %s", async (_label, performPaidRequest) => {
     const d = deps({
-      performPaidRequest: vi.fn(performPaidRequest),
+      performPaidRequest: vi.fn(async (
+        _policy,
+        _wallet,
+        _inspection,
+        context: ExternalPaidRequestContext,
+      ) => {
+        context.paymentBearingGuard.inspect({ "PAYMENT-SIGNATURE": "mock" });
+        return performPaidRequest(context);
+      }),
     });
     const result = await runExternalPaidProbe(
       { policy: POLICY, request: armedRequest(), mode: "execute-paid" },
@@ -294,6 +324,82 @@ describe("TrustForge external paid executor one-shot behavior", () => {
     expect(result.retryUsed).toBe(false);
     expect(result.fallbackUsed).toBe(false);
     expect(d.performPaidRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["HTTP 500", paidResponse({ httpStatus: 500 })],
+    ["HTTP 402", paidResponse({ httpStatus: 402 })],
+    ["invalid body", paidResponse({ responseBodyParseable: false })],
+    ["chain id incorrect", paidResponse({ observedChainId: "0x2" })],
+    ["actual spend absent", paidResponse({ actualAmountUsdc: null })],
+    ["actual spend above cap", paidResponse({ actualAmountUsdc: "0.006" })],
+    ["network incorrect", paidResponse({ network: "eip155:84532" })],
+    ["asset incorrect", paidResponse({ asset: "ETH" })],
+    ["payment evidence absent", paidResponse({ paymentEvidence: null })],
+    [
+      "receipt and settlement absent",
+      paidResponse({ receipt: null, settlementEvidence: null }),
+    ],
+  ])("rejects post-payment validation failure: %s", async (_label, response) => {
+    const d = deps({
+      performPaidRequest: vi.fn(async (
+        _policy,
+        _wallet,
+        _inspection,
+        context: ExternalPaidRequestContext,
+      ) => {
+        context.paymentBearingGuard.inspect({ "PAYMENT-SIGNATURE": "mock" });
+        return response;
+      }),
+    });
+    const result = await runExternalPaidProbe(
+      { policy: POLICY, request: armedRequest(), mode: "execute-paid" },
+      d,
+    );
+
+    expect(result.status).toBe("FAIL_AFTER_PAYMENT");
+    expect(result.paymentAttempts).toBe(1);
+    expect(result.paymentBearingRequests).toBe(1);
+    expect(d.performPaidRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects ground truth after failure without retry", async () => {
+    const d = deps({
+      verifyGroundTruthAfter: vi.fn(async () => ({
+        ok: false,
+        chainIdHex: "0x2",
+        chainIdDecimal: 2,
+      })),
+    });
+    const result = await runExternalPaidProbe(
+      { policy: POLICY, request: armedRequest(), mode: "execute-paid" },
+      d,
+    );
+
+    expect(result.status).toBe("FAIL_AFTER_PAYMENT");
+    expect(result.paymentAttempts).toBe(1);
+    expect(d.performPaidRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails when the paid transport does not emit exactly one payment-bearing request", async () => {
+    const d = deps({
+      performPaidRequest: vi.fn(async () => paidResponse({ paymentBearingRequestCount: 0 })),
+    });
+    const result = await runExternalPaidProbe(
+      { policy: POLICY, request: armedRequest(), mode: "execute-paid" },
+      d,
+    );
+
+    expect(result.status).toBe("FAIL_AFTER_PAYMENT");
+    expect(result.paymentBearingRequests).toBe(0);
+  });
+});
+
+describe("TrustForge external paid response validation", () => {
+  it("accepts a complete one-shot paid response", () => {
+    expect(() =>
+      validatePaidResponseForPolicy(POLICY, handshake(), paidResponse()),
+    ).not.toThrow();
   });
 });
 
