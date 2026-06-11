@@ -33,15 +33,18 @@ describe("buyer paid invocation guard", () => {
       join(process.cwd(), "buyer-client", "src", "call-paid-report.ts"),
       "utf8",
     );
-    const dryRunBody = source.match(
-      /async function runDryRun\(\): Promise<number> \{[\s\S]*?\n\}\n\nasync function runPay/,
-    )?.[0];
-    const payBody = source.match(
-      /async function runPay\(\): Promise<number> \{[\s\S]*?paidInvocationGuard\.assertNext\(\);[\s\S]*?fetchWithPayment/,
-    )?.[0];
+    const dryRunStart = source.indexOf("async function runDryRun()");
+    const payStart = source.indexOf("async function runPay()");
+    const dryRunBody =
+      dryRunStart >= 0 && payStart > dryRunStart
+        ? source.slice(dryRunStart, payStart)
+        : "";
+    const payBody = payStart >= 0 ? source.slice(payStart) : "";
 
     expect(dryRunBody).toBeTruthy();
     expect(dryRunBody).not.toContain("paidInvocationGuard.assertNext()");
     expect(payBody).toBeTruthy();
+    expect(payBody).toContain("paidInvocationGuard.assertNext()");
+    expect(payBody).toContain("fetchWithPayment");
   });
 });

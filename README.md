@@ -90,6 +90,27 @@ npm run dev -- --pay
 # pays 0.001 USDC, receives Claude analysis
 ```
 
+### TrustForge external GET dry-run
+
+The TrustForge MVP-T0A adapter is a narrow external preflight surface for one
+allowlisted x402 seller endpoint:
+
+```bash
+npm run trustforge:probe:external:dry-run -- --policy onesource_api_chain_id_base_mainnet_v1
+```
+
+Safety invariants:
+
+- supports only `GET https://api.onesource.io/api/chain/chain-id?network=ethereum`;
+- requires Base mainnet CAIP-2 `eip155:8453` and USDC;
+- enforces `0.005 USDC` max per call, `0.005 USDC` max total, and one payment attempt;
+- disables redirects, retries, fallback, batch, loops, and scheduler behavior;
+- performs only an unpaid `402` handshake inspection and writes run-scoped evidence under `D:\trustforge-mvp-t0a-adapter`;
+- never loads a wallet, signs, sends a payment header, or executes settlement.
+
+The adapter exists only to unblock a separately reviewed future paid smoke.
+Any new external target must be added as an explicit code-reviewed policy.
+
 ## MCP gateway
 
 A local MCP gateway exposes the paid text-analysis endpoint to MCP-compatible
