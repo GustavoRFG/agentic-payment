@@ -111,6 +111,34 @@ Safety invariants:
 The adapter exists only to unblock a separately reviewed future paid smoke.
 Any new external target must be added as an explicit code-reviewed policy.
 
+### TrustForge external paid readiness
+
+The T0B readiness surface prepares a future one-shot paid probe without running
+one now:
+
+```bash
+npm run trustforge:probe:external:paid-readiness -- --policy onesource_api_chain_id_base_mainnet_v1 --readiness-only
+```
+
+Readiness mode performs a fresh unpaid `402` handshake, validates the live
+quote/network/asset against the exact policy, confirms paid execution is not
+armed, writes scratch evidence outside the repo, and exits before ground truth,
+wallet load, signing, payment headers, or settlement.
+
+The future paid path is intentionally harder to arm. It requires all of:
+
+- `--execute-paid`;
+- `--policy onesource_api_chain_id_base_mainnet_v1`;
+- `--run-id <non-empty>`;
+- `TRUSTFORGE_EXTERNAL_PAID_SMOKE_ARMED=YES_I_AUTHORIZE_ONE_PAYMENT`;
+- fresh unpaid handshake in the same invocation;
+- ground-truth `eth_chainId == 0x1` before wallet load;
+- one payment attempt maximum, with redirects, retries, fallback, batch, loops,
+  and scheduler behavior disabled.
+
+The current readiness command does not load a wallet and does not expose an
+automatic payment script. The real paid smoke remains a separate reviewed task.
+
 ## MCP gateway
 
 A local MCP gateway exposes the paid text-analysis endpoint to MCP-compatible
