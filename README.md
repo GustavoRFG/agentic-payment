@@ -1,16 +1,58 @@
 # Agentic Payments Lab
 
-> An experimental commerce layer for AI agents.
+Experimental x402 agent-commerce infrastructure evolving into **TrustForge**:
+a paid, continuous, auditable verification layer for services consumed by
+autonomous agents.
 
-A minimal, working demonstration of machine-to-machine payments:
-an AI agent autonomously discovers a paid API, pays USDC on Base
-Sepolia by default or Base mainnet by explicit opt-in, and receives a
-real Claude-powered text/code service response with no account, no
-subscription, no OAuth.
+## Current status
+
+This repository contains the payment and probe-buyer foundation of TrustForge.
+
+Validated so far:
+
+- local seller and buyer flows;
+- controlled x402 payment experiments;
+- external third-party x402 discovery;
+- live unpaid `402 Payment Required` handshake against an external seller;
+- exact allowlisted external GET policy;
+- default-deny dry-run and paid-readiness surfaces;
+- one-shot payment guards;
+- evidence capture and semantic verification scaffolding.
+
+Not yet claimed as live proof:
+
+- the first externally settled TrustForge payment;
+- multi-seller registry;
+- continuous ServiceEvalTask execution;
+- temporal TrustScore ledger;
+- public Trust API.
+
+## Product thesis
+
+TrustForge is not primarily a marketplace, payment protocol, or uptime monitor.
+Its core value is the continuous semantic verification of artifacts purchased
+from agent-facing services.
+
+## Safety posture
+
+The initial external probe path is intentionally narrow:
+
+- exact allowlisted URL;
+- GET only;
+- Base mainnet only;
+- USDC only;
+- capped spend;
+- maximum one payment attempt;
+- no paid retry;
+- no paid fallback;
+- ground truth before and after;
+- evidence written on success and failure.
+
+Real payments must never be executed from documentation examples.
 
 ## What this proves
 
-The full economic cycle works end-to-end:
+The controlled local and paid-service flows show the economic cycle end-to-end:
 
 ```
 agent sends text
@@ -77,20 +119,19 @@ npm run dev
 
 ```bash
 cd buyer-client
-cp .env.example .env   # add BUYER_PRIVATE_KEY
+cp .env.example .env   # configure local values as needed
 npm install
 npm run dev -- --dry-run
 # receives HTTP 402, prints payment requirements, exits without paying
 ```
 
-### Buyer pay
+### Buyer pay intentionally omitted
 
-```bash
-npm run dev -- --pay
-# pays 0.001 USDC, receives Claude analysis
-```
+Paid buyer execution is intentionally opt-in and is not documented as a
+copy-paste command. Use the reviewed runbooks and local safety gates before
+executing any real payment.
 
-### TrustForge external GET dry-run
+### TrustForge external dry-run unpaid
 
 The TrustForge MVP-T0A adapter is a narrow external preflight surface for one
 allowlisted x402 seller endpoint:
@@ -105,13 +146,13 @@ Safety invariants:
 - requires Base mainnet CAIP-2 `eip155:8453` and USDC;
 - enforces `0.005 USDC` max per call, `0.005 USDC` max total, and one payment attempt;
 - disables redirects, retries, fallback, batch, loops, and scheduler behavior;
-- performs only an unpaid `402` handshake inspection and writes run-scoped evidence under `D:\trustforge\artifacts\runs\mvp-t0a-adapter`;
+- performs only an unpaid `402` handshake inspection and writes run-scoped evidence outside the source repo;
 - never loads a wallet, signs, sends a payment header, or executes settlement.
 
 The adapter exists only to unblock a separately reviewed future paid smoke.
 Any new external target must be added as an explicit code-reviewed policy.
 
-### TrustForge external paid readiness
+### TrustForge external paid-readiness unpaid
 
 The T0B readiness surface prepares a future one-shot paid probe without running
 one now:
@@ -125,19 +166,11 @@ quote/network/asset against the exact policy, confirms paid execution is not
 armed, writes scratch evidence outside the repo, and exits before ground truth,
 wallet load, signing, payment headers, or settlement.
 
-The future paid path is intentionally harder to arm. It requires all of:
+### Future external paid execution
 
-- `--execute-paid`;
-- `--policy onesource_api_chain_id_base_mainnet_v1`;
-- `--run-id <non-empty>`;
-- `TRUSTFORGE_EXTERNAL_PAID_SMOKE_ARMED=YES_I_AUTHORIZE_ONE_PAYMENT`;
-- fresh unpaid handshake in the same invocation;
-- ground-truth `eth_chainId == 0x1` before wallet load;
-- one payment attempt maximum, with redirects, retries, fallback, batch, loops,
-  and scheduler behavior disabled.
-
-The current readiness command does not load a wallet and does not expose an
-automatic payment script. The real paid smoke remains a separate reviewed task.
+The future paid path is intentionally not documented as a copy-paste command.
+It remains a separate reviewed task after a dedicated wallet, explicit human
+authorization, spend cap, and post-settlement verification plan are in place.
 
 ## MCP gateway
 

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+coverage/
 .codex_tmp/
 .env
 .env.*
@@ -10,6 +11,7 @@ logs/
 dashboard/exports/
 dashboard/index.html
 runtime/
+artifacts/
 *.jsonl
 .awal-electron-user-data/
 .awal-electron-user-data*/
