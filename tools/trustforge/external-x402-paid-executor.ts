@@ -543,7 +543,10 @@ export function defaultExternalPaidReadinessRunDir(date = new Date()): string {
     pad(date.getUTCMinutes()),
     pad(date.getUTCSeconds()),
   ].join("");
-  return resolve("D:\\trustforge-mvp-t0b-paid-readiness", `run_${timestamp}`);
+  return resolve(
+    "D:\\trustforge\\artifacts\\runs\\mvp-t0b-readiness",
+    `run_${timestamp}`,
+  );
 }
 
 async function writeText(path: string, content: string): Promise<void> {

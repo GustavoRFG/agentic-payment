@@ -446,7 +446,10 @@ function timestampForPath(date: Date): string {
 }
 
 export function defaultExternalProbeRunDir(date = new Date()): string {
-  return resolve("D:\\trustforge-mvp-t0a-adapter", `run_${timestampForPath(date)}`);
+  return resolve(
+    "D:\\trustforge\\artifacts\\runs\\mvp-t0a-adapter",
+    `run_${timestampForPath(date)}`,
+  );
 }
 
 async function writeText(path: string, content: string): Promise<void> {

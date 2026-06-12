@@ -105,7 +105,7 @@ Safety invariants:
 - requires Base mainnet CAIP-2 `eip155:8453` and USDC;
 - enforces `0.005 USDC` max per call, `0.005 USDC` max total, and one payment attempt;
 - disables redirects, retries, fallback, batch, loops, and scheduler behavior;
-- performs only an unpaid `402` handshake inspection and writes run-scoped evidence under `D:\trustforge-mvp-t0a-adapter`;
+- performs only an unpaid `402` handshake inspection and writes run-scoped evidence under `D:\trustforge\artifacts\runs\mvp-t0a-adapter`;
 - never loads a wallet, signs, sends a payment header, or executes settlement.
 
 The adapter exists only to unblock a separately reviewed future paid smoke.

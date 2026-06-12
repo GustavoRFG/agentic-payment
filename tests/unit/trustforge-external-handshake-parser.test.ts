@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import {
   assertExternalPaidExecutionDisabled,
+  defaultExternalProbeRunDir,
   inspectExternalX402GetHandshake,
 } from "../../tools/trustforge/external-x402-get-adapter";
 import { ONESOURCE_ETHEREUM_CHAIN_ID_POLICY } from "../../tools/trustforge/external-x402-get-policy";
@@ -58,6 +59,17 @@ function fetchOnce(response: Response): typeof fetch {
 }
 
 describe("TrustForge external x402 handshake parser", () => {
+  it("uses the consolidated TrustForge workspace for default dry-run artifacts", () => {
+    const runDir = defaultExternalProbeRunDir(
+      new Date("2026-06-12T01:02:03.000Z"),
+    );
+
+    expect(runDir).toBe(
+      "D:\\trustforge\\artifacts\\runs\\mvp-t0a-adapter\\run_20260612_010203",
+    );
+    expect(runDir).not.toContain("D:\\trustforge-");
+  });
+
   it("fails closed if paid execution is accidentally enabled", () => {
     const original = process.env.TRUSTFORGE_EXTERNAL_PAID_ENABLE;
     process.env.TRUSTFORGE_EXTERNAL_PAID_ENABLE = "1";

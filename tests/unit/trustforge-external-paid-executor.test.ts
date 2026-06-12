@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
+  defaultExternalPaidReadinessRunDir,
   requestFromPaidPolicy,
   runExternalPaidProbe,
   sanitizeForExternalPaidEvidence,
@@ -126,6 +127,17 @@ function armedRequest(overrides = {}) {
 }
 
 describe("TrustForge external paid executor policy and arming", () => {
+  it("uses the consolidated TrustForge workspace for default readiness artifacts", () => {
+    const runDir = defaultExternalPaidReadinessRunDir(
+      new Date("2026-06-12T01:02:03.000Z"),
+    );
+
+    expect(runDir).toBe(
+      "D:\\trustforge\\artifacts\\runs\\mvp-t0b-readiness\\run_20260612_010203",
+    );
+    expect(runDir).not.toContain("D:\\trustforge-");
+  });
+
   it("rejects unknown policy", () => {
     expect(() => resolveExternalX402GetProbePolicy("unknown")).toThrow(
       "unknown external probe policy",
