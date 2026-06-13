@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/trust_score.schema.json",
+  "title": "TrustForge TrustScore",
+  "type": "object",
+  "required": [
+    "schema_name",
+    "schema_version",
+    "service_id",
+    "window",
+    "dimensions",
+    "composite",
+    "sample_size",
+    "confidence",
+    "regression_flag",
+    "methodology_version",
+    "commercial_disclosure",
+    "evidence_refs",
+    "created_at_utc"
+  ],
+  "properties": {
+    "schema_name": { "const": "trustforge_trust_score" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "service_id": { "type": "string", "minLength": 1 },
+    "window": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "from_utc": { "type": ["string", "null"] },
+        "to_utc": { "type": ["string", "null"] }
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "required": [
+        "correctness",
+        "reliability",
+        "payment_integrity",
+        "latency",
+        "safety"
+      ],
+      "properties": {
+        "correctness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reliability": { "type": "number", "minimum": 0, "maximum": 1 },
+        "payment_integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "latency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safety": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "composite": { "type": "number", "minimum": 0, "maximum": 1 },
+    "sample_size": { "type": "integer", "minimum": 0 },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "regression_flag": { "type": "boolean" },
+    "methodology_version": { "type": "string", "minLength": 1 },
+    "commercial_disclosure": {
+      "type": "object",
+      "required": [
+        "evaluated_service_is_customer",
+        "relationship_type",
+        "seller_funded_probes",
+        "seller_funded_probe_share",
+        "score_methodology_unchanged",
+        "disclosure_notes"
+      ],
+      "properties": {
+        "evaluated_service_is_customer": { "type": "boolean" },
+        "relationship_type": { "type": "string" },
+        "seller_funded_probes": { "type": "boolean" },
+        "seller_funded_probe_share": { "type": "number", "minimum": 0, "maximum": 1 },
+        "score_methodology_unchanged": { "type": "boolean" },
+        "disclosure_notes": { "type": "string" }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "created_at_utc": { "type": "string", "format": "date-time" }
+  }
+}

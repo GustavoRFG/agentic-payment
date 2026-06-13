@@ -17,12 +17,14 @@ Validated so far:
 - exact allowlisted external GET policy;
 - default-deny dry-run and paid-readiness surfaces;
 - one-shot payment guards;
-- evidence capture and semantic verification scaffolding.
+- evidence capture and semantic verification scaffolding;
+- bootstrap contracts, an 8-service registry, a deterministic evaluator, and a
+  TrustScore consolidator (all schema-validated and unit-tested).
 
 Not yet claimed as live proof:
 
-- the first externally settled TrustForge payment;
-- multi-seller registry;
+- the first externally settled TrustForge payment (remains human-gated);
+- a real `TrustScore` from a real settled probe (only mock fixtures exist);
 - continuous ServiceEvalTask execution;
 - temporal TrustScore ledger;
 - public Trust API.
@@ -171,6 +173,51 @@ wallet load, signing, payment headers, or settlement.
 The future paid path is intentionally not documented as a copy-paste command.
 It remains a separate reviewed task after a dedicated wallet, explicit human
 authorization, spend cap, and post-settlement verification plan are in place.
+
+## TrustForge bootstrap pipeline (registry, contracts, evaluator, score)
+
+The deterministic, LLM-free benchmarking pipeline is in place and tested. It is
+ready to consume a real settled `ProbeRun` the moment a paid T0C smoke is
+authorized; no live external settlement is claimed yet.
+
+- **Contracts** — JSON Schema (draft 2020-12) for `ProbeRun`, `ServiceEvalTask`,
+  `EvaluationResult`, `TrustScore`, and `ServiceRegistry`, under
+  `contracts/trustforge/`. Validated by a dependency-free validator
+  (`tools/trustforge/json-schema-lite.ts`):
+
+  ```bash
+  npm run trustforge:contracts:validate
+  ```
+
+- **Registry** — `trustforge/registry/services.bootstrap.json` lists 8 real
+  sellers proven by unpaid handshake in the spike-zero inventory (3 OneSource
+  chain-metadata endpoints, OttoAI token-price and hyperliquid-market, Blockrun
+  Polymarket, Anchor token-price, Memory weather). No invented endpoints.
+
+- **Evaluator** — deterministic, no LLM judge:
+
+  ```bash
+  npm run trustforge:evaluate:bootstrap -- --probe-run <path> --task <path>
+  ```
+
+  Dimensions: correctness, reliability, payment_integrity, latency, safety.
+  `correctness=1` only if the observed chain id is `1` and independent
+  before/after ground truth agree; `payment_integrity=1` only if the on-chain
+  USDC transfer is verified; `safety=1` only for a true one-shot with no retry
+  or fallback.
+
+- **Score** — consolidate evaluations into a `TrustScore`:
+
+  ```bash
+  npm run trustforge:score:bootstrap -- --eval <path>
+  ```
+
+  The first real score will be `sample_size=1`, `confidence=low`,
+  `regression_flag=false`, methodology `trustforge-bootstrap-v0.1.0`, with a
+  commercial-independence disclosure attached.
+
+Until a paid T0C smoke is authorized, only mock fixtures under
+`trustforge/fixtures/` exercise this pipeline; no real `TrustScore` exists.
 
 ## MCP gateway
 

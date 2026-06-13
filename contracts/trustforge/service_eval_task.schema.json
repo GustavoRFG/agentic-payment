@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/service_eval_task.schema.json",
+  "title": "TrustForge ServiceEvalTask",
+  "type": "object",
+  "required": [
+    "task_id",
+    "service_id",
+    "category",
+    "request_template",
+    "verifiers",
+    "ground_truth_strategy",
+    "max_acceptable_latency_ms",
+    "methodology_version"
+  ],
+  "properties": {
+    "task_id": { "type": "string", "minLength": 1 },
+    "service_id": { "type": "string", "minLength": 1 },
+    "category": { "type": "string", "minLength": 1 },
+    "request_template": {
+      "type": "object",
+      "required": ["url", "method"],
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "method": { "const": "GET" },
+        "network": { "type": "string" },
+        "asset": { "type": "string" }
+      }
+    },
+    "verifiers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "weight"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+          "dimension": {
+            "enum": ["correctness", "reliability", "payment_integrity", "latency", "safety"]
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "ground_truth_strategy": { "type": "string", "minLength": 1 },
+    "max_acceptable_latency_ms": { "type": "number", "exclusiveMinimum": 0 },
+    "methodology_version": { "type": "string", "minLength": 1 }
+  }
+}

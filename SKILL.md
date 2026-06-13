@@ -74,7 +74,13 @@ Do not create new TrustForge scratch directories directly under `D:\`.
 ## Anti-goals
 - no infinite readiness layering;
 - no generic wallet framework before T0C;
-- no registry before the one-shot external payment;
 - no dashboard before score artifacts exist;
 - no public score publication before methodology and legal review;
 - no broad refactor without need.
+
+## Bootstrap pipeline status (fast-track-e2e, 2026-06-13)
+The deterministic registry, JSON Schema contracts, evaluator, and TrustScore
+consolidator are implemented and tested ahead of T0C so the first paid run is
+short. This is scaffolding only: no real `TrustScore` is created until a real,
+authorized, on-chain-verified paid probe exists (`REAL_SCORE_NOT_CREATED`).
+Handshake success and mock fixtures are never presented as live settlement.

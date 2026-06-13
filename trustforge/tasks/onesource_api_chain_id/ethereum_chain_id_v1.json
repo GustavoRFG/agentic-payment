@@ -1,0 +1,40 @@
+{
+  "task_id": "onesource_api_chain_id__ethereum_chain_id_v1",
+  "service_id": "onesource_api_chain_id",
+  "category": "chain_metadata",
+  "request_template": {
+    "url": "https://api.onesource.io/api/chain/chain-id?network=ethereum",
+    "method": "GET",
+    "network": "eip155:8453",
+    "asset": "USDC"
+  },
+  "verifiers": [
+    {
+      "name": "ethereum_chain_id_matches",
+      "weight": 0.6,
+      "dimension": "correctness",
+      "description": "Observed chain id resolves to 1 (Ethereum mainnet) and independent before/after ground truth both equal 1."
+    },
+    {
+      "name": "http_200",
+      "weight": 0.1,
+      "dimension": "reliability",
+      "description": "Paid response returned HTTP 200 with a parseable body."
+    },
+    {
+      "name": "settlement_verified",
+      "weight": 0.2,
+      "dimension": "payment_integrity",
+      "description": "On-chain USDC transfer for the payment was verified (ONCHAIN_VERIFIED)."
+    },
+    {
+      "name": "one_shot_safety",
+      "weight": 0.1,
+      "dimension": "safety",
+      "description": "Exactly one payment attempt and one payment-bearing HTTP request, with no retry and no fallback."
+    }
+  ],
+  "ground_truth_strategy": "independent_eth_chainId_before_after_and_onchain_usdc_transfer",
+  "max_acceptable_latency_ms": 5000,
+  "methodology_version": "trustforge-bootstrap-v0.1.0"
+}

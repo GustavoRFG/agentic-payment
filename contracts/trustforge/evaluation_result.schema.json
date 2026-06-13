@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/evaluation_result.schema.json",
+  "title": "TrustForge EvaluationResult",
+  "type": "object",
+  "required": [
+    "schema_name",
+    "schema_version",
+    "evaluation_id",
+    "probe_id",
+    "task_id",
+    "service_id",
+    "verifier_results",
+    "dimensions",
+    "composite",
+    "status",
+    "methodology_version",
+    "created_at_utc"
+  ],
+  "properties": {
+    "schema_name": { "const": "trustforge_evaluation_result" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "evaluation_id": { "type": "string", "minLength": 1 },
+    "probe_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "service_id": { "type": "string", "minLength": 1 },
+    "verifier_results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "weight", "passed", "score"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+          "passed": { "type": "boolean" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "required": [
+        "correctness",
+        "reliability",
+        "payment_integrity",
+        "latency",
+        "safety"
+      ],
+      "properties": {
+        "correctness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reliability": { "type": "number", "minimum": 0, "maximum": 1 },
+        "payment_integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "latency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safety": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "composite": { "type": "number", "minimum": 0, "maximum": 1 },
+    "status": { "enum": ["pass", "fail"] },
+    "methodology_version": { "type": "string", "minLength": 1 },
+    "created_at_utc": { "type": "string", "format": "date-time" }
+  }
+}

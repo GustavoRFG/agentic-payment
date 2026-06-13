@@ -1,0 +1,51 @@
+{
+  "schema_name": "trustforge_probe_run",
+  "schema_version": "0.1.0",
+  "probe_id": "mock_onesource_chain_id_0001",
+  "service_id": "onesource_api_chain_id",
+  "task_ref": "onesource_api_chain_id__ethereum_chain_id_v1",
+  "target": {
+    "url": "https://api.onesource.io/api/chain/chain-id?network=ethereum",
+    "method": "GET",
+    "network": "eip155:8453",
+    "asset": "USDC"
+  },
+  "request": {
+    "policy_id": "onesource_api_chain_id_base_mainnet_v1",
+    "max_total_spend_usdc": "0.005",
+    "max_payment_attempts": 1
+  },
+  "payment": {
+    "attempt_count": 1,
+    "payment_bearing_http_request_count": 1,
+    "wallet_fingerprint": "mock000000000000",
+    "actual_amount_usdc": "0.001",
+    "transaction_hash": "MOCK_TX_NOT_A_REAL_ONCHAIN_HASH",
+    "receipt_status": "captured",
+    "settlement_evidence_status": "captured",
+    "retry_used": false,
+    "fallback_used": false
+  },
+  "response": {
+    "http_status": 200,
+    "body_sha256": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "latency_ms": 420,
+    "observed_chain_id": 1
+  },
+  "verification": {
+    "ground_truth_before": 1,
+    "ground_truth_after": 1,
+    "observed_chain_id": 1,
+    "semantic_correctness": "pass",
+    "onchain_transfer_verification": "ONCHAIN_VERIFIED"
+  },
+  "safety": {
+    "attempt_count": 1,
+    "payment_bearing_http_request_count": 1,
+    "retry_used": false,
+    "fallback_used": false,
+    "one_shot": true
+  },
+  "created_at_utc": "2026-06-13T03:43:00.000Z",
+  "_fixture_note": "MOCK probe run for pipeline tests only. Not a real settlement. No real TrustScore is derived from this fixture."
+}

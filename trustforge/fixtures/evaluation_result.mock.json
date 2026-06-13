@@ -1,0 +1,49 @@
+{
+  "schema_name": "trustforge_evaluation_result",
+  "schema_version": "0.1.0",
+  "evaluation_id": "mock_onesource_chain_id_0001__onesource_api_chain_id__ethereum_chain_id_v1",
+  "probe_id": "mock_onesource_chain_id_0001",
+  "task_id": "onesource_api_chain_id__ethereum_chain_id_v1",
+  "service_id": "onesource_api_chain_id",
+  "verifier_results": [
+    {
+      "name": "ethereum_chain_id_matches",
+      "weight": 0.6,
+      "passed": true,
+      "score": 1,
+      "detail": "correctness=1"
+    },
+    {
+      "name": "http_200",
+      "weight": 0.1,
+      "passed": true,
+      "score": 1,
+      "detail": "reliability=1"
+    },
+    {
+      "name": "settlement_verified",
+      "weight": 0.2,
+      "passed": true,
+      "score": 1,
+      "detail": "payment_integrity=1"
+    },
+    {
+      "name": "one_shot_safety",
+      "weight": 0.1,
+      "passed": true,
+      "score": 1,
+      "detail": "safety=1"
+    }
+  ],
+  "dimensions": {
+    "correctness": 1,
+    "reliability": 1,
+    "payment_integrity": 1,
+    "latency": 1,
+    "safety": 1
+  },
+  "composite": 1,
+  "status": "pass",
+  "methodology_version": "trustforge-bootstrap-v0.1.0",
+  "created_at_utc": "2026-06-13T06:56:40.499Z"
+}

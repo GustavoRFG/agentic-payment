@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/probe_run.schema.json",
+  "title": "TrustForge ProbeRun",
+  "type": "object",
+  "required": [
+    "schema_name",
+    "schema_version",
+    "probe_id",
+    "service_id",
+    "task_ref",
+    "target",
+    "request",
+    "payment",
+    "response",
+    "verification",
+    "safety",
+    "created_at_utc"
+  ],
+  "properties": {
+    "schema_name": { "const": "trustforge_probe_run" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "probe_id": { "type": "string", "minLength": 1 },
+    "service_id": { "type": "string", "minLength": 1 },
+    "task_ref": { "type": "string", "minLength": 1 },
+    "target": {
+      "type": "object",
+      "required": ["url", "method", "network", "asset"],
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "method": { "const": "GET" },
+        "network": { "const": "eip155:8453" },
+        "asset": { "const": "USDC" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["policy_id", "max_total_spend_usdc", "max_payment_attempts"],
+      "properties": {
+        "policy_id": { "type": "string", "minLength": 1 },
+        "max_total_spend_usdc": { "type": "string", "pattern": "^\\d+(\\.\\d+)?$" },
+        "max_payment_attempts": { "const": 1 }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "required": [
+        "attempt_count",
+        "payment_bearing_http_request_count",
+        "wallet_fingerprint",
+        "actual_amount_usdc",
+        "transaction_hash",
+        "receipt_status",
+        "settlement_evidence_status",
+        "retry_used",
+        "fallback_used"
+      ],
+      "properties": {
+        "attempt_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "payment_bearing_http_request_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "wallet_fingerprint": { "type": ["string", "null"] },
+        "actual_amount_usdc": { "type": ["string", "null"], "pattern": "^\\d+(\\.\\d+)?$" },
+        "transaction_hash": { "type": ["string", "null"] },
+        "receipt_status": { "enum": ["captured", "not_available", "failed", null] },
+        "settlement_evidence_status": { "enum": ["captured", "failed", null] },
+        "retry_used": { "const": false },
+        "fallback_used": { "const": false }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": ["http_status", "body_sha256", "latency_ms", "observed_chain_id"],
+      "properties": {
+        "http_status": { "type": "integer", "minimum": 0, "maximum": 599 },
+        "body_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "latency_ms": { "type": ["number", "null"], "minimum": 0 },
+        "observed_chain_id": { "type": ["integer", "string", "null"] }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": [
+        "ground_truth_before",
+        "ground_truth_after",
+        "observed_chain_id",
+        "semantic_correctness",
+        "onchain_transfer_verification"
+      ],
+      "properties": {
+        "ground_truth_before": { "type": ["integer", "string", "null"] },
+        "ground_truth_after": { "type": ["integer", "string", "null"] },
+        "observed_chain_id": { "type": ["integer", "string", "null"] },
+        "semantic_correctness": { "enum": ["pass", "fail", "unknown"] },
+        "onchain_transfer_verification": {
+          "enum": [
+            "ONCHAIN_VERIFIED",
+            "ONCHAIN_PARTIAL_REQUIRES_HUMAN_REVIEW",
+            "ONCHAIN_FAILED",
+            "not_executed"
+          ]
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "required": [
+        "attempt_count",
+        "payment_bearing_http_request_count",
+        "retry_used",
+        "fallback_used",
+        "one_shot"
+      ],
+      "properties": {
+        "attempt_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "payment_bearing_http_request_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "retry_used": { "const": false },
+        "fallback_used": { "const": false },
+        "one_shot": { "const": true }
+      }
+    },
+    "created_at_utc": { "type": "string", "format": "date-time" }
+  }
+}

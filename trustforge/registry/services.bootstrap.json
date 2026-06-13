@@ -1,0 +1,159 @@
+{
+  "schema_name": "trustforge_service_registry",
+  "registry_version": "0.1.0",
+  "generated_at_utc": "2026-06-13T03:43:00.000Z",
+  "services": [
+    {
+      "service_id": "onesource_api_chain_id",
+      "provider": "OneSource",
+      "category": "chain_metadata",
+      "endpoint_url": "https://api.onesource.io/api/chain/chain-id?network=ethereum",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_eth_chainId_must_equal_1_for_network_ethereum",
+      "ground_truth_determinism": "deterministic",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:09:20.0939841Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#onesource_api_chain_id",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\onesource_api_chain_id\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "onesource_api_block_number",
+      "provider": "OneSource",
+      "category": "chain_metadata",
+      "endpoint_url": "https://api.onesource.io/api/chain/block-number?network=ethereum",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_eth_blockNumber_within_tolerance_window",
+      "ground_truth_determinism": "time_sensitive_cross_check",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:09:20.8793902Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#onesource_api_block_number",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\onesource_api_block_number\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "onesource_api_network_info",
+      "provider": "OneSource",
+      "category": "chain_metadata",
+      "endpoint_url": "https://api.onesource.io/api/chain/network-info?network=ethereum",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_eth_chainId_deterministic_plus_blockNumber_gasPrice_tolerance",
+      "ground_truth_determinism": "time_sensitive_cross_check",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:09:21.5642190Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#onesource_api_network_info",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\onesource_api_network_info\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "otto_token_price_eth",
+      "provider": "OttoAI",
+      "category": "market_data",
+      "endpoint_url": "https://x402.ottoai.services/token-price?token=ETH",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_dex_price_source_with_tolerance_and_timestamp",
+      "ground_truth_determinism": "time_sensitive_cross_check",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:04:42.9380512Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#otto_token_price_eth",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\otto_token_price_eth\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "otto_hyperliquid_btc",
+      "provider": "OttoAI",
+      "category": "market_data",
+      "endpoint_url": "https://x402.ottoai.services/hyperliquid-market?asset=BTC",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_hyperliquid_market_data_with_numeric_tolerance",
+      "ground_truth_determinism": "time_sensitive_cross_check",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:04:48.8919098Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#otto_hyperliquid_btc",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\otto_hyperliquid_btc\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "blockrun_polymarket_markets",
+      "provider": "Blockrun",
+      "category": "prediction_market",
+      "endpoint_url": "https://blockrun.ai/api/v1/pm/polymarket/markets?limit=1",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_polymarket_gamma_or_clob_cross_check_with_tolerance",
+      "ground_truth_determinism": "time_sensitive_cross_check",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:05:13.3885447Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#blockrun_polymarket_markets",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\blockrun_polymarket_markets\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "anchor_token_price_eth",
+      "provider": "Anchor x402",
+      "category": "market_data",
+      "endpoint_url": "https://api.anchor-x402.com/v1/price/token?symbol=ETH",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_market_price_source_with_tolerance_and_timestamp",
+      "ground_truth_determinism": "time_sensitive_cross_check",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:04:50.1281974Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#anchor_token_price_eth",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\anchor_token_price_eth\\response_body_sanitized.json"
+      ]
+    },
+    {
+      "service_id": "geo_memory_weather_london",
+      "provider": "Memory API",
+      "category": "weather",
+      "endpoint_url": "https://geo.memoryapi.org/x402/geo/weather?location=London&days=3&units=metric",
+      "method": "GET",
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "last_observed_quote_usdc": "0.001",
+      "ground_truth_strategy": "independent_open_meteo_cross_check_for_same_coordinates_and_timestamp",
+      "ground_truth_determinism": "near_deterministic",
+      "status": "proven_unpaid_handshake",
+      "observed_at_utc": "2026-06-11T05:04:52.5346526Z",
+      "evidence_refs": [
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#geo_memory_weather_london",
+        "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\geo_memory_weather_london\\response_body_sanitized.json"
+      ]
+    }
+  ]
+}

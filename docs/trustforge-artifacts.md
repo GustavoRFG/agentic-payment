@@ -21,9 +21,31 @@ Historical runs consolidated in this workspace include:
 - `mvp-t0b-readiness`
 - `mvp-t0b1-binding`
 - `consolidation-binding-audit`
+- `fast-track-e2e`
 
 The artifact index is maintained at:
 
 ```text
 D:\trustforge\artifacts\index.json
 ```
+
+## In-repo TrustForge bootstrap assets
+
+These tracked, sanitized assets live inside the source repo (not under the
+artifacts root) because they are code/contract inputs, not run evidence:
+
+```text
+contracts/trustforge/*.schema.json          # JSON Schema contracts
+trustforge/registry/services.bootstrap.json # 8-service bootstrap registry
+trustforge/tasks/onesource_api_chain_id/    # ServiceEvalTask definitions
+trustforge/fixtures/                         # MOCK probe/eval/score fixtures only
+tools/trustforge/json-schema-lite.ts         # dependency-free validator
+tools/trustforge/contracts.ts                # contract loader/validator
+tools/trustforge/evaluate-bootstrap-probe.ts # deterministic evaluator
+tools/trustforge/consolidate-bootstrap-trust-score.ts
+```
+
+The `fast-track-e2e` run (`D:\trustforge\artifacts\runs\fast-track-e2e\run_<ts>`)
+holds the run log, snapshots, governance/secret/binding reports, T0C preflight
+(human-gated, not executed), contracts validation, tests, builds, and the final
+report.
