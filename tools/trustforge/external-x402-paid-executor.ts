@@ -14,7 +14,9 @@ import {
   compareUsdcDecimal,
   requestFromPolicy,
   validateExternalProbeRequest,
+  verificationProfileOf,
   type ExternalX402GetProbePolicy,
+  type VerificationProfileId,
 } from "./external-x402-get-policy";
 import {
   inspectExternalX402GetHandshake,
@@ -71,6 +73,8 @@ export interface GroundTruthResult {
   readonly ok: boolean;
   readonly chainIdHex?: string;
   readonly chainIdDecimal?: number;
+  readonly blockNumberHex?: string;
+  readonly blockNumberDecimal?: number;
   readonly sources?: readonly string[];
   readonly error?: string;
 }
@@ -88,6 +92,8 @@ export interface PaidResponse {
   readonly responseBodySha256: string;
   readonly responseBodyParseable?: boolean;
   readonly observedChainId?: string | number | null;
+  /** Generic observed semantic value (chain id or block number per profile). */
+  readonly observedValue?: string | number | null;
   readonly actualAmountUsdc?: string | null;
   readonly network?: string | null;
   readonly asset?: string | null;
@@ -109,8 +115,12 @@ export interface ExternalPaidProbeDependencies {
   readonly inspectHandshake: (
     policy: ExternalX402GetProbePolicy,
   ) => Promise<ExternalHandshakeInspection>;
-  readonly verifyGroundTruthBefore: () => Promise<GroundTruthResult>;
-  readonly verifyGroundTruthAfter: () => Promise<GroundTruthResult>;
+  readonly verifyGroundTruthBefore: (
+    policy: ExternalX402GetProbePolicy,
+  ) => Promise<GroundTruthResult>;
+  readonly verifyGroundTruthAfter: (
+    policy: ExternalX402GetProbePolicy,
+  ) => Promise<GroundTruthResult>;
   readonly loadWallet: (
     policy: ExternalX402GetProbePolicy,
     inspection: ExternalHandshakeInspection,
@@ -288,10 +298,99 @@ export function validateInspectionForPaidPolicy(
   }
 }
 
-export function validateGroundTruth(result: GroundTruthResult): void {
+export function validateGroundTruth(
+  result: GroundTruthResult,
+  profile: VerificationProfileId = "ethereum_chain_id",
+): void {
+  if (profile === "ethereum_block_number") {
+    if (
+      !result.ok ||
+      typeof result.blockNumberDecimal !== "number" ||
+      !Number.isInteger(result.blockNumberDecimal) ||
+      result.blockNumberDecimal <= 0
+    ) {
+      throw new Error("ground truth eth_blockNumber check failed");
+    }
+    return;
+  }
   if (!result.ok || result.chainIdHex !== "0x1" || result.chainIdDecimal !== 1) {
     throw new Error("ground truth eth_chainId check failed");
   }
+}
+
+export function normalizeBlockNumber(
+  value: string | number | null | undefined,
+): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isInteger(value) ? value : null;
+  const trimmed = value.trim();
+  if (/^0x[0-9a-fA-F]+$/.test(trimmed)) return Number.parseInt(trimmed, 16);
+  if (/^\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
+  return null;
+}
+
+export interface ProfileSemanticResult {
+  readonly profile: VerificationProfileId;
+  readonly pass: boolean;
+  readonly observed: number | null;
+  readonly lowerBound: number | null;
+  readonly upperBound: number | null;
+  readonly detail: string;
+}
+
+/**
+ * Deterministic, profile-aware semantic verification of a paid response against
+ * the independent before/after ground truth. Throwing is reserved for the
+ * executor; this returns a structured result so callers can record evidence.
+ */
+export function verifyProfileSemantics(
+  policy: ExternalX402GetProbePolicy,
+  response: PaidResponse,
+  before: GroundTruthResult | null,
+  after: GroundTruthResult | null,
+): ProfileSemanticResult {
+  const profile = verificationProfileOf(policy);
+  if (profile === "ethereum_block_number") {
+    const tolerance = policy.blockToleranceBlocks ?? 5;
+    const observed = normalizeBlockNumber(response.observedValue ?? response.observedChainId);
+    const b = before?.blockNumberDecimal ?? null;
+    const a = after?.blockNumberDecimal ?? null;
+    if (observed === null || b === null || a === null) {
+      return {
+        profile,
+        pass: false,
+        observed,
+        lowerBound: b,
+        upperBound: a,
+        detail: "missing observed block number or ground-truth window",
+      };
+    }
+    const lower = Math.min(b, a) - tolerance;
+    const upper = Math.max(b, a) + tolerance;
+    const pass = observed >= lower && observed <= upper;
+    return {
+      profile,
+      pass,
+      observed,
+      lowerBound: lower,
+      upperBound: upper,
+      detail: pass
+        ? `observed block ${observed} within [${lower}, ${upper}] (tolerance ${tolerance})`
+        : `observed block ${observed} outside [${lower}, ${upper}] (tolerance ${tolerance})`,
+    };
+  }
+  const observed = normalizeChainId(response.observedChainId ?? response.observedValue);
+  const pass = observed === 1;
+  return {
+    profile,
+    pass,
+    observed,
+    lowerBound: 1,
+    upperBound: 1,
+    detail: pass
+      ? "observed chain id resolves to Ethereum mainnet (1)"
+      : `observed chain id ${observed ?? "null"} != 1`,
+  };
 }
 
 function transition(
@@ -380,8 +479,9 @@ export async function runExternalPaidProbe(
       });
     }
 
-    groundTruthBefore = await dependencies.verifyGroundTruthBefore();
-    validateGroundTruth(groundTruthBefore);
+    const profile = verificationProfileOf(options.policy);
+    groundTruthBefore = await dependencies.verifyGroundTruthBefore(options.policy);
+    validateGroundTruth(groundTruthBefore, profile);
     transition(states, "GROUND_TRUTH_BEFORE_CONFIRMED");
     validateExternalPaidArming(options.request);
     transition(states, "ARMING_CONFIRMED");
@@ -412,9 +512,18 @@ export async function runExternalPaidProbe(
 
     validatePaidResponseForPolicy(options.policy, handshake, paidResponse);
     transition(states, "RECEIPT_OR_SETTLEMENT_EVIDENCE_VALIDATED");
-    groundTruthAfter = await dependencies.verifyGroundTruthAfter();
-    validateGroundTruth(groundTruthAfter);
+    groundTruthAfter = await dependencies.verifyGroundTruthAfter(options.policy);
+    validateGroundTruth(groundTruthAfter, profile);
     transition(states, "GROUND_TRUTH_AFTER_CONFIRMED");
+    const semantics = verifyProfileSemantics(
+      options.policy,
+      paidResponse,
+      groundTruthBefore,
+      groundTruthAfter,
+    );
+    if (!semantics.pass) {
+      throw new Error(`semantic verification failed: ${semantics.detail}`);
+    }
     transition(states, "SEMANTIC_VERIFICATION_COMPLETED");
     transition(states, "PASS");
     return result(options, states, "PASS", {
@@ -509,7 +618,10 @@ export function validatePaidResponseForPolicy(
   if (response.asset !== policy.allowedAsset) {
     throw new Error("paid response asset mismatch");
   }
-  if (normalizeChainId(response.observedChainId) !== 1) {
+  if (
+    verificationProfileOf(policy) === "ethereum_chain_id" &&
+    normalizeChainId(response.observedChainId) !== 1
+  ) {
     throw new Error("paid response chain id did not match Ethereum mainnet");
   }
   if (!hasEvidence(response.paymentEvidence)) {

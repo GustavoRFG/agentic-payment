@@ -16,11 +16,23 @@
       "ground_truth_strategy": "independent_eth_chainId_must_equal_1_for_network_ethereum",
       "ground_truth_determinism": "deterministic",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:09:20.0939841Z",
+      "observed_at_utc": "2026-06-14T03:04:07.114Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#onesource_api_chain_id",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\onesource_api_chain_id\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 715,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:07.114Z"
+      }
     },
     {
       "service_id": "onesource_api_block_number",
@@ -35,11 +47,23 @@
       "ground_truth_strategy": "independent_eth_blockNumber_within_tolerance_window",
       "ground_truth_determinism": "time_sensitive_cross_check",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:09:20.8793902Z",
+      "observed_at_utc": "2026-06-14T03:04:07.832Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#onesource_api_block_number",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\onesource_api_block_number\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 462,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:07.832Z"
+      }
     },
     {
       "service_id": "onesource_api_network_info",
@@ -54,11 +78,23 @@
       "ground_truth_strategy": "independent_eth_chainId_deterministic_plus_blockNumber_gasPrice_tolerance",
       "ground_truth_determinism": "time_sensitive_cross_check",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:09:21.5642190Z",
+      "observed_at_utc": "2026-06-14T03:04:08.294Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#onesource_api_network_info",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\onesource_api_network_info\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 154,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:08.294Z"
+      }
     },
     {
       "service_id": "otto_token_price_eth",
@@ -73,11 +109,23 @@
       "ground_truth_strategy": "independent_dex_price_source_with_tolerance_and_timestamp",
       "ground_truth_determinism": "time_sensitive_cross_check",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:04:42.9380512Z",
+      "observed_at_utc": "2026-06-14T03:04:08.448Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#otto_token_price_eth",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\otto_token_price_eth\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 1032,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:08.448Z"
+      }
     },
     {
       "service_id": "otto_hyperliquid_btc",
@@ -92,11 +140,23 @@
       "ground_truth_strategy": "independent_hyperliquid_market_data_with_numeric_tolerance",
       "ground_truth_determinism": "time_sensitive_cross_check",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:04:48.8919098Z",
+      "observed_at_utc": "2026-06-14T03:04:09.481Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#otto_hyperliquid_btc",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\otto_hyperliquid_btc\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 553,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:09.481Z"
+      }
     },
     {
       "service_id": "blockrun_polymarket_markets",
@@ -111,11 +171,23 @@
       "ground_truth_strategy": "independent_polymarket_gamma_or_clob_cross_check_with_tolerance",
       "ground_truth_determinism": "time_sensitive_cross_check",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:05:13.3885447Z",
+      "observed_at_utc": "2026-06-14T03:04:10.034Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#blockrun_polymarket_markets",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\blockrun_polymarket_markets\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 648,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:10.034Z"
+      }
     },
     {
       "service_id": "anchor_token_price_eth",
@@ -130,11 +202,23 @@
       "ground_truth_strategy": "independent_market_price_source_with_tolerance_and_timestamp",
       "ground_truth_determinism": "time_sensitive_cross_check",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:04:50.1281974Z",
+      "observed_at_utc": "2026-06-14T03:04:10.682Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#anchor_token_price_eth",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\anchor_token_price_eth\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 842,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:10.682Z"
+      }
     },
     {
       "service_id": "geo_memory_weather_london",
@@ -149,11 +233,23 @@
       "ground_truth_strategy": "independent_open_meteo_cross_check_for_same_coordinates_and_timestamp",
       "ground_truth_determinism": "near_deterministic",
       "status": "proven_unpaid_handshake",
-      "observed_at_utc": "2026-06-11T05:04:52.5346526Z",
+      "observed_at_utc": "2026-06-14T03:04:11.525Z",
       "evidence_refs": [
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\03_handshake_inventory.json#geo_memory_weather_london",
         "D:\\trustforge\\artifacts\\runs\\spike-zero\\run_20260611_015536\\evidence\\handshakes\\geo_memory_weather_london\\response_body_sanitized.json"
-      ]
+      ],
+      "last_refresh": {
+        "refresh_status": "live_402",
+        "http_status": 402,
+        "observed_quote_usdc": "0.001",
+        "observed_network": "eip155:8453",
+        "observed_asset": "USDC",
+        "quote_within_cap": true,
+        "drift_from_registry": false,
+        "latency_ms": 522,
+        "error": null,
+        "refreshed_at_utc": "2026-06-14T03:04:11.525Z"
+      }
     }
   ]
 }

@@ -1,0 +1,32 @@
+{
+  "schema_name": "trustforge_portfolio_trust_score",
+  "schema_version": "0.1.0",
+  "window": {
+    "type": "portfolio_bootstrap",
+    "from_utc": "2026-06-14T01:21:01.694Z",
+    "to_utc": "2026-06-14T07:03:46.833Z"
+  },
+  "services": [
+    {
+      "service_id": "onesource_api_chain_id",
+      "composite": 1,
+      "sample_size": 1,
+      "confidence": "low",
+      "regression_flag": false
+    },
+    {
+      "service_id": "onesource_api_block_number",
+      "composite": 1,
+      "sample_size": 1,
+      "confidence": "low",
+      "regression_flag": false
+    }
+  ],
+  "service_count": 2,
+  "total_sample_size": 2,
+  "composite": 1,
+  "confidence": "low",
+  "regression_flag": false,
+  "methodology_version": "trustforge-bootstrap-v0.1.0",
+  "created_at_utc": "2026-06-14T07:03:46.847Z"
+}

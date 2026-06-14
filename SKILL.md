@@ -62,14 +62,15 @@ Artifacts live under `D:\trustforge\artifacts\runs`.
 Do not create new TrustForge scratch directories directly under `D:\`.
 
 ## Current roadmap
-1. close real paid binding;
-2. execute one authorized T0C payment;
-3. verify transfer on-chain;
-4. add registry for 5-8 services;
-5. implement first ServiceEvalTask;
-6. produce EvaluationResult;
-7. add temporal TrustScore;
-8. expose Trust API later.
+1. close real paid binding; ✅
+2. execute one authorized T0C payment; ✅
+3. verify transfer on-chain; ✅
+4. add registry for 5-8 services; ✅ (8 services, unpaid refresh tool)
+5. implement first ServiceEvalTask; ✅ (chain-id + block-number)
+6. produce EvaluationResult; ✅ (two real evaluations)
+7. add temporal TrustScore; ✅ (per-service history + portfolio roll-up + regression/consistency)
+8. richer paid probe — OATP `tx_explainer` (prepared, unpaid; separate authorization + higher cap);
+9. expose Trust API later.
 
 ## Anti-goals
 - no infinite readiness layering;
@@ -87,3 +88,15 @@ probe (tx `0xb445f8c1…0cfb11`, 0.001 USDC) produced the first real `ProbeRun`,
 `confidence=low`), committed under `trustforge/evidence/t0c_first_paid_probe/`.
 Mock fixtures still exercise the pipeline independently and are never presented
 as live settlement.
+
+## Phase 2 status (phase2-temporal-semantic)
+Phase 2 is **complete** (run id `phase2_20260613_233553`). A second authorized,
+on-chain-verified paid probe against `onesource_api_block_number` (tx
+`0xff5ec5e2…26d4`, 0.001 USDC) used a new tolerance-window verification profile,
+produced a second real `ProbeRun`/`EvaluationResult`/`TrustScore`, a 2-service
+portfolio roll-up, and per-service score history with regression/consistency
+detection. Verification profiles (`ethereum_chain_id`, `ethereum_block_number`)
+generalize the executor; selection and refresh are deterministic and tested.
+The same one-shot/no-retry/no-fallback invariants apply; the 0.005 USDC cap is
+the OneSource deterministic cap and is **not** reused for OATP (separate higher
+cap + separate authorization).

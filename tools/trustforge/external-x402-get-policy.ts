@@ -1,3 +1,11 @@
+/**
+ * The deterministic semantic check applied to a paid response. `ethereum_chain_id`
+ * (the T0C/default profile) asserts the observed chain id resolves to mainnet 1.
+ * `ethereum_block_number` asserts the observed L1 block number sits inside the
+ * independent before/after ground-truth window (plus a small tolerance).
+ */
+export type VerificationProfileId = "ethereum_chain_id" | "ethereum_block_number";
+
 export interface ExternalX402GetProbePolicy {
   readonly policyId: string;
   readonly serviceId: string;
@@ -12,6 +20,16 @@ export interface ExternalX402GetProbePolicy {
   readonly allowRetries: false;
   readonly allowFallback: false;
   readonly dryRunOnly: true;
+  /** Defaults to "ethereum_chain_id" when omitted (backward compatible). */
+  readonly verificationProfile?: VerificationProfileId;
+  /** Tolerance window (in blocks) for the block-number profile. */
+  readonly blockToleranceBlocks?: number;
+}
+
+export function verificationProfileOf(
+  policy: ExternalX402GetProbePolicy,
+): VerificationProfileId {
+  return policy.verificationProfile ?? "ethereum_chain_id";
 }
 
 export interface ExternalX402GetProbeRequest {
@@ -47,8 +65,28 @@ export const ONESOURCE_ETHEREUM_CHAIN_ID_POLICY = {
   dryRunOnly: true,
 } as const satisfies ExternalX402GetProbePolicy;
 
+export const ONESOURCE_ETHEREUM_BLOCK_NUMBER_POLICY = {
+  policyId: "onesource_api_block_number_base_mainnet_v1",
+  serviceId: "onesource_api_block_number",
+  exactUrl: "https://api.onesource.io/api/chain/block-number?network=ethereum",
+  method: "GET",
+  allowedNetwork: "eip155:8453",
+  allowedAsset: "USDC",
+  maxPricePerCallUsdc: "0.005",
+  maxTotalSpendUsdc: "0.005",
+  maxPaymentAttempts: 1,
+  allowRedirects: false,
+  allowRetries: false,
+  allowFallback: false,
+  dryRunOnly: true,
+  verificationProfile: "ethereum_block_number",
+  blockToleranceBlocks: 5,
+} as const satisfies ExternalX402GetProbePolicy;
+
 const POLICIES: Record<string, ExternalX402GetProbePolicy> = {
   [ONESOURCE_ETHEREUM_CHAIN_ID_POLICY.policyId]: ONESOURCE_ETHEREUM_CHAIN_ID_POLICY,
+  [ONESOURCE_ETHEREUM_BLOCK_NUMBER_POLICY.policyId]:
+    ONESOURCE_ETHEREUM_BLOCK_NUMBER_POLICY,
 };
 
 export function resolveExternalX402GetProbePolicy(

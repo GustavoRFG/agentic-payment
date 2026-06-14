@@ -6,10 +6,33 @@ consumed by autonomous agents. The core value is semantic correctness
 verification of purchased third-party artifacts over time.
 
 ## Current Phase
-MVP-T0C is **complete**. The first separately authorized, real, externally
-settled paid x402 probe has executed, been verified on-chain, and produced the
-first real `ProbeRun`, `EvaluationResult`, and `TrustScore`
-(`fast-track-e2e` run `run_20260614_010720`, run id `t0c_20260613_215339`).
+Phase 2 (temporal + semantically richer verification) is **complete**. A second,
+separately authorized, real, externally settled paid x402 probe executed against
+a different deterministic service (`onesource_api_block_number`), verified
+on-chain, producing a second real `ProbeRun`, `EvaluationResult`, and per-service
+`TrustScore`, plus a 2-service portfolio roll-up and per-service score history
+(`phase2-temporal-semantic` run, run id `phase2_20260613_233553`).
+
+MVP-T0C remains the immutable baseline (chain-id), preserved with a SHA-256
+manifest under `trustforge/evidence/t0c_first_paid_probe/`.
+
+## Live Proof (Phase 2 — PASS, on-chain verified)
+- Second externally settled TrustForge probe (one attempt, one payment-bearing
+  HTTP request, no retry, no fallback).
+- On-chain USDC transfer verified on Base mainnet:
+  tx `0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4`
+  (`status=success`, USDC `0x8335…2913`, `Transfer` of 1000 atomic = 0.001 USDC,
+  EIP-3009 facilitator-relayed, authorizer fingerprint `49b14ebd8f578d41`).
+- Semantically richer verification: observed Ethereum L1 block `25313317` fell
+  inside the independent before/after `eth_blockNumber` window (±5 tolerance,
+  ≥2 independent RPC confirmations); `semantic_correctness: pass`.
+- Block-number `ServiceEvalTask` evaluated: composite `1.0`, status `pass`.
+- Per-service `TrustScore`: composite `1.0`, `sample_size=1`, `confidence=low`,
+  `regression_flag=false`. Portfolio score across 2 services: composite `1.0`,
+  `total_sample_size=2`. Evidence: `trustforge/evidence/phase2_second_deterministic_probe/`.
+- New machinery: verification profiles (`ethereum_chain_id`, `ethereum_block_number`),
+  unpaid registry refresh tool, deterministic service selection, temporal score
+  history + portfolio roll-up — all unit-tested (238 passing).
 
 ## Live Proof (MVP-T0C — PASS, on-chain verified)
 - First externally settled TrustForge probe completed (one attempt, one
@@ -70,7 +93,10 @@ now detects and validates it (`real_score_created: yes`). Mock fixtures under
 `trustforge/fixtures/` still exercise the pipeline independently of the real run.
 
 ## Next Step
-Expand from one deterministic seller to the 5–8 service registry: run unpaid
-refresh probes across the registry, and add the first semantically richer paid
-`ServiceEvalTask` (e.g. block-number or tx-explainer). Do not over-harden the
-one-shot chain-id path further.
+Proceed to a separate OATP `tx_explainer` paid probe (see
+`docs/trustforge-oatp-tx-explainer-plan.md`) with a higher explicit cap, richer
+on-chain fact verifiers (deterministic + tolerance), and no LLM-judged score for
+prose quality yet. It requires a registry unpaid handshake and a separate
+explicit paid authorization. To raise confidence on the existing services,
+repeat probes on the same `service_id` to grow `sample_size` and exercise the
+temporal regression/consistency detection.

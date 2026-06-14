@@ -1,0 +1,40 @@
+{
+  "task_id": "onesource_api_block_number__ethereum_block_number_v1",
+  "service_id": "onesource_api_block_number",
+  "category": "chain_metadata",
+  "request_template": {
+    "url": "https://api.onesource.io/api/chain/block-number?network=ethereum",
+    "method": "GET",
+    "network": "eip155:8453",
+    "asset": "USDC"
+  },
+  "verifiers": [
+    {
+      "name": "ethereum_block_number_within_tolerance",
+      "weight": 0.6,
+      "dimension": "correctness",
+      "description": "Observed Ethereum L1 block number lies within the independent before/after eth_blockNumber window (±5 blocks tolerance)."
+    },
+    {
+      "name": "http_200",
+      "weight": 0.1,
+      "dimension": "reliability",
+      "description": "Paid response returned HTTP 200 with a parseable body."
+    },
+    {
+      "name": "settlement_verified",
+      "weight": 0.2,
+      "dimension": "payment_integrity",
+      "description": "On-chain USDC transfer for the payment was verified (ONCHAIN_VERIFIED)."
+    },
+    {
+      "name": "one_shot_safety",
+      "weight": 0.1,
+      "dimension": "safety",
+      "description": "Exactly one payment attempt and one payment-bearing HTTP request, with no retry and no fallback."
+    }
+  ],
+  "ground_truth_strategy": "independent_eth_blockNumber_before_after_tolerance_and_onchain_usdc_transfer",
+  "max_acceptable_latency_ms": 5000,
+  "methodology_version": "trustforge-bootstrap-v0.1.0"
+}

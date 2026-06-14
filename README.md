@@ -21,18 +21,29 @@ Validated so far:
 - bootstrap contracts, an 8-service registry, a deterministic evaluator, and a
   TrustScore consolidator (all schema-validated and unit-tested).
 
-Now proven (MVP-T0C, 2026-06-14):
+Now proven (MVP-T0C + Phase 2, 2026-06-14):
 
 - the first externally settled TrustForge payment — on-chain verified on Base
   mainnet (tx `0xb445f8c1…0cfb11`, 0.001 USDC, one attempt, no retry/fallback);
 - a real `TrustScore` from a real settled probe (composite `1.0`,
   `sample_size=1`, `confidence=low`) — evidence under
-  `trustforge/evidence/t0c_first_paid_probe/`.
+  `trustforge/evidence/t0c_first_paid_probe/`;
+- a **second** externally settled probe against a different deterministic service
+  (`onesource_api_block_number`) with semantically richer, tolerance-window
+  verification — on-chain verified (tx `0xff5ec5e2…26d4`, 0.001 USDC, observed L1
+  block inside the independent before/after window) — evidence under
+  `trustforge/evidence/phase2_second_deterministic_probe/`;
+- a 2-service portfolio TrustScore roll-up and per-service score history
+  (`trustforge/runtime/scores/`), with deterministic regression/consistency
+  detection.
 
 Not yet claimed as live proof:
 
-- continuous / multi-sample ServiceEvalTask execution (only one real probe so far);
-- temporal TrustScore ledger;
+- multi-sample ServiceEvalTask execution per service (each service has one real
+  probe so far; the temporal ledger and regression detection exist but
+  `confidence=low`);
+- a semantically rich paid OATP `tx_explainer` probe (prepared, unpaid — see
+  `docs/trustforge-oatp-tx-explainer-plan.md`);
 - public Trust API.
 
 ## Product thesis

@@ -8,10 +8,12 @@ import {
   type ExternalHandshakeInspection,
 } from "./external-x402-get-adapter";
 import {
+  verificationProfileOf,
   type ExternalX402GetProbePolicy,
 } from "./external-x402-get-policy";
 import {
   liveReadinessDependencies as readinessOnlyDependencies,
+  normalizeBlockNumber,
   normalizeChainId,
   validateInspectionForPaidPolicy,
   type ExternalPaidProbeDependencies,
@@ -25,6 +27,16 @@ const DEFAULT_ETHEREUM_RPC_SOURCES = [
   "https://ethereum-rpc.publicnode.com",
   "https://cloudflare-eth.com",
 ] as const;
+
+// cloudflare-eth.com serves eth_chainId but refuses eth_blockNumber, so the
+// block-number ground truth uses its own pool of independent RPCs that all
+// support eth_blockNumber. At least two must agree (independent confirmation).
+const DEFAULT_ETHEREUM_BLOCK_RPC_SOURCES = [
+  "https://ethereum-rpc.publicnode.com",
+  "https://eth.drpc.org",
+  "https://1rpc.io/eth",
+] as const;
+const MIN_INDEPENDENT_BLOCK_CONFIRMATIONS = 2;
 
 interface AccountLike {
   readonly address: string;
@@ -82,19 +94,15 @@ export function livePaidDependencies(
 ): ExternalPaidProbeDependencies {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const groundTruthFor = (policy: ExternalX402GetProbePolicy) =>
+    verificationProfileOf(policy) === "ethereum_block_number"
+      ? verifyEthereumBlockNumber({ fetchImpl, sources: options.rpcSources })
+      : verifyEthereumMainnetChainId({ fetchImpl, sources: options.rpcSources });
 
   return {
     inspectHandshake: (policy) => inspectExternalX402GetHandshake(policy),
-    verifyGroundTruthBefore: () =>
-      verifyEthereumMainnetChainId({
-        fetchImpl,
-        sources: options.rpcSources,
-      }),
-    verifyGroundTruthAfter: () =>
-      verifyEthereumMainnetChainId({
-        fetchImpl,
-        sources: options.rpcSources,
-      }),
+    verifyGroundTruthBefore: (policy) => groundTruthFor(policy),
+    verifyGroundTruthAfter: (policy) => groundTruthFor(policy),
     loadWallet: (policy, inspection) =>
       loadExternalBuyerWalletFromEnv({
         policy,
@@ -204,6 +212,71 @@ export async function verifyEthereumMainnetChainId(options: {
   }
 }
 
+export async function verifyEthereumBlockNumber(options: {
+  readonly fetchImpl?: typeof fetch;
+  readonly sources?: readonly string[];
+} = {}): Promise<GroundTruthResult> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const sources = options.sources?.length
+    ? options.sources
+    : DEFAULT_ETHEREUM_BLOCK_RPC_SOURCES;
+  const observed: number[] = [];
+  const errors: string[] = [];
+
+  // Per-source failures are tolerated; the check passes only when at least two
+  // independent sources return a usable block number (independent confirmation).
+  for (const source of sources) {
+    try {
+      const response = await fetchImpl(source, {
+        method: "POST",
+        redirect: "manual",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_blockNumber",
+          params: [],
+          id: 1,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const body = (await response.json()) as { result?: unknown; error?: unknown };
+      if (body.error) {
+        throw new Error(`rpc error ${JSON.stringify(body.error)}`);
+      }
+      const parsed = normalizeBlockNumber(
+        typeof body.result === "string" || typeof body.result === "number"
+          ? body.result
+          : null,
+      );
+      if (parsed === null || parsed <= 0) {
+        throw new Error(`unusable blockNumber=${String(body.result)}`);
+      }
+      observed.push(parsed);
+    } catch (error) {
+      errors.push(`${source}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (observed.length < MIN_INDEPENDENT_BLOCK_CONFIRMATIONS) {
+    return {
+      ok: false,
+      sources,
+      error: `need >= ${MIN_INDEPENDENT_BLOCK_CONFIRMATIONS} independent block confirmations, got ${observed.length}; ${errors.join("; ")}`,
+    };
+  }
+
+  // Use the most advanced confirmed node as the representative ground truth.
+  const blockNumberDecimal = Math.max(...observed);
+  return {
+    ok: true,
+    blockNumberDecimal,
+    blockNumberHex: `0x${blockNumberDecimal.toString(16)}`,
+    sources,
+  };
+}
+
 export async function performExternalX402PaidGetRequest(options: {
   readonly policy: ExternalX402GetProbePolicy;
   readonly wallet: WalletHandle;
@@ -269,6 +342,11 @@ export async function performExternalX402PaidGetRequest(options: {
     options.importModule,
   );
   const observedChainId = extractObservedChainId(parsed.value);
+  const profile = verificationProfileOf(options.policy);
+  const observedValue =
+    profile === "ethereum_block_number"
+      ? extractObservedNumeric(parsed.value)
+      : observedChainId;
 
   return {
     httpStatus: response.status,
@@ -277,6 +355,7 @@ export async function performExternalX402PaidGetRequest(options: {
     responseBodySha256,
     responseBodyParseable: parsed.parseable,
     observedChainId,
+    observedValue,
     actualAmountUsdc: options.inspection.quoteUsdc,
     network: options.inspection.network,
     asset: options.inspection.asset,
@@ -422,6 +501,35 @@ function extractObservedChainId(value: unknown): string | number | null {
   }
   for (const candidate of Object.values(record)) {
     const nested = extractObservedChainId(candidate);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+export function extractObservedNumeric(value: unknown): string | number | null {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    return /^(0x[0-9a-fA-F]+|\d+)$/.test(value.trim()) ? value.trim() : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  for (const key of [
+    "blockNumber",
+    "block_number",
+    "block",
+    "number",
+    "height",
+    "result",
+    "data",
+    "value",
+  ]) {
+    if (key in record) {
+      const nested = extractObservedNumeric(record[key]);
+      if (nested !== null) return nested;
+    }
+  }
+  for (const candidate of Object.values(record)) {
+    const nested = extractObservedNumeric(candidate);
     if (nested !== null) return nested;
   }
   return null;

@@ -1,0 +1,54 @@
+{
+  "schema_name": "trustforge_probe_run",
+  "schema_version": "0.1.0",
+  "probe_id": "onesource_block_number__phase2_20260613_233553",
+  "service_id": "onesource_api_block_number",
+  "task_ref": "onesource_api_block_number__ethereum_block_number_v1",
+  "target": {
+    "url": "https://api.onesource.io/api/chain/block-number?network=ethereum",
+    "method": "GET",
+    "network": "eip155:8453",
+    "asset": "USDC"
+  },
+  "request": {
+    "policy_id": "onesource_api_block_number_base_mainnet_v1",
+    "max_total_spend_usdc": "0.005",
+    "max_payment_attempts": 1
+  },
+  "payment": {
+    "attempt_count": 1,
+    "payment_bearing_http_request_count": 1,
+    "wallet_fingerprint": "49b14ebd8f578d41",
+    "actual_amount_usdc": "0.001",
+    "transaction_hash": "0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4",
+    "receipt_status": "captured",
+    "settlement_evidence_status": "captured",
+    "retry_used": false,
+    "fallback_used": false
+  },
+  "response": {
+    "http_status": 200,
+    "body_sha256": "c4a31d8bb8a187dc6eec7615fd960d3485a19b172afc68d65052ef1af3f451a4",
+    "latency_ms": null,
+    "observed_chain_id": null
+  },
+  "verification": {
+    "verification_profile": "ethereum_block_number",
+    "ground_truth_before": 25313317,
+    "ground_truth_after": 25313317,
+    "observed_chain_id": null,
+    "observed_value": 25313317,
+    "block_tolerance": 5,
+    "acceptance_window": [25313312, 25313322],
+    "semantic_correctness": "pass",
+    "onchain_transfer_verification": "ONCHAIN_VERIFIED"
+  },
+  "safety": {
+    "attempt_count": 1,
+    "payment_bearing_http_request_count": 1,
+    "retry_used": false,
+    "fallback_used": false,
+    "one_shot": true
+  },
+  "created_at_utc": "2026-06-14T04:25:00.000Z"
+}

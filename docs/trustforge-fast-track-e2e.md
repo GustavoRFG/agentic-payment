@@ -35,6 +35,33 @@ end-to-end.
 6. Full suite 208 passed / 1 skipped; seller/buyer/mcp builds green;
    `git diff --check` clean.
 
+## Phase 2 (temporal + semantically richer) — `phase2-temporal-semantic`
+
+`PASS_PHASE2_TEMPORAL_SCORE` (run id `phase2_20260613_233553`).
+
+- T0C preserved as immutable baseline (SHA-256 `MANIFEST.sha256` added; no T0C
+  artifact modified).
+- Unpaid refresh of all 8 registry services (`trustforge:registry:refresh-unpaid`):
+  8/8 `live_402`, all Base USDC, quote 0.001, within cap.
+- Deterministic selection chose `onesource_api_block_number` (priority #1),
+  excluding the T0C baseline and OATP.
+- New verification-profile machinery: `ethereum_chain_id` (default, T0C) and
+  `ethereum_block_number` (tolerance-window) profiles in policy / executor /
+  live-bindings / evaluator.
+- Second paid probe settled on Base mainnet, on-chain verified: tx
+  `0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4`,
+  0.001 USDC, one attempt, no retry/fallback. Observed block 25313317 inside the
+  independent before/after window → `semantic_correctness: pass`.
+- Second `ProbeRun` + `EvaluationResult` (composite 1.0) + per-service
+  `TrustScore` (`sample_size=1`, `confidence=low`, `regression_flag=false`).
+- Temporal: per-service `history.json` for both services, 2-service portfolio
+  roll-up (composite 1.0, `total_sample_size=2`), regression/consistency
+  detection (`insufficient_data` for the new single-sample service).
+- OATP `tx_explainer` prepared (unpaid/design only): plan + draft task
+  (`draft_unpaid_only`); no OATP payment performed.
+- Full suite 238 passed / 1 skipped; seller/buyer/mcp builds green; contracts
+  validate PASS; `git diff --check` clean.
+
 ## Outcome (Run 1 — historical)
 
 `PASS_BOOTSTRAP_READY_HUMAN_GATE_T0C`

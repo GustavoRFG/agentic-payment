@@ -1,0 +1,35 @@
+{
+  "schema_name": "trustforge_trust_score",
+  "schema_version": "0.1.0",
+  "service_id": "onesource_api_block_number",
+  "window": {
+    "type": "bootstrap",
+    "from_utc": "2026-06-14T07:03:46.825Z",
+    "to_utc": "2026-06-14T07:03:46.825Z"
+  },
+  "dimensions": {
+    "correctness": 1,
+    "reliability": 1,
+    "payment_integrity": 1,
+    "latency": 0,
+    "safety": 1
+  },
+  "composite": 1,
+  "sample_size": 1,
+  "confidence": "low",
+  "regression_flag": false,
+  "methodology_version": "trustforge-bootstrap-v0.1.0",
+  "commercial_disclosure": {
+    "evaluated_service_is_customer": false,
+    "relationship_type": "none",
+    "seller_funded_probes": false,
+    "seller_funded_probe_share": 0,
+    "score_methodology_unchanged": true,
+    "disclosure_notes": "Second deterministic external paid probe (block-number)."
+  },
+  "evidence_refs": [
+    "evaluation:onesource_block_number__phase2_20260613_233553__onesource_api_block_number__ethereum_block_number_v1",
+    "probe:onesource_block_number__phase2_20260613_233553"
+  ],
+  "created_at_utc": "2026-06-14T07:03:46.833Z"
+}

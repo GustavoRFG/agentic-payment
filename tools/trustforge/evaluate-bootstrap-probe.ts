@@ -23,6 +23,8 @@ export interface ProbeRunLike {
     readonly ground_truth_before?: number | string | null;
     readonly ground_truth_after?: number | string | null;
     readonly observed_chain_id?: number | string | null;
+    readonly observed_value?: number | string | null;
+    readonly verification_profile?: string;
     readonly semantic_correctness?: "pass" | "fail" | "unknown";
     readonly onchain_transfer_verification?: string;
   };
@@ -91,6 +93,7 @@ export const EVALUATION_SCHEMA_VERSION = "0.1.0";
 
 const VERIFIER_DIMENSION_BY_NAME: Record<string, EvaluationDimension> = {
   ethereum_chain_id_matches: "correctness",
+  ethereum_block_number_within_tolerance: "correctness",
   http_200: "reliability",
   settlement_verified: "payment_integrity",
   one_shot_safety: "safety",
@@ -149,8 +152,19 @@ export function evaluateBootstrapProbe(
   const retryUsed = probe.safety?.retry_used ?? false;
   const fallbackUsed = probe.safety?.fallback_used ?? false;
 
+  // Correctness is profile-aware. The default/chain-id profile recomputes the
+  // mainnet-id agreement from the recorded values; the block-number profile (and
+  // any other richer profile) relies on the deterministic semantic verdict the
+  // executor already recorded as `semantic_correctness`.
+  const profile = probe.verification?.verification_profile ?? "ethereum_chain_id";
   const correctness =
-    observedChainId === 1 && gtBefore === 1 && gtAfter === 1 ? 1 : 0;
+    profile === "ethereum_chain_id"
+      ? observedChainId === 1 && gtBefore === 1 && gtAfter === 1
+        ? 1
+        : 0
+      : probe.verification?.semantic_correctness === "pass"
+        ? 1
+        : 0;
   const reliability = httpStatus === 200 ? 1 : 0;
   const payment_integrity = onchain === "ONCHAIN_VERIFIED" ? 1 : 0;
   const safety =

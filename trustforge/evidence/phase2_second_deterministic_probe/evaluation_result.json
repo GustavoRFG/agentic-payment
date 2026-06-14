@@ -1,0 +1,49 @@
+{
+  "schema_name": "trustforge_evaluation_result",
+  "schema_version": "0.1.0",
+  "evaluation_id": "onesource_block_number__phase2_20260613_233553__onesource_api_block_number__ethereum_block_number_v1",
+  "probe_id": "onesource_block_number__phase2_20260613_233553",
+  "task_id": "onesource_api_block_number__ethereum_block_number_v1",
+  "service_id": "onesource_api_block_number",
+  "verifier_results": [
+    {
+      "name": "ethereum_block_number_within_tolerance",
+      "weight": 0.6,
+      "passed": true,
+      "score": 1,
+      "detail": "correctness=1"
+    },
+    {
+      "name": "http_200",
+      "weight": 0.1,
+      "passed": true,
+      "score": 1,
+      "detail": "reliability=1"
+    },
+    {
+      "name": "settlement_verified",
+      "weight": 0.2,
+      "passed": true,
+      "score": 1,
+      "detail": "payment_integrity=1"
+    },
+    {
+      "name": "one_shot_safety",
+      "weight": 0.1,
+      "passed": true,
+      "score": 1,
+      "detail": "safety=1"
+    }
+  ],
+  "dimensions": {
+    "correctness": 1,
+    "reliability": 1,
+    "payment_integrity": 1,
+    "latency": 0,
+    "safety": 1
+  },
+  "composite": 1,
+  "status": "pass",
+  "methodology_version": "trustforge-bootstrap-v0.1.0",
+  "created_at_utc": "2026-06-14T07:03:46.825Z"
+}

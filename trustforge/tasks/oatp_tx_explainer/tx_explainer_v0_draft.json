@@ -1,0 +1,57 @@
+{
+  "task_id": "oatp_tx_explainer__tx_explainer_v0_draft",
+  "service_id": "oatp_tx_explainer",
+  "category": "chain_metadata",
+  "status": "draft_unpaid_only",
+  "draft_notes": "DRAFT — not executable. No OATP payment in Phase 2. Requires registry unpaid handshake + a separate explicit paid authorization with a dedicated (likely higher) cap before any paid run.",
+  "request_template": {
+    "url": "https://REPLACE-WITH-OATP-TX-EXPLAINER-ENDPOINT/explain?tx=<rotating_private_fixture>",
+    "method": "GET",
+    "network": "eip155:8453",
+    "asset": "USDC"
+  },
+  "verifiers": [
+    {
+      "name": "tx_exists_and_status_match",
+      "weight": 0.3,
+      "dimension": "correctness",
+      "description": "Deterministic: tx exists on-chain and reported status matches receipt status."
+    },
+    {
+      "name": "tx_block_and_parties_match",
+      "weight": 0.2,
+      "dimension": "correctness",
+      "description": "Deterministic: block number, from, to, and token-transfer set match independent RPC ground truth."
+    },
+    {
+      "name": "tx_fee_within_tolerance",
+      "weight": 0.1,
+      "dimension": "correctness",
+      "description": "Tolerance-based: reported fee within tolerance of gasUsed*effectiveGasPrice (+ Base L1 fee)."
+    },
+    {
+      "name": "http_200",
+      "weight": 0.1,
+      "dimension": "reliability",
+      "description": "Paid response HTTP 200 with parseable body."
+    },
+    {
+      "name": "settlement_verified",
+      "weight": 0.2,
+      "dimension": "payment_integrity",
+      "description": "On-chain USDC transfer for the payment verified (ONCHAIN_VERIFIED)."
+    },
+    {
+      "name": "one_shot_safety",
+      "weight": 0.1,
+      "dimension": "safety",
+      "description": "Exactly one payment attempt and one payment-bearing HTTP request; no retry, no fallback."
+    }
+  ],
+  "unscored_outputs": [
+    "natural_language_explanation_prose (recorded as evidence; not scored in v0 — no LLM-judge yet)"
+  ],
+  "ground_truth_strategy": "independent_eth_getTransactionReceipt_and_getTransactionByHash_deterministic_plus_fee_tolerance_with_rotating_private_fixtures",
+  "max_acceptable_latency_ms": 15000,
+  "methodology_version": "trustforge-bootstrap-v0.1.0"
+}
