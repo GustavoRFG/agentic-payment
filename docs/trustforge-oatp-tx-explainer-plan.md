@@ -1,8 +1,11 @@
-# TrustForge OATP `tx_explainer` — readiness plan (UNPAID / design only)
+# TrustForge OATP `tx_explainer` — readiness plan
 
-**Status: `draft_unpaid_only`. No OATP payment is performed in Phase 2.** This
-document prepares the next, semantically richer paid probe. Executing it requires
-a *separate, explicit* authorization with a higher spend cap.
+**Status (2026-06-14):** Phase 3 pipeline implemented. OATP not found in local CDP
+Bazaar cache; **Zapper** `transaction-details` selected as `FOUND_EQUIVALENT`
+allowlisted endpoint. Unpaid 402 liveness confirmed (quote 0.001125 USDC ≤ cap).
+Paid probe requires `BUYER_PRIVATE_KEY` via safe loader + all rich gates.
+
+**Phase 2 note:** No OATP payment was performed in Phase 2 (design only).
 
 ## Target candidate
 

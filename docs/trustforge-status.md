@@ -6,6 +6,12 @@ consumed by autonomous agents. The core value is semantic correctness
 verification of purchased third-party artifacts over time.
 
 ## Current Phase
+Phase 3 (rich `tx_explainer` fact verification) is **in progress / ready**. Pipeline
+builds RPC ground truth, deterministic claim extraction, fact verification, and
+optional one-shot paid probe against allowlisted tx_explainer endpoints (Zapper
+from CDP Bazaar cache; OATP not found locally). See
+`docs/trustforge-rich-tx-explainer-methodology.md`.
+
 Phase 2 (temporal + semantically richer verification) is **complete**. A second,
 separately authorized, real, externally settled paid x402 probe executed against
 a different deterministic service (`onesource_api_block_number`), verified

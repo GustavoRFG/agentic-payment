@@ -1,0 +1,24 @@
+{
+  "chain_id": 8453,
+  "tx_hash": "0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4",
+  "exists": true,
+  "status": "success",
+  "block_number": 47310852,
+  "from": "0xb87e1a2cc2b4643f2892768e80e41167f17c5860",
+  "to": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+  "gas_used": "0x1511a",
+  "effective_gas_price": "0x989680",
+  "logs_count": 2,
+  "erc20_transfers": [
+    {
+      "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "symbol": "USDC",
+      "decimals": 6,
+      "from": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+      "to": "0x52e29e0d2aa49bfbfc548c0a9f2196f4aa51f3ea",
+      "amount_atomic": "1000",
+      "amount_decimal": "0.001"
+    }
+  ],
+  "created_at_utc": "2026-06-14T19:46:13.933Z"
+}

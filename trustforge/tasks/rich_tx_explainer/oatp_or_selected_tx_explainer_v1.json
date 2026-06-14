@@ -1,0 +1,21 @@
+{
+  "task_id": "rich_tx_explainer__base_usdc_payment_tx_v1",
+  "service_id": "zapper_tx_explainer",
+  "category": "tx_explainer",
+  "ground_truth_strategy": "base_rpc_receipt_transaction_logs_erc20_transfer",
+  "methodology_version": "trustforge-rich-tx-explainer-v0.1.0",
+  "verifiers": [
+    "tx_identity",
+    "chain_identity",
+    "execution_status",
+    "block_facts",
+    "address_facts",
+    "token_transfer_facts",
+    "amount_facts",
+    "fee_facts",
+    "one_shot_payment_safety",
+    "onchain_settlement"
+  ],
+  "max_acceptable_latency_ms": 30000,
+  "status": "ready_unpaid_or_paid"
+}

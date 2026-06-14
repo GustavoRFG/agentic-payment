@@ -23,6 +23,8 @@
     "trustforge:evaluate:bootstrap": "npm --prefix seller-api exec -- tsx tools/run-trustforge-evaluate-bootstrap.ts",
     "trustforge:score:bootstrap": "npm --prefix seller-api exec -- tsx tools/run-trustforge-score-bootstrap.ts",
     "trustforge:registry:refresh-unpaid": "npm --prefix seller-api exec -- tsx tools/run-trustforge-registry-refresh-unpaid.ts",
+    "trustforge:tx:ground-truth": "npm --prefix seller-api exec -- tsx tools/run-trustforge-build-tx-ground-truth.ts",
+    "trustforge:rich-tx-explainer": "npm --prefix seller-api exec -- tsx tools/run-trustforge-rich-tx-explainer.ts",
     "mcp:build": "npm --prefix mcp-gateway run build",
     "mcp:dev": "npm --prefix mcp-gateway run dev",
     "mcp:smoke": "npm --prefix seller-api exec -- tsx tools/smoke-local-mcp-gateway.ts",
