@@ -53,6 +53,15 @@ function normalizeAmount(value: string): string {
   return value.replace(/\s*(USDC|usdc|USD)\s*/gi, "").trim();
 }
 
+function isVerifiableAmountClaim(value: string): boolean {
+  const normalized = normalizeAmount(value);
+  if (!normalized) return false;
+  if (/^0x[0-9a-fA-F]+$/i.test(normalized)) return false;
+  if (/USDC|USD/i.test(value)) return true;
+  if (normalized.includes(".")) return true;
+  return false;
+}
+
 export function verifyTxExplainerFacts(input: {
   readonly groundTruth: TxGroundTruth;
   readonly claims: TxExplainerClaims;
@@ -169,16 +178,25 @@ export function verifyTxExplainerFacts(input: {
   const expectedAmounts = usdcTransfers.map((t) => t.amount_decimal);
   if (expectedAmounts.length === 0) {
     amount_facts = claims.amount_claims.length === 0 ? 0.5 : 0;
-  } else if (claims.amount_claims.length === 0) {
-    missing_core_facts.push("amount");
-    amount_facts = 0.5;
   } else {
-    const normalizedExpected = expectedAmounts.map(normalizeAmount);
-    const normalizedClaims = claims.amount_claims.map(normalizeAmount);
-    const ok = normalizedClaims.some((c) => normalizedExpected.includes(c));
-    amount_facts = ok ? 1 : 0;
-    if (!ok) wrong_claims.push(...claims.amount_claims.map((a) => `amount:${a}`));
-    else matched_claims.push(`amount:${expectedAmounts[0]}`);
+    const verifiableAmountClaims = claims.amount_claims.filter(isVerifiableAmountClaim);
+    const noiseAmountClaims = claims.amount_claims.filter((claim) => !isVerifiableAmountClaim(claim));
+    noiseAmountClaims.forEach((claim) => unverifiable_claims.push(`amount:${claim}`));
+
+    if (verifiableAmountClaims.length === 0) {
+      missing_core_facts.push("amount");
+      amount_facts = 0.5;
+    } else {
+      const normalizedExpected = expectedAmounts.map(normalizeAmount);
+      const normalizedClaims = verifiableAmountClaims.map(normalizeAmount);
+      const ok = normalizedClaims.some((c) => normalizedExpected.includes(c));
+      amount_facts = ok ? 1 : 0;
+      if (!ok) {
+        wrong_claims.push(...verifiableAmountClaims.map((a) => `amount:${a}`));
+      } else {
+        matched_claims.push(`amount:${expectedAmounts[0]}`);
+      }
+    }
   }
 
   let fee_facts = 1;

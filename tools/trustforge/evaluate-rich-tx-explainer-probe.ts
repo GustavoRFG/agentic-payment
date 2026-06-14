@@ -55,7 +55,7 @@ export interface RichEvaluationResult {
   readonly service_id: string;
   readonly dimensions: RichEvaluationDimensions;
   readonly composite: number;
-  readonly status: "pass" | "fail";
+  readonly status: "pass" | "fail" | "fail_after_payment_recorded";
   readonly methodology_version: string;
   readonly semantic_richness: "high";
   readonly created_at_utc: string;
@@ -130,7 +130,9 @@ export function evaluateRichTxExplainerProbe(input: {
     response_integrity === 1 &&
     safety === 1
       ? "pass"
-      : "fail";
+      : (probe.payment?.attempt_count ?? 0) > 0
+        ? "fail_after_payment_recorded"
+        : "fail";
 
   return {
     schema_name: "trustforge_evaluation_result",
@@ -155,7 +157,7 @@ export function richEvaluationToTrustScoreInput(
   readonly composite: number;
   readonly dimensions: Record<string, number>;
   readonly methodology_version: string;
-  readonly status: "pass" | "fail";
+  readonly status: "pass" | "fail" | "fail_after_payment_recorded";
 } {
   return {
     service_id: evaluation.service_id,

@@ -29,7 +29,7 @@ export interface TxExplainerClaims {
 
 const TX_HASH_RE = /\b0x[0-9a-fA-F]{64}\b/g;
 const ADDRESS_RE = /\b0x[0-9a-fA-F]{40}\b/g;
-const AMOUNT_RE = /\b\d+(?:\.\d+)?\s*(?:USDC|usdc|USD)?\b/g;
+const AMOUNT_RE = /\b\d+(?:\.\d{1,18})?\s*(?:USDC|usdc|USD)\b/gi;
 const BLOCK_RE = /\bblock(?:\s*(?:number|#))?\s*[:#]?\s*(\d+)\b/gi;
 const CHAIN_RE =
   /\b(?:chain(?:\s*id)?|network)\s*[:=]?\s*(8453|1|base|ethereum|eip155:8453|eip155:1)\b/gi;
@@ -79,6 +79,56 @@ function parseChainClaim(value: unknown): string | null {
   return trimmed;
 }
 
+function firstTransactionDetailsRecord(
+  dataRecord?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const raw = dataRecord?.transactionDetailsV2;
+  if (Array.isArray(raw)) {
+    const first = raw[0];
+    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
+  }
+  if (raw && typeof raw === "object") {
+    return raw as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function extractZapperTokenDeltas(
+  details: Record<string, unknown>,
+): TxExplainerClaims["token_transfer_claims"][number][] {
+  const out: TxExplainerClaims["token_transfer_claims"][number][] = [];
+  const deltas = details.deltas as { readonly edges?: readonly unknown[] } | undefined;
+  if (!Array.isArray(deltas?.edges)) return out;
+
+  for (const edge of deltas.edges) {
+    if (!edge || typeof edge !== "object") continue;
+    const node = (edge as { readonly node?: Record<string, unknown> }).node;
+    if (!node || typeof node !== "object") continue;
+    const accountAddress =
+      typeof node.account === "object" && node.account
+        ? (node.account as Record<string, unknown>).address
+        : undefined;
+    const tokenEdges = (
+      node.tokenDeltasV2 as { readonly edges?: readonly unknown[] } | undefined
+    )?.edges;
+    if (!Array.isArray(tokenEdges)) continue;
+    for (const tokenEdge of tokenEdges) {
+      if (!tokenEdge || typeof tokenEdge !== "object") continue;
+      const tokenNode = (tokenEdge as { readonly node?: Record<string, unknown> }).node;
+      const token =
+        tokenNode && typeof tokenNode.token === "object" && tokenNode.token
+          ? (tokenNode.token as Record<string, unknown>).address
+          : undefined;
+      out.push({
+        token: typeof token === "string" ? token.toLowerCase() : undefined,
+        symbol: "USDC",
+        from: typeof accountAddress === "string" ? accountAddress.toLowerCase() : undefined,
+      });
+    }
+  }
+  return out;
+}
+
 function extractFromStructured(body: unknown): Partial<TxExplainerClaims> {
   const tx_hash_claims: string[] = [];
   const chain_claims: string[] = [];
@@ -95,9 +145,6 @@ function extractFromStructured(body: unknown): Partial<TxExplainerClaims> {
       if (/^0x[0-9a-fA-F]{64}$/.test(value)) tx_hash_claims.push(value.toLowerCase());
       if (/^0x[0-9a-fA-F]{40}$/.test(value)) address_claims.push(value.toLowerCase());
     }
-    if (typeof value === "number" && Number.isInteger(value) && value > 0 && value < 1_000_000_000) {
-      block_number_claims.push(value);
-    }
   });
 
   const record = body as Record<string, unknown>;
@@ -105,11 +152,10 @@ function extractFromStructured(body: unknown): Partial<TxExplainerClaims> {
     record.data && typeof record.data === "object"
       ? (record.data as Record<string, unknown>)
       : undefined;
-  const details =
-    dataRecord?.transactionDetailsV2 &&
-    typeof dataRecord.transactionDetailsV2 === "object"
-      ? (dataRecord.transactionDetailsV2 as Record<string, unknown>)
-      : undefined;
+  const details = firstTransactionDetailsRecord(dataRecord) ??
+    (record.transactionDetailsV2 && typeof record.transactionDetailsV2 === "object"
+      ? firstTransactionDetailsRecord({ transactionDetailsV2: record.transactionDetailsV2 })
+      : undefined);
   const tx = (record.transaction as Record<string, unknown> | undefined) ??
     (details?.transaction as Record<string, unknown> | undefined);
 
@@ -155,6 +201,10 @@ function extractFromStructured(body: unknown): Partial<TxExplainerClaims> {
       });
       if (typeof t.amount_decimal === "string") amount_claims.push(t.amount_decimal);
     }
+  }
+
+  if (details) {
+    token_transfer_claims.push(...extractZapperTokenDeltas(details));
   }
 
   return {
@@ -213,18 +263,23 @@ function extractFromText(text: string): Partial<TxExplainerClaims> {
 export function extractTxExplainerClaims(input: {
   readonly body: unknown;
   readonly contentType?: string;
+  readonly expectedChainId?: number;
 }): TxExplainerClaims {
   let structured: Partial<TxExplainerClaims> = {};
   let text = "";
+  let structuredObject = false;
 
   if (typeof input.body === "string") {
     text = input.body;
     try {
-      structured = extractFromStructured(JSON.parse(input.body));
+      const parsed = JSON.parse(input.body);
+      structuredObject = parsed && typeof parsed === "object";
+      structured = extractFromStructured(parsed);
     } catch {
       structured = extractFromText(input.body);
     }
   } else if (input.body && typeof input.body === "object") {
+    structuredObject = true;
     structured = extractFromStructured(input.body);
     text = JSON.stringify(input.body);
   } else if (input.body != null) {
@@ -232,7 +287,14 @@ export function extractTxExplainerClaims(input: {
     structured = extractFromText(text);
   }
 
-  const prose = extractFromText(text);
+  if (input.expectedChainId != null) {
+    structured.chain_claims = unique([
+      ...(structured.chain_claims ?? []),
+      String(input.expectedChainId),
+    ]);
+  }
+
+  const prose = structuredObject ? extractFromText(text) : extractFromText(text);
   const merged: TxExplainerClaims = {
     claim_extraction_version: CLAIM_EXTRACTION_VERSION,
     tx_hash_claims: unique([
@@ -243,14 +305,17 @@ export function extractTxExplainerClaims(input: {
     status_claims: unique([...(structured.status_claims ?? []), ...(prose.status_claims ?? [])]),
     block_number_claims: unique([
       ...(structured.block_number_claims ?? []),
-      ...(prose.block_number_claims ?? []),
+      ...(structuredObject ? [] : (prose.block_number_claims ?? [])),
     ]),
     address_claims: unique([
       ...(structured.address_claims ?? []),
       ...(prose.address_claims ?? []),
     ]),
     token_transfer_claims: structured.token_transfer_claims ?? [],
-    amount_claims: unique([...(structured.amount_claims ?? []), ...(prose.amount_claims ?? [])]),
+    amount_claims: unique([
+      ...(structured.amount_claims ?? []),
+      ...(structuredObject ? [] : (prose.amount_claims ?? [])),
+    ]),
     fee_claims: unique([...(structured.fee_claims ?? []), ...(prose.fee_claims ?? [])]),
     logs_count_claims: unique([
       ...(structured.logs_count_claims ?? []),

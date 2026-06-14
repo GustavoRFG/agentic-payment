@@ -1,0 +1,101 @@
+{
+  "content_type": "application/octet-stream",
+  "body": {
+    "data": {
+      "transactionDetailsV2": [
+        {
+          "transaction": {
+            "hash": "0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4",
+            "nonce": 4809,
+            "gasPrice": "10000000",
+            "gas": 95945,
+            "blockNumber": 47310852,
+            "timestamp": 1781411051000,
+            "fromUser": {
+              "address": "0xb87e1a2cc2b4643f2892768e80e41167f17c5860",
+              "displayName": {
+                "value": "0xb87e...5860"
+              },
+              "farcasterProfile": null
+            },
+            "toUser": {
+              "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "displayName": {
+                "value": "0x8335...2913"
+              },
+              "farcasterProfile": null
+            }
+          },
+          "app": {
+            "displayName": "Circle",
+            "imgUrl": "https://storage.googleapis.com/zapper-fi-assets/apps%2Fcircle.png"
+          },
+          "interpretation": {
+            "processedDescription": "Did something with 0x8335...2913",
+            "description": "Did something with $1",
+            "descriptionDisplayItems": [
+              {
+                "type": "actor",
+                "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "account": {
+                  "displayName": {
+                    "value": "0x8335...2913"
+                  }
+                }
+              }
+            ]
+          },
+          "deltas": {
+            "edges": [
+              {
+                "node": {
+                  "account": {
+                    "address": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1"
+                  },
+                  "nftDeltasV2": {
+                    "edges": []
+                  },
+                  "tokenDeltasV2": {
+                    "edges": [
+                      {
+                        "node": {
+                          "token": {
+                            "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                            "imageUrlV2": "https://storage.googleapis.com/zapper-fi-assets/tokens/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.png"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "node": {
+                  "account": {
+                    "address": "0x52e29e0d2aa49bfbfc548c0a9f2196f4aa51f3ea"
+                  },
+                  "nftDeltasV2": {
+                    "edges": []
+                  },
+                  "tokenDeltasV2": {
+                    "edges": [
+                      {
+                        "node": {
+                          "token": {
+                            "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                            "imageUrlV2": "https://storage.googleapis.com/zapper-fi-assets/tokens/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.png"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "body_sha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09"
+}
