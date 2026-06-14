@@ -78,9 +78,12 @@ Do not create new TrustForge scratch directories directly under `D:\`.
 - no public score publication before methodology and legal review;
 - no broad refactor without need.
 
-## Bootstrap pipeline status (fast-track-e2e, 2026-06-13)
+## Bootstrap pipeline status (fast-track-e2e)
 The deterministic registry, JSON Schema contracts, evaluator, and TrustScore
-consolidator are implemented and tested ahead of T0C so the first paid run is
-short. This is scaffolding only: no real `TrustScore` is created until a real,
-authorized, on-chain-verified paid probe exists (`REAL_SCORE_NOT_CREATED`).
-Handshake success and mock fixtures are never presented as live settlement.
+consolidator are implemented and tested. As of run `run_20260614_010720`
+(2026-06-14), MVP-T0C is **complete**: one authorized, on-chain-verified paid
+probe (tx `0xb445f8c1…0cfb11`, 0.001 USDC) produced the first real `ProbeRun`,
+`EvaluationResult`, and `TrustScore` (composite `1.0`, `sample_size=1`,
+`confidence=low`), committed under `trustforge/evidence/t0c_first_paid_probe/`.
+Mock fixtures still exercise the pipeline independently and are never presented
+as live settlement.

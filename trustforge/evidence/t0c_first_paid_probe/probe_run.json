@@ -1,0 +1,50 @@
+{
+  "schema_name": "trustforge_probe_run",
+  "schema_version": "0.1.0",
+  "probe_id": "onesource_chain_id__t0c_20260613_215339",
+  "service_id": "onesource_api_chain_id",
+  "task_ref": "onesource_api_chain_id__ethereum_chain_id_v1",
+  "target": {
+    "url": "https://api.onesource.io/api/chain/chain-id?network=ethereum",
+    "method": "GET",
+    "network": "eip155:8453",
+    "asset": "USDC"
+  },
+  "request": {
+    "policy_id": "onesource_api_chain_id_base_mainnet_v1",
+    "max_total_spend_usdc": "0.005",
+    "max_payment_attempts": 1
+  },
+  "payment": {
+    "attempt_count": 1,
+    "payment_bearing_http_request_count": 1,
+    "wallet_fingerprint": "49b14ebd8f578d41",
+    "actual_amount_usdc": "0.001",
+    "transaction_hash": "0xb445f8c1091a55ac35d23db38371a0e0d0bbb0bf2564e3ddf9843abea70cfb11",
+    "receipt_status": "captured",
+    "settlement_evidence_status": "captured",
+    "retry_used": false,
+    "fallback_used": false
+  },
+  "response": {
+    "http_status": 200,
+    "body_sha256": "b543c60caf3f85663228c116e0884d49091b72f3f78dab825b04ff1db57a86d3",
+    "latency_ms": null,
+    "observed_chain_id": "0x1"
+  },
+  "verification": {
+    "ground_truth_before": 1,
+    "ground_truth_after": 1,
+    "observed_chain_id": 1,
+    "semantic_correctness": "pass",
+    "onchain_transfer_verification": "ONCHAIN_VERIFIED"
+  },
+  "safety": {
+    "attempt_count": 1,
+    "payment_bearing_http_request_count": 1,
+    "retry_used": false,
+    "fallback_used": false,
+    "one_shot": true
+  },
+  "created_at_utc": "2026-06-14T01:12:16.567Z"
+}

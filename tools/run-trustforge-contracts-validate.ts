@@ -5,6 +5,7 @@
  * dependency-free. Exits non-zero on any contract failure.
  */
 
+import { existsSync } from "node:fs";
 import {
   CONTRACT_FILES,
   loadAllSchemas,
@@ -104,6 +105,26 @@ function main(): void {
     }),
   );
 
+  // Real artifacts: present only after a real T0C paid probe has settled on-chain.
+  const realScorePath = repoPath(
+    "trustforge",
+    "runtime",
+    "scores",
+    "onesource_api_chain_id.json",
+  );
+  const realScoreExists = existsSync(realScorePath);
+  if (realScoreExists) {
+    const realScore = readJson(realScorePath) as { sample_size?: number };
+    checks.push(
+      check("real_trust_score_valid", () => {
+        expectValid("trust_score", realScore);
+        if (!realScore.sample_size || realScore.sample_size < 1) {
+          throw new Error("real trust score must have sample_size >= 1");
+        }
+      }),
+    );
+  }
+
   const allOk = checks.every((c) => c.ok);
   console.log("RESULT:", allOk ? "PASS" : "FAIL");
   console.log(`contracts_dir: ${repoPath("contracts", "trustforge")}`);
@@ -111,7 +132,11 @@ function main(): void {
   for (const c of checks) {
     console.log(`${c.ok ? "PASS" : "FAIL"} ${c.name}${c.ok ? "" : ` -> ${c.detail}`}`);
   }
-  console.log("real_score_created: no (REAL_SCORE_NOT_CREATED — mock fixtures only)");
+  console.log(
+    realScoreExists
+      ? `real_score_created: yes (${realScorePath})`
+      : "real_score_created: no (REAL_SCORE_NOT_CREATED — mock fixtures only)",
+  );
   if (!allOk) {
     process.exitCode = 1;
   }

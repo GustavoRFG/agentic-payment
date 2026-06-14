@@ -39,13 +39,19 @@ contracts/trustforge/*.schema.json          # JSON Schema contracts
 trustforge/registry/services.bootstrap.json # 8-service bootstrap registry
 trustforge/tasks/onesource_api_chain_id/    # ServiceEvalTask definitions
 trustforge/fixtures/                         # MOCK probe/eval/score fixtures only
+trustforge/evidence/t0c_first_paid_probe/    # REAL T0C probe/eval/score + on-chain proof
 tools/trustforge/json-schema-lite.ts         # dependency-free validator
 tools/trustforge/contracts.ts                # contract loader/validator
 tools/trustforge/evaluate-bootstrap-probe.ts # deterministic evaluator
 tools/trustforge/consolidate-bootstrap-trust-score.ts
 ```
 
+Real per-run outputs are written locally to `trustforge/runtime/` (git-ignored).
+The committed, sanitized copies of the first real settlement live under
+`trustforge/evidence/t0c_first_paid_probe/` (`probe_run.json`,
+`evaluation_result.json`, `trust_score.json`, `onchain_verification.md`).
+
 The `fast-track-e2e` run (`D:\trustforge\artifacts\runs\fast-track-e2e\run_<ts>`)
-holds the run log, snapshots, governance/secret/binding reports, T0C preflight
-(human-gated, not executed), contracts validation, tests, builds, and the final
-report.
+holds the run log, snapshots, governance/secret/binding reports, the T0C paid
+execution and on-chain verification, contracts validation, tests, builds, and the
+final report. Run `run_20260614_010720` is the first real paid T0C smoke (PASS).

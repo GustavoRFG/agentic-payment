@@ -21,11 +21,17 @@ Validated so far:
 - bootstrap contracts, an 8-service registry, a deterministic evaluator, and a
   TrustScore consolidator (all schema-validated and unit-tested).
 
+Now proven (MVP-T0C, 2026-06-14):
+
+- the first externally settled TrustForge payment — on-chain verified on Base
+  mainnet (tx `0xb445f8c1…0cfb11`, 0.001 USDC, one attempt, no retry/fallback);
+- a real `TrustScore` from a real settled probe (composite `1.0`,
+  `sample_size=1`, `confidence=low`) — evidence under
+  `trustforge/evidence/t0c_first_paid_probe/`.
+
 Not yet claimed as live proof:
 
-- the first externally settled TrustForge payment (remains human-gated);
-- a real `TrustScore` from a real settled probe (only mock fixtures exist);
-- continuous ServiceEvalTask execution;
+- continuous / multi-sample ServiceEvalTask execution (only one real probe so far);
 - temporal TrustScore ledger;
 - public Trust API.
 
