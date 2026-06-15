@@ -3,6 +3,7 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execSync } from "node:child_process";
@@ -406,9 +407,18 @@ export async function runRichTxExplainerPhase3(options: {
       body_sha256: paidResponse.responseBodySha256,
       payment_metadata: {
         payment_response_header_present: paymentResponseHeaderPresent,
+        payment_response_header_sha256: paymentHeader
+          ? createHash("sha256").update(paymentHeader, "utf8").digest("hex")
+          : null,
         settlement_transaction_hash: paymentTxHash,
         quote_usdc: handshake.quoteUsdc,
+        quote_atomic: handshake.amountAtomic,
+        attempt_id: gate.runId ?? null,
+        wallet_fingerprint: walletFingerprint,
+        http_status: paidResponse.httpStatus,
       },
+      settlement_evidence: paidResponse.settlementEvidence,
+      payment_evidence_summary: paidResponse.paymentEvidence,
     });
 
     onchainPayment = await verifyBaseUsdcPayment({

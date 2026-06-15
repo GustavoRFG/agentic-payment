@@ -1,14 +1,36 @@
 {
   "schema_name": "trustforge_evaluation_result",
   "schema_version": "0.2.0",
-  "evaluation_id": "zapper_tx_explainer__fail_after_payment_recorded__diagnostic",
-  "probe_id": "zapper_tx_explainer__aggregated_failures",
+  "evaluation_id": "zapper_tx_explainer__phase3b_fail_after_payment_recorded",
+  "probe_id": "zapper_tx_explainer__phase3b_offline_replay",
   "task_id": "rich_tx_explainer__base_usdc_payment_tx_v1",
   "service_id": "zapper_tx_explainer",
+  "dimensions": {
+    "payment_integrity": 0,
+    "response_integrity": 1,
+    "tx_identity": 1,
+    "chain_identity": 1,
+    "execution_status": 0,
+    "block_facts": 1,
+    "address_facts": 1,
+    "token_transfer_facts": 1,
+    "amount_facts": 0,
+    "fee_facts": 1,
+    "safety": 0
+  },
+  "composite": 0.65,
   "status": "fail_after_payment_recorded",
-  "composite": 0.75,
-  "semantic_richness": "high",
   "methodology_version": "trustforge-rich-tx-explainer-v0.1.0",
-  "notes": "Aggregated offline diagnostic over saved runs; no passing TrustScore; settlement evidence absent.",
-  "created_at_utc": "2026-06-14T21:53:53.841Z"
+  "semantic_richness": "high",
+  "created_at_utc": "2026-06-15T01:46:39.780Z",
+  "notes": "Settlement initially missing in saved artifacts; chain reconciliation applied in Phase 3B. Seller response incomplete under v0.1 rich methodology. No passing TrustScore.",
+  "reconciliation": {
+    "settlement_reconciliation_status": "SETTLEMENT_FOUND_BY_CHAIN_RECONCILIATION",
+    "reconciled_payment_count": 2,
+    "reconciled_total_usdc": "0.00225",
+    "reconciled_tx_hashes": [
+      "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+      "0x8f5edd95fb36ae7bcc129dc600ec7815db5d979ffe6cd7088b711ff94a0c2b86"
+    ]
+  }
 }

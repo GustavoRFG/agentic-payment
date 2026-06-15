@@ -1,0 +1,37 @@
+{
+  "wallet": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+  "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "from_block": 47310352,
+  "to_block": "latest",
+  "events": [
+    {
+      "tx_hash": "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+      "block_number": 47342247,
+      "block_timestamp_utc": "2026-06-14T21:50:41.000Z",
+      "from": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+      "to": "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+      "amount_atomic": "1125",
+      "amount_decimal": "0.001125",
+      "log_index": 92,
+      "transaction_index": 43,
+      "candidate_match": "zapper_rich_tx_explainer"
+    },
+    {
+      "tx_hash": "0x8f5edd95fb36ae7bcc129dc600ec7815db5d979ffe6cd7088b711ff94a0c2b86",
+      "block_number": 47342251,
+      "block_timestamp_utc": "2026-06-14T21:50:49.000Z",
+      "from": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+      "to": "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+      "amount_atomic": "1125",
+      "amount_decimal": "0.001125",
+      "log_index": 78,
+      "transaction_index": 60,
+      "candidate_match": "zapper_rich_tx_explainer"
+    }
+  ],
+  "zapper_candidate_count": 2,
+  "zapper_candidate_total_usdc": "0.00225",
+  "settlement_reconciliation_status": "SETTLEMENT_FOUND_BY_CHAIN_RECONCILIATION",
+  "reconciled_payment_count": 2,
+  "reconciled_total_usdc": "0.00225"
+}

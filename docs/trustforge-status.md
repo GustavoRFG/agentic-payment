@@ -6,10 +6,14 @@ consumed by autonomous agents. The core value is semantic correctness
 verification of purchased third-party artifacts over time.
 
 ## Current Phase
-Phase 3 (rich `tx_explainer` fact verification) is **in progress / ready**. Pipeline
-builds RPC ground truth, deterministic claim extraction, fact verification, and
-optional one-shot paid probe against allowlisted tx_explainer endpoints (Zapper
-from CDP Bazaar cache; OATP not found locally). See
+Phase 3B (rich `tx_explainer` settlement reconciliation) is **complete (no-payment)**.
+Three Phase 3 paid attempts saved Zapper responses but missed settlement hashes.
+Read-only chain reconciliation found **two** `0.001125 USDC` settlements; evaluation
+remains `fail_after_payment_recorded` / incomplete semantic status with **no**
+passing TrustScore. See `docs/trustforge-phase3b-reconciliation.md`.
+
+Phase 3 (rich `tx_explainer` fact verification) reached paid attempts with
+verifier fixes in `ef10841`; diagnostics in
 `docs/trustforge-rich-tx-explainer-methodology.md`.
 
 Phase 2 (temporal + semantically richer verification) is **complete**. A second,

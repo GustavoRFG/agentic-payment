@@ -1,0 +1,39 @@
+{
+  "attempts": [
+    {
+      "run_dir": "D:\\trustforge\\artifacts\\runs\\rich-tx-explainer\\run_20260614_214953",
+      "payment_bearing_http_request_count": 1,
+      "seller_response_captured": true,
+      "seller_response_body_sha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09",
+      "saved_transaction_hash": null,
+      "mapped_settlement_tx_hash": "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+      "mapped_settlement_confidence": "medium",
+      "amount_usdc": "0.001125"
+    },
+    {
+      "run_dir": "D:\\trustforge\\artifacts\\runs\\rich-tx-explainer\\run_20260614_215030",
+      "payment_bearing_http_request_count": 1,
+      "seller_response_captured": true,
+      "seller_response_body_sha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09",
+      "saved_transaction_hash": null,
+      "mapped_settlement_tx_hash": "0x8f5edd95fb36ae7bcc129dc600ec7815db5d979ffe6cd7088b711ff94a0c2b86",
+      "mapped_settlement_confidence": "medium",
+      "amount_usdc": "0.001125"
+    },
+    {
+      "run_dir": "D:\\trustforge\\artifacts\\runs\\rich-tx-explainer\\run_20260614_215039",
+      "payment_bearing_http_request_count": 1,
+      "seller_response_captured": true,
+      "seller_response_body_sha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09",
+      "saved_transaction_hash": null,
+      "mapped_settlement_tx_hash": null,
+      "mapped_settlement_confidence": "unknown",
+      "amount_usdc": null
+    }
+  ],
+  "unmapped_settlements": [],
+  "unmapped_attempts": [
+    "D:\\trustforge\\artifacts\\runs\\rich-tx-explainer\\run_20260614_215039"
+  ],
+  "attempt_mapping_status": "AMBIGUOUS"
+}

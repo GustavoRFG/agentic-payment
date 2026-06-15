@@ -41,7 +41,16 @@ BUYER_PRIVATE_KEY=0x...
 ```powershell
 npm run trustforge:tx:ground-truth -- --tx <hash> --chain base --out <path>
 npm run trustforge:rich-tx-explainer -- [--execute-paid]
+npm run trustforge:rich-tx-explainer:diagnostics
+npm run trustforge:rich-tx-explainer:phase3b
+npm run trustforge:rich-tx-explainer:reconcile-settlements -- --wallet <addr> --from-block <n>
 ```
+
+## Phase 3B settlement reconciliation
+
+The rich Zapper target did **not** receive a passing TrustScore. Saved runs missed
+settlement tx hashes; Phase 3B reconciles outbound USDC `Transfer` logs on Base.
+See `docs/trustforge-phase3b-reconciliation.md`.
 
 ## Confidence
 

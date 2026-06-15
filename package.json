@@ -27,6 +27,8 @@
     "trustforge:rich-tx-explainer": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-rich-tx-explainer.ts",
     "trustforge:rich-tx-explainer:paid": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-rich-tx-explainer.ts --execute-paid",
     "trustforge:rich-tx-explainer:diagnostics": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-rich-tx-explainer-diagnostics.ts",
+    "trustforge:rich-tx-explainer:phase3b": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-rich-tx-explainer-phase3b.ts",
+    "trustforge:rich-tx-explainer:reconcile-settlements": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-reconcile-settlements.ts",
     "mcp:build": "npm --prefix mcp-gateway run build",
     "mcp:dev": "npm --prefix mcp-gateway run dev",
     "mcp:smoke": "npm --prefix seller-api exec -- tsx tools/smoke-local-mcp-gateway.ts",

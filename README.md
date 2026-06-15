@@ -44,6 +44,9 @@ Not yet claimed as live proof:
   `confidence=low`);
 - a semantically rich paid OATP `tx_explainer` probe (prepared, unpaid — see
   `docs/trustforge-oatp-tx-explainer-plan.md`);
+- Phase 3 Zapper rich tx_explainer received **no passing TrustScore**; two
+  on-chain `0.001125 USDC` settlements were reconciled read-only in Phase 3B
+  (`docs/trustforge-phase3b-reconciliation.md`);
 - public Trust API.
 
 ## Product thesis
