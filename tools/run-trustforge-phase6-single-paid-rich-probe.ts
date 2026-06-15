@@ -36,9 +36,15 @@ import {
   settlementEvidenceToV1,
 } from "./trustforge/settlement-first-v1";
 import {
-  checkPhase6PaidInvariants,
+  checkPhase6PaidInvariantsFromLegacy,
   allPhase6PaidInvariantsPassed,
 } from "./trustforge/phase6-paid-invariants";
+import {
+  authorizationLedgerPath,
+  hashAuthorizationContent,
+  reserveAuthorizationAttempt,
+  AUTHORIZATION_ALREADY_CONSUMED,
+} from "./trustforge/authorization-consumption-ledger";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -149,14 +155,11 @@ export async function runPhase6SinglePaidRichProbe(
     throw new Error("COMPLETED_HUMAN_REJECTED_PAID_PROBE");
   }
 
-  const env = options.env ?? loadEnvForPaidProbe();
-  const buyerKeyPresent = Boolean(env.BUYER_PRIVATE_KEY?.trim());
-  if (!buyerKeyPresent) {
-    throw new Error(
-      "BLOCKED_WALLET_NOT_CONFIGURED: set BUYER_PRIVATE_KEY in environment or D:\\trustforge\\.env",
-    );
-  }
+  const authContent = await readFile(authPath, "utf8");
+  const authorizationHash = hashAuthorizationContent(authContent);
+  const ledgerPath = authorizationLedgerPath(phase5RunDir);
 
+  const env = options.env ?? loadEnvForPaidProbe();
   const commitBefore = gitHash();
   const runId = `phase6_${timestampDir()}`;
   const runDir =
@@ -164,10 +167,38 @@ export async function runPhase6SinglePaidRichProbe(
     join(WORKSPACE, "artifacts", "runs", "phase6-single-paid-rich-probe", runId);
   await mkdir(runDir, { recursive: true });
 
+  if (!options.finalizeOnly) {
+    try {
+      await reserveAuthorizationAttempt({
+        ledgerPath,
+        authorizationHash,
+        authorizationPath: authPath,
+        provider: auth.provider,
+        serviceId: auth.service_id,
+        endpoint: auth.endpoint,
+        maxPaymentAttempts: auth.max_payment_attempts,
+        attemptId: `${runId}__attempt_1`,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === AUTHORIZATION_ALREADY_CONSUMED) {
+        throw new Error(AUTHORIZATION_ALREADY_CONSUMED);
+      }
+      throw error;
+    }
+  }
+
+  const buyerKeyPresent = Boolean(env.BUYER_PRIVATE_KEY?.trim());
+  if (!options.finalizeOnly && !buyerKeyPresent) {
+    throw new Error(
+      "BLOCKED_WALLET_NOT_CONFIGURED: set BUYER_PRIVATE_KEY in environment or D:\\trustforge\\.env",
+    );
+  }
+
   await writeJson(join(runDir, "01_run_state.json"), {
     phase: "phase6_single_paid_rich_probe",
     status: "running",
     human_authorization: join(phase5RunDir, "human_payment_authorization.json"),
+    authorization_consumption_ledger: ledgerPath,
     phase5_run: phase5RunDir,
     commit_before: commitBefore,
     strict_one_payment: true,
@@ -227,6 +258,12 @@ export async function finalizePhase6Run(input: {
   const paymentBearingCount = Number(
     richResult.match(/payment_bearing_http_request_count: (\d+)/)?.[1] ?? "0",
   );
+  const paymentHeaderSentLine = richResult.match(/payment_header_sent: (\S+)/)?.[1];
+  const paymentHeaderSent =
+    paymentHeaderSentLine === "yes" || paymentAttempted;
+  const paid402CapturePresent = existsSync(
+    join(richRunDir, "paid_402_response_sanitized.json"),
+  );
   const walletLoaded = richResult.includes("wallet_loaded_live: yes");
 
   const sellerResponse = existsSync(join(richRunDir, "10_seller_response.json"))
@@ -264,8 +301,9 @@ export async function finalizePhase6Run(input: {
     sellerResponse?.payment_metadata?.settlement_transaction_hash ??
     onchainParsed?.transaction_hash ??
     null;
-  const actualSpend =
-    onchainParsed?.amount_decimal ?? sellerResponse?.payment_metadata?.quote_usdc ?? null;
+  const actualSpend = txHash
+    ? (onchainParsed?.amount_decimal ?? null)
+    : null;
 
   const savedLegacy = txHash
     ? settlementEvidenceFromSavedHeader({
@@ -317,7 +355,7 @@ export async function finalizePhase6Run(input: {
     targetTaskId: "rich_tx_explainer__base_usdc_payment_tx_v1",
     quoteUsdc: selected.quote_amount_usdc ?? "0.001125",
     capUsdc: auth.max_usdc,
-    paymentBearingHttpRequestCount: paymentBearingCount || (paymentAttempted ? 1 : 0),
+    paymentBearingHttpRequestCount: paymentBearingCount || (paymentHeaderSent ? 1 : 0),
     walletFingerprint: sellerResponse?.payment_metadata?.wallet_fingerprint ?? (walletLoaded ? "loaded" : null),
     sellerResponseCaptured: Boolean(sellerResponse),
     sellerResponseBodySha256: null,
@@ -385,8 +423,19 @@ export async function finalizePhase6Run(input: {
     trustScoreGate,
   );
 
-  const paidInvariants = checkPhase6PaidInvariants({
-    paymentBearingHttpRequestCount: paymentBearingCount,
+  let authorizationConsumedAttempts = paymentAttempted ? 1 : 0;
+  const authLedgerPath = authorizationLedgerPath(phase5RunDir);
+  if (existsSync(authLedgerPath)) {
+    try {
+      const authLedger = await readJson<{ consumed_attempts?: number }>(authLedgerPath);
+      authorizationConsumedAttempts = authLedger.consumed_attempts ?? authorizationConsumedAttempts;
+    } catch {
+      /* keep default */
+    }
+  }
+
+  const paidInvariants = checkPhase6PaidInvariantsFromLegacy({
+    paymentBearingHttpRequestCount: paymentBearingCount || (paymentHeaderSent ? 1 : 0),
     paymentAttemptCount: paymentAttempted ? 1 : 0,
     retryUsed: false,
     authorizedMaxUsdc: auth.max_usdc,
@@ -402,6 +451,10 @@ export async function finalizePhase6Run(input: {
     semanticEvaluationPass: semanticStatus === "pass",
     trustScoreCreated: trustScoreGate.trust_score_created === true,
     secretsPrinted: false,
+    paymentHeaderSent,
+    paid402CapturePresent,
+    authorizationConsumedAttempts,
+    authorizationMaxAttempts: auth.max_payment_attempts,
   });
   await writeJson(join(runDir, "paid_invariants.json"), paidInvariants);
 
@@ -427,10 +480,11 @@ export async function finalizePhase6Run(input: {
     `authorized_max_usdc: ${auth.max_usdc}`,
     `actual_spend_usdc: ${actualSpend ?? "null"}`,
     `payment_attempt_count: ${paymentAttempted ? 1 : 0}`,
-    `payment_bearing_http_request_count: ${paymentBearingCount}`,
+    `payment_bearing_http_request_count: ${paymentBearingCount || (paymentHeaderSent ? 1 : 0)}`,
     `retry_used: no`,
     `wallet_loaded: ${walletLoaded ? "yes" : "no"}`,
-    `payment_header_sent: ${paymentAttempted ? "attempted" : "no"}`,
+    `payment_header_sent: ${paymentHeaderSent ? "yes" : "no"}`,
+    `paid_402_capture_present: ${paid402CapturePresent ? "yes" : "no"}`,
     `settlement_evidence_status: ${settlementEvidenceV1.status}`,
     `payment_integrity_status: ${paymentIntegrity.status}`,
     `semantic_evaluation_status: ${semanticStatus}`,

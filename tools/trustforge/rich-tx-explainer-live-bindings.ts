@@ -13,6 +13,10 @@ import {
   type PaymentBearingRequestGuard,
 } from "../../buyer-client/src/payment-bearing-request-guard";
 import { compareUsdcDecimal } from "./external-x402-get-policy";
+import {
+  buildPaid402Capture,
+  PaidRequest402Error,
+} from "./paid-402-response-sanitize";
 import type { RichTxExplainerHandshake } from "./rich-tx-explainer-handshake";
 import type { RichTxExplainerPolicy } from "./rich-tx-explainer-policy";
 
@@ -28,6 +32,8 @@ export interface RichPaidResponse {
   readonly receipt: unknown;
   readonly paymentInvocationCount: number;
   readonly paymentBearingRequestCount: number;
+  readonly paymentHeaderCreated: boolean;
+  readonly paymentHeaderSent: boolean;
   readonly paymentResponseHeaderPresent: boolean;
   readonly paymentResponseHeaderSha256: string | null;
 }
@@ -68,8 +74,10 @@ export async function performRichTxExplainerPaidRequest(options: {
   readonly wallet: RichWalletHandle;
   readonly paidInvocationGuard: PaidInvocationGuard;
   readonly paymentBearingGuard: PaymentBearingRequestGuard;
+  readonly attemptId?: string | null;
   readonly fetchImpl?: typeof fetch;
   readonly importModule?: (specifier: string) => Promise<unknown>;
+  readonly now?: () => Date;
 }): Promise<RichPaidResponse> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const importModule = options.importModule ?? ((specifier) => import(specifier));
@@ -134,14 +142,40 @@ export async function performRichTxExplainerPaidRequest(options: {
     redirect: "manual",
   });
 
+  const paymentBearingRequestCount = options.paymentBearingGuard.getPaymentBearingRequests();
+  const paymentHeaderSent = paymentBearingRequestCount > 0;
+  const paymentHeaderCreated = paymentHeaderSent;
+
   if (response.status >= 300 && response.status < 400) {
     throw new Error(`paid request redirect HTTP ${response.status}`);
   }
+
+  const text = await response.text();
+
+  if (response.status === 402) {
+    const capture = buildPaid402Capture({
+      response,
+      responseBodyText: text,
+      attemptId: options.attemptId ?? null,
+      provider: options.policy.provider,
+      serviceId: options.policy.serviceId,
+      endpoint: options.handshake.endpointUrl,
+      unpaidScheme: "exact",
+      unpaidNetwork: options.handshake.network,
+      unpaidAmountAtomic: options.handshake.amountAtomic,
+      now: options.now,
+    });
+    throw new PaidRequest402Error(`paid request HTTP 402`, {
+      capture,
+      paymentBearingHttpRequestCount: paymentBearingRequestCount,
+      paymentHeaderCreated,
+      paymentHeaderSent,
+    });
+  }
+
   if (response.status !== 200) {
     throw new Error(`paid request HTTP ${response.status}`);
   }
-
-  const text = await response.text();
   let body: unknown = text;
   try {
     body = JSON.parse(text);
@@ -194,7 +228,9 @@ export async function performRichTxExplainerPaidRequest(options: {
     settlementEvidence,
     receipt,
     paymentInvocationCount: options.paidInvocationGuard.getAttempts(),
-    paymentBearingRequestCount: options.paymentBearingGuard.getPaymentBearingRequests(),
+    paymentBearingRequestCount,
+    paymentHeaderCreated,
+    paymentHeaderSent,
     paymentResponseHeaderPresent: Boolean(paymentHeader),
     paymentResponseHeaderSha256: paymentHeader ? sha256(paymentHeader) : null,
   };

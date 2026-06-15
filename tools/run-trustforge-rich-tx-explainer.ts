@@ -26,6 +26,11 @@ import {
   loadRichBuyerWallet,
   performRichTxExplainerPaidRequest,
 } from "./trustforge/rich-tx-explainer-live-bindings";
+import {
+  PaidRequest402Error,
+  formatPaid402CaptureMarkdown,
+  paid402CaptureSha256,
+} from "./trustforge/paid-402-response-sanitize";
 import { evaluateRichTxExplainerProbe } from "./trustforge/evaluate-rich-tx-explainer-probe";
 import { evaluateRichProbeEligibility } from "./trustforge/rich-probe-invariants";
 import {
@@ -380,10 +385,14 @@ export async function runRichTxExplainerPhase3(options: {
   let paidResponse = null;
   let walletFingerprint: string | null = null;
   let paymentTxHash: string | null = null;
+  let paymentBearingHttpRequestCount = 0;
+  let paymentHeaderCreated = false;
+  let paymentHeaderSent = false;
+  let guards: ReturnType<typeof createRichPaidGuards> | null = null;
   let onchainPayment = await verifyBaseUsdcPayment({ transactionHash: null });
 
   try {
-    const guards = createRichPaidGuards();
+    guards = createRichPaidGuards();
     const wallet = await loadRichBuyerWallet(env);
     walletFingerprint = wallet.walletFingerprint;
     paidResponse = await performRichTxExplainerPaidRequest({
@@ -393,8 +402,13 @@ export async function runRichTxExplainerPhase3(options: {
       wallet,
       paidInvocationGuard: guards.paidInvocationGuard,
       paymentBearingGuard: guards.paymentBearingGuard,
+      attemptId: gate.runId ?? null,
       fetchImpl: options.fetchImpl,
+      now,
     });
+    paymentBearingHttpRequestCount = paidResponse.paymentBearingRequestCount;
+    paymentHeaderCreated = paidResponse.paymentHeaderCreated;
+    paymentHeaderSent = paidResponse.paymentHeaderSent;
     paymentTxHash = paidResponse.transactionHash;
     const paymentResponseHeaderPresent = paidResponse.paymentResponseHeaderPresent;
     await writeJson(join(runDir, "10_seller_response.json"), {
@@ -618,9 +632,37 @@ export async function runRichTxExplainerPhase3(options: {
     await writeText(join(runDir, "RESULT.txt"), resultLines.join("\n"));
     return { status, runDir, resultLines };
   } catch (error) {
+    if (guards) {
+      paymentBearingHttpRequestCount = Math.max(
+        paymentBearingHttpRequestCount,
+        guards.paymentBearingGuard.getPaymentBearingRequests(),
+      );
+      paymentHeaderSent = paymentHeaderSent || paymentBearingHttpRequestCount > 0;
+      paymentHeaderCreated = paymentHeaderCreated || paymentHeaderSent;
+    }
+
+    if (error instanceof PaidRequest402Error) {
+      paymentBearingHttpRequestCount = error.paymentBearingHttpRequestCount;
+      paymentHeaderCreated = error.paymentHeaderCreated;
+      paymentHeaderSent = error.paymentHeaderSent;
+      await writeJson(join(runDir, "paid_402_response_sanitized.json"), {
+        ...error.capture,
+        body_sha256: paid402CaptureSha256(error.capture),
+      });
+      await writeText(
+        join(runDir, "paid_402_response_sanitized.md"),
+        formatPaid402CaptureMarkdown(error.capture),
+      );
+    }
+
     await writeText(
       join(runDir, "08_paid_execution.md"),
-      `FAIL_AFTER_PAYMENT: ${error instanceof Error ? error.message : String(error)}`,
+      [
+        `FAIL_AFTER_PAYMENT: ${error instanceof Error ? error.message : String(error)}`,
+        `payment_header_created: ${paymentHeaderCreated}`,
+        `payment_header_sent: ${paymentHeaderSent}`,
+        `payment_bearing_http_request_count: ${paymentBearingHttpRequestCount}`,
+      ].join("\n"),
     );
     const resultLines = buildResult({
       status: "FAIL_AFTER_PAYMENT_RECORDED",
@@ -633,13 +675,15 @@ export async function runRichTxExplainerPhase3(options: {
       handshake,
       runDir,
       targetTx,
-      paymentAttempted: Boolean(walletFingerprint || paymentTxHash),
+      paymentAttempted: Boolean(walletFingerprint || paymentHeaderSent),
       walletFingerprint,
       paymentTxHash,
       onchainPayment,
       error: error instanceof Error ? error.message : String(error),
       actualSpendUsdc: onchainPayment.amount_decimal ?? null,
-      paymentBearingRequestCount: paymentTxHash ? 1 : 0,
+      paymentBearingRequestCount: paymentBearingHttpRequestCount,
+      paymentHeaderSent,
+      paid402CaptureWritten: error instanceof PaidRequest402Error,
     });
     await writeText(join(runDir, "RESULT.txt"), resultLines.join("\n"));
     return { status: "FAIL_AFTER_PAYMENT_RECORDED", runDir, resultLines };
@@ -666,6 +710,8 @@ function buildResult(input: {
   readonly quoteUsdc?: string;
   readonly actualSpendUsdc?: string | null;
   readonly paymentBearingRequestCount?: number;
+  readonly paymentHeaderSent?: boolean;
+  readonly paid402CaptureWritten?: boolean;
   readonly paidExecutionBlockedReason?: string | null;
   readonly sellerResponseKind?: string;
   readonly settlementEvidenceStatus?: string;
@@ -717,7 +763,9 @@ function buildResult(input: {
     `wallet_fingerprint: ${input.walletFingerprint ?? "null"}`,
     `payment_attempted_live: ${input.paymentAttempted ? "yes" : "no"}`,
     `payment_attempt_count: ${input.paymentAttempted ? 1 : 0}`,
-    `payment_bearing_http_request_count: ${input.paymentBearingRequestCount ?? (input.paymentAttempted ? 1 : 0)}`,
+    `payment_bearing_http_request_count: ${input.paymentBearingRequestCount ?? 0}`,
+    `payment_header_sent: ${input.paymentHeaderSent ? "yes" : input.paymentAttempted ? "attempted" : "no"}`,
+    `paid_402_capture_written: ${input.paid402CaptureWritten ? "yes" : "no"}`,
     `retry_used: no`,
     `fallback_used: no`,
     `actual_spend_usdc: ${input.paymentTxHash ? input.actualSpendUsdc ?? "null" : "null"}`,
