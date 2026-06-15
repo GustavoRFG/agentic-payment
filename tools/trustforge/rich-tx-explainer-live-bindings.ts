@@ -28,6 +28,8 @@ export interface RichPaidResponse {
   readonly receipt: unknown;
   readonly paymentInvocationCount: number;
   readonly paymentBearingRequestCount: number;
+  readonly paymentResponseHeaderPresent: boolean;
+  readonly paymentResponseHeaderSha256: string | null;
 }
 
 export interface RichWalletHandle {
@@ -193,6 +195,8 @@ export async function performRichTxExplainerPaidRequest(options: {
     receipt,
     paymentInvocationCount: options.paidInvocationGuard.getAttempts(),
     paymentBearingRequestCount: options.paymentBearingGuard.getPaymentBearingRequests(),
+    paymentResponseHeaderPresent: Boolean(paymentHeader),
+    paymentResponseHeaderSha256: paymentHeader ? sha256(paymentHeader) : null,
   };
 }
 

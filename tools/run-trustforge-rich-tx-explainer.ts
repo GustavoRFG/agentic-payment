@@ -396,21 +396,14 @@ export async function runRichTxExplainerPhase3(options: {
       fetchImpl: options.fetchImpl,
     });
     paymentTxHash = paidResponse.transactionHash;
-    const paymentResponseHeaderPresent = Boolean(
-      paidResponse.paymentEvidence &&
-        typeof paidResponse.paymentEvidence === "object" &&
-        (paidResponse.paymentEvidence as { payment_response_header_present?: boolean })
-          .payment_response_header_present,
-    );
+    const paymentResponseHeaderPresent = paidResponse.paymentResponseHeaderPresent;
     await writeJson(join(runDir, "10_seller_response.json"), {
       content_type: paidResponse.contentType,
       body: paidResponse.responseBody,
       body_sha256: paidResponse.responseBodySha256,
       payment_metadata: {
         payment_response_header_present: paymentResponseHeaderPresent,
-        payment_response_header_sha256: paymentHeader
-          ? createHash("sha256").update(paymentHeader, "utf8").digest("hex")
-          : null,
+        payment_response_header_sha256: paidResponse.paymentResponseHeaderSha256,
         settlement_transaction_hash: paymentTxHash,
         quote_usdc: handshake.quoteUsdc,
         quote_atomic: handshake.amountAtomic,
