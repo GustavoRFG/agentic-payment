@@ -9,6 +9,8 @@ verification of purchased third-party artifacts over time.
 Phase 3B (rich `tx_explainer` settlement reconciliation) is **complete (no-payment)**.
 Phase 4 (settlement-first architecture) is **complete (no-payment)** — rich probes
 require settlement evidence or chain reconciliation before TrustScore eligibility.
+See `docs/trustforge-phase4-settlement-first.md` and v1 contracts under
+`contracts/trustforge/*.v1.schema.json`.
 
 Three Phase 3 paid attempts saved Zapper responses but missed settlement hashes.
 Read-only chain reconciliation found **two** `0.001125 USDC` settlements; evaluation

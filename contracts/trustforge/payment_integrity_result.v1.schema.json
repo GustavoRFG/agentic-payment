@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/payment_integrity_result.v1.schema.json",
+  "title": "PaymentIntegrityResult",
+  "type": "object",
+  "required": ["schema_version", "status", "pass", "checked_at"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "const": "payment_integrity_result.v1" },
+    "status": {
+      "enum": ["pass", "fail", "blocked", "not_applicable"]
+    },
+    "pass": { "type": "boolean" },
+    "checked_at": { "type": "string" },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "settlement_evidence_status": {
+      "enum": ["pass", "fail", "not_executed", "unknown"]
+    },
+    "semantic_evaluation_status": {
+      "enum": ["pass", "fail", "not_executed", "unknown"]
+    },
+    "invariants": { "type": "object" }
+  }
+}

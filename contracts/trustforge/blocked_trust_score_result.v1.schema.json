@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/blocked_trust_score_result.v1.schema.json",
+  "title": "BlockedTrustScoreResult",
+  "type": "object",
+  "required": ["schema_version", "trust_score_created", "blocked_reason", "checked_at"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "const": "blocked_trust_score_result.v1" },
+    "trust_score_created": { "const": false },
+    "blocked_reason": {
+      "enum": [
+        "missing_payment_integrity_pass",
+        "missing_semantic_evaluation_pass",
+        "payment_integrity_fail",
+        "semantic_evaluation_fail",
+        "both_gates_failed"
+      ]
+    },
+    "payment_integrity_status": { "type": "string" },
+    "semantic_evaluation_status": { "type": "string" },
+    "checked_at": { "type": "string" }
+  }
+}

@@ -23,7 +23,11 @@ export type ContractName =
   | "service_eval_task"
   | "evaluation_result"
   | "trust_score"
-  | "service_registry";
+  | "service_registry"
+  | "settlement_evidence_v1"
+  | "payment_attempt_ledger_entry_v1"
+  | "payment_integrity_result_v1"
+  | "blocked_trust_score_result_v1";
 
 export const CONTRACT_FILES: Record<ContractName, string> = {
   probe_run: "probe_run.schema.json",
@@ -31,6 +35,10 @@ export const CONTRACT_FILES: Record<ContractName, string> = {
   evaluation_result: "evaluation_result.schema.json",
   trust_score: "trust_score.schema.json",
   service_registry: "service_registry.schema.json",
+  settlement_evidence_v1: "settlement_evidence.v1.schema.json",
+  payment_attempt_ledger_entry_v1: "payment_attempt_ledger_entry.v1.schema.json",
+  payment_integrity_result_v1: "payment_integrity_result.v1.schema.json",
+  blocked_trust_score_result_v1: "blocked_trust_score_result.v1.schema.json",
 };
 
 export function repoPath(...parts: string[]): string {

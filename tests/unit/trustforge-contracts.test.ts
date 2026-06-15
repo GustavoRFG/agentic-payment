@@ -21,9 +21,9 @@ import { consolidateBootstrapTrustScore } from "../../tools/trustforge/consolida
 const fixedNow = () => new Date("2026-06-13T03:43:00.000Z");
 
 describe("TrustForge contracts — schema loading", () => {
-  it("loads all five schemas with a $schema declaration", () => {
+  it("loads all schemas with a $schema declaration", () => {
     const schemas = loadAllSchemas();
-    expect(Object.keys(schemas)).toHaveLength(5);
+    expect(Object.keys(schemas)).toHaveLength(9);
     for (const schema of Object.values(schemas)) {
       expect(typeof schema.$schema).toBe("string");
     }
@@ -63,6 +63,19 @@ describe("TrustForge contracts — fixtures validate", () => {
     expect(validateAgainst("evaluation_result", evaluation)).toEqual([]);
     const score = consolidateBootstrapTrustScore([evaluation], { now: fixedNow });
     expect(validateAgainst("trust_score", score)).toEqual([]);
+  });
+
+  it("validates Phase 4 blocked trust score fixture shape", () => {
+    expect(
+      validateAgainst("blocked_trust_score_result_v1", {
+        schema_version: "blocked_trust_score_result.v1",
+        trust_score_created: false,
+        blocked_reason: "missing_semantic_evaluation_pass",
+        payment_integrity_status: "pass",
+        semantic_evaluation_status: "incomplete",
+        checked_at: "2026-06-15T00:00:00.000Z",
+      }),
+    ).toEqual([]);
   });
 });
 

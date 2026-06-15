@@ -1,0 +1,24 @@
+{
+  "tx_hash": "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+  "chain_id": 8453,
+  "network": "base",
+  "block_number": 47342247,
+  "block_timestamp_utc": "2026-06-14T21:50:41.000Z",
+  "payer": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+  "payee": "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+  "token": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "symbol": "USDC",
+    "decimals": 6
+  },
+  "amount": {
+    "raw": "1125",
+    "human": "0.001125",
+    "currency": "USDC"
+  },
+  "explorer_url": "https://basescan.org/tx/0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+  "evidence_source": "offline_replay",
+  "reconciled_at": "2026-06-15T01:46:37.000Z",
+  "mapped_run": "run_20260614_214953",
+  "missing_fields": []
+}

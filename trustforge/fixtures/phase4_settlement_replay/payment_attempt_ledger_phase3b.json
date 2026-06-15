@@ -1,0 +1,39 @@
+{
+  "schema_version": "trustforge_payment_attempt_ledger_phase3b_replay.v1",
+  "service_id": "zapper_tx_explainer",
+  "provider": "Zapper",
+  "endpoint": "https://public.zapper.xyz/x402/transaction-details",
+  "quote_usdc": "0.001125",
+  "cap_usdc": "0.10",
+  "no_payment_mode": true,
+  "settlement_replay_hashes": [
+    "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+    "0x8f5edd95fb36ae7bcc129dc600ec7815db5d979ffe6cd7088b711ff94a0c2b86"
+  ],
+  "entries": [
+    {
+      "attempt_id": "run_20260614_214953__attempt_1",
+      "probe_id": "run_20260614_214953",
+      "mapped_settlement_tx_hash": "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+      "payment_bearing_http_request_count_original": 1,
+      "payment_bearing_http_request_count_replay": 0,
+      "seller_response_captured": true,
+      "wallet_loaded_replay": false,
+      "payment_header_sent_replay": false
+    },
+    {
+      "attempt_id": "run_20260614_215030__attempt_1",
+      "probe_id": "run_20260614_215030",
+      "mapped_settlement_tx_hash": "0x8f5edd95fb36ae7bcc129dc600ec7815db5d979ffe6cd7088b711ff94a0c2b86",
+      "payment_bearing_http_request_count_original": 1,
+      "payment_bearing_http_request_count_replay": 0,
+      "seller_response_captured": true,
+      "wallet_loaded_replay": false,
+      "payment_header_sent_replay": false
+    }
+  ],
+  "actual_total_spend_usdc": "0.00225",
+  "reconciled_settlement_count": 2,
+  "semantic_evaluation_status": "incomplete",
+  "trust_score_eligible": false
+}

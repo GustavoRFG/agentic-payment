@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/settlement_evidence.v1.schema.json",
+  "title": "SettlementEvidence",
+  "type": "object",
+  "required": ["schema_version", "status", "evidence_source"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "const": "settlement_evidence.v1" },
+    "status": {
+      "enum": ["pass", "fail", "not_executed", "unknown"]
+    },
+    "chain_id": { "type": ["integer", "null"] },
+    "network": { "type": ["string", "null"] },
+    "tx_hash": { "type": ["string", "null"] },
+    "block_number": { "type": ["integer", "null"] },
+    "payer": { "type": ["string", "null"] },
+    "payee": { "type": ["string", "null"] },
+    "token": {
+      "type": "object",
+      "properties": {
+        "address": { "type": ["string", "null"] },
+        "symbol": { "type": ["string", "null"] },
+        "decimals": { "type": ["integer", "null"] }
+      }
+    },
+    "amount": {
+      "type": "object",
+      "properties": {
+        "raw": { "type": ["string", "null"] },
+        "human": { "type": ["string", "null"] },
+        "currency": { "type": ["string", "null"] }
+      }
+    },
+    "evidence_source": {
+      "enum": ["offline_replay", "live_reconciled", "fixture", "not_available"]
+    },
+    "reconciled_at": { "type": ["string", "null"] }
+  }
+}

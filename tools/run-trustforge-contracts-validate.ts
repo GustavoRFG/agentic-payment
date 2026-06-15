@@ -105,6 +105,53 @@ function main(): void {
     }),
   );
 
+  // Phase 4 v1 settlement-first contracts (fixture-backed, offline).
+  const settlementFixture = readJson(
+    repoPath(
+      "trustforge",
+      "fixtures",
+      "phase4_settlement_replay",
+      "settlement_0x9b605b35ed.json",
+    ),
+  );
+  checks.push(
+    check("phase4_settlement_fixture_shape", () => {
+      const v1 = {
+        schema_version: "settlement_evidence.v1",
+        status: "pass",
+        chain_id: (settlementFixture as { chain_id: number }).chain_id,
+        network: "base",
+        tx_hash: (settlementFixture as { tx_hash: string }).tx_hash,
+        block_number: (settlementFixture as { block_number: number }).block_number,
+        payer: (settlementFixture as { payer: string }).payer,
+        payee: (settlementFixture as { payee: string }).payee,
+        token: (settlementFixture as { token: unknown }).token,
+        amount: (settlementFixture as { amount: unknown }).amount,
+        settlement_recipient_matches_quote: true,
+        settlement_amount_matches_quote: true,
+        settlement_chain_matches_quote: true,
+        confirmations: 1,
+        explorer_url: (settlementFixture as { explorer_url: string }).explorer_url,
+        evidence_source: "offline_replay",
+        reconciled_at: (settlementFixture as { reconciled_at: string }).reconciled_at,
+      };
+      expectValid("settlement_evidence_v1", v1);
+    }),
+  );
+
+  checks.push(
+    check("phase4_blocked_trust_score_fixture", () => {
+      expectValid("blocked_trust_score_result_v1", {
+        schema_version: "blocked_trust_score_result.v1",
+        trust_score_created: false,
+        blocked_reason: "missing_semantic_evaluation_pass",
+        payment_integrity_status: "pass",
+        semantic_evaluation_status: "incomplete",
+        checked_at: "2026-06-15T00:00:00.000Z",
+      });
+    }),
+  );
+
   // Real artifacts: present only after a real T0C paid probe has settled on-chain.
   const realScorePath = repoPath(
     "trustforge",

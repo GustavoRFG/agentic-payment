@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trustforge.local/contracts/payment_attempt_ledger_entry.v1.schema.json",
+  "title": "PaymentAttemptLedgerEntry",
+  "type": "object",
+  "required": ["schema_version", "attempt_id", "probe_id", "status"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "const": "payment_attempt_ledger_entry.v1" },
+    "attempt_id": { "type": "string" },
+    "probe_id": { "type": "string" },
+    "provider": { "type": "string" },
+    "service_id": { "type": "string" },
+    "endpoint": { "type": "string" },
+    "status": {
+      "enum": [
+        "not_attempted",
+        "quoted_unpaid",
+        "payment_header_prepared",
+        "payment_header_sent",
+        "seller_response_received",
+        "settlement_reconciled",
+        "failed",
+        "blocked_by_policy"
+      ]
+    },
+    "policy_flags": {
+      "type": "object",
+      "properties": {
+        "no_payment_mode": { "type": "boolean" },
+        "paid_execution_armed": { "type": "boolean" },
+        "human_authorized": { "type": "boolean" }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "secrets_printed": { "type": "boolean" },
+        "retry_used": { "type": "boolean" },
+        "fallback_used": { "type": "boolean" },
+        "payment_bearing_http_request_count": { "type": "integer" }
+      }
+    }
+  }
+}
