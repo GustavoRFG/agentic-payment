@@ -12,6 +12,10 @@ require settlement evidence or chain reconciliation before TrustScore eligibilit
 See `docs/trustforge-phase4-settlement-first.md` and v1 contracts under
 `contracts/trustforge/*.v1.schema.json`.
 
+Phase 5 (rich provider discovery) is **waiting for human payment decision (no-payment)**.
+Unpaid discovery selected **Zapper** `zapper_tx_explainer` as the next settlement-first
+rich probe candidate. See `docs/trustforge-phase5-rich-provider-discovery.md`.
+
 Three Phase 3 paid attempts saved Zapper responses but missed settlement hashes.
 Read-only chain reconciliation found **two** `0.001125 USDC` settlements; evaluation
 remains `fail_after_payment_recorded` / incomplete semantic status with **no**
