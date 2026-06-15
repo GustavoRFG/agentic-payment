@@ -7,7 +7,7 @@ import {
   reconcileUsdcSettlements,
   type UsdcSettlementReconciliation,
 } from "../../tools/trustforge/reconcile-usdc-settlements";
-import { resolveSettlementEvidence } from "../../tools/trustforge/settlement-evidence";
+import { resolveSettlementEvidence, legacySettlementEvidenceView } from "../../tools/trustforge/settlement-evidence";
 import { checkPhase3bEnvSafety } from "../../tools/run-trustforge-rich-tx-explainer-phase3b";
 
 const WALLET = "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1";
@@ -148,8 +148,8 @@ describe("settlement evidence semantics", () => {
       paymentResponseHeaderPresent: false,
       quoteUsdc: "0.001125",
     });
-    expect(evidence.actual_spend_usdc).toBeNull();
-    expect(evidence.settlement_evidence_status).toBe("no_payment_header");
+    expect(evidence.status).toBe("missing_payment_metadata");
+    expect(legacySettlementEvidenceView(evidence).actual_spend_usdc).toBeNull();
   });
 
   it("uses chain reconciliation when mapped with medium confidence", () => {
@@ -160,9 +160,10 @@ describe("settlement evidence semantics", () => {
       mappingConfidence: "medium",
       quoteUsdc: "0.001125",
     });
-    expect(evidence.actual_spend_usdc).toBe("0.001125");
-    expect(evidence.transaction_hash_source).toBe("chain_reconciliation");
-    expect(evidence.settlement_evidence_status).toBe("reconciled_from_chain");
+    expect(evidence.status).toBe("chain_reconciled");
+    expect(evidence.amountDecimal).toBe("0.001125");
+    expect(evidence.transactionHashSource).toBe("chain_reconciliation");
+    expect(legacySettlementEvidenceView(evidence).actual_spend_usdc).toBe("0.001125");
   });
 });
 

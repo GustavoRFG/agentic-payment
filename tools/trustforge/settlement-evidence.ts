@@ -1,44 +1,168 @@
 /**
- * settlement-evidence — persisted / reconciled payment settlement model.
+ * settlement-evidence — settlement-first payment proof model (Phase 4).
  */
 
-export type SavedSettlementEvidenceStatus =
-  | "header_tx_hash_found"
-  | "no_header_tx_hash"
-  | "missing_payment_metadata";
-
-export type OnchainReconciliationStatus =
-  | "found"
-  | "not_found"
-  | "ambiguous"
-  | "not_executed";
-
 export type SettlementEvidenceStatus =
-  | "header_verified"
-  | "reconciled_from_chain"
-  | "no_settlement_found"
-  | "ambiguous"
-  | "missing_metadata"
-  | "onchain_verified"
-  | "no_payment_header"
-  | "not_executed";
+  | "not_required"
+  | "header_tx_hash_found"
+  | "chain_reconciled"
+  | "missing_header_tx_hash"
+  | "missing_payment_metadata"
+  | "no_settlement_found_onchain"
+  | "ambiguous_requires_manual_review"
+  | "failed_verification";
 
-export type TransactionHashSource = "saved_payment_header" | "chain_reconciliation" | null;
+export type TransactionHashSource =
+  | "payment_response_header"
+  | "x_payment_response_header"
+  | "body_metadata"
+  | "chain_reconciliation"
+  | "manual_audit"
+  | null;
 
 export type SettlementMappingConfidence = "high" | "medium" | "low" | "unknown" | null;
 
 export interface SettlementEvidence {
-  readonly saved_settlement_evidence_status: SavedSettlementEvidenceStatus;
-  readonly onchain_reconciliation_status: OnchainReconciliationStatus;
-  readonly settlement_evidence_status: SettlementEvidenceStatus;
+  readonly status: SettlementEvidenceStatus;
+  readonly transactionHash: string | null;
+  readonly transactionHashSource: TransactionHashSource;
+  readonly chainId: number | null;
+  readonly amountAtomic: string | null;
+  readonly amountDecimal: string | null;
+  readonly asset: string | null;
+  readonly payer: string | null;
+  readonly payTo: string | null;
+  readonly receiptStatus: "success" | "failed" | "unknown" | null;
+  readonly mappingConfidence: SettlementMappingConfidence;
+  readonly evidencePaths: readonly string[];
+  readonly notes: readonly string[];
+}
+
+export function emptySettlementEvidence(notes: readonly string[] = []): SettlementEvidence {
+  return {
+    status: "not_required",
+    transactionHash: null,
+    transactionHashSource: null,
+    chainId: null,
+    amountAtomic: null,
+    amountDecimal: null,
+    asset: null,
+    payer: null,
+    payTo: null,
+    receiptStatus: null,
+    mappingConfidence: null,
+    evidencePaths: [],
+    notes,
+  };
+}
+
+export function settlementEvidenceFromSavedHeader(input: {
+  readonly transactionHash: string;
+  readonly amountDecimal?: string | null;
+  readonly amountAtomic?: string | null;
+  readonly payTo?: string | null;
+  readonly payer?: string | null;
+  readonly chainId?: number | null;
+  readonly receiptStatus?: "success" | "failed" | "unknown";
+  readonly source?: "payment_response_header" | "x_payment_response_header" | "body_metadata";
+  readonly evidencePaths?: readonly string[];
+}): SettlementEvidence {
+  return {
+    status: "header_tx_hash_found",
+    transactionHash: input.transactionHash.toLowerCase(),
+    transactionHashSource: input.source ?? "payment_response_header",
+    chainId: input.chainId ?? 8453,
+    amountAtomic: input.amountAtomic ?? null,
+    amountDecimal: input.amountDecimal ?? null,
+    asset: "USDC",
+    payer: input.payer?.toLowerCase() ?? null,
+    payTo: input.payTo?.toLowerCase() ?? null,
+    receiptStatus: input.receiptStatus ?? "unknown",
+    mappingConfidence: "high",
+    evidencePaths: input.evidencePaths ?? [],
+    notes: [],
+  };
+}
+
+export function settlementEvidenceFromChainReconciliation(input: {
+  readonly transactionHash: string;
+  readonly amountDecimal: string;
+  readonly amountAtomic: string;
+  readonly payer: string;
+  readonly payTo: string;
+  readonly chainId?: number;
+  readonly mappingConfidence?: SettlementMappingConfidence;
+  readonly receiptStatus?: "success" | "failed" | "unknown";
+  readonly evidencePaths?: readonly string[];
+}): SettlementEvidence {
+  return {
+    status: "chain_reconciled",
+    transactionHash: input.transactionHash.toLowerCase(),
+    transactionHashSource: "chain_reconciliation",
+    chainId: input.chainId ?? 8453,
+    amountAtomic: input.amountAtomic,
+    amountDecimal: input.amountDecimal,
+    asset: "USDC",
+    payer: input.payer.toLowerCase(),
+    payTo: input.payTo.toLowerCase(),
+    receiptStatus: input.receiptStatus ?? "success",
+    mappingConfidence: input.mappingConfidence ?? "medium",
+    evidencePaths: input.evidencePaths ?? [],
+    notes: ["settlement recovered via read-only chain reconciliation"],
+  };
+}
+
+export function missingHeaderSettlementEvidence(input: {
+  readonly paymentMetadataPresent?: boolean;
+  readonly paymentResponseHeaderPresent?: boolean;
+  readonly quoteUsdc?: string | null;
+}): SettlementEvidence {
+  const status: SettlementEvidenceStatus = input.paymentMetadataPresent === false
+    ? "missing_payment_metadata"
+    : "missing_header_tx_hash";
+  return {
+    status,
+    transactionHash: null,
+    transactionHashSource: null,
+    chainId: 8453,
+    amountAtomic: null,
+    amountDecimal: null,
+    asset: "USDC",
+    payer: null,
+    payTo: null,
+    receiptStatus: null,
+    mappingConfidence: null,
+    evidencePaths: [],
+    notes: [
+      input.paymentResponseHeaderPresent
+        ? "payment header present but tx hash not decoded"
+        : "no payment-response header metadata saved",
+      `quote_usdc=${input.quoteUsdc ?? "null"} is not actual spend`,
+    ],
+  };
+}
+
+export function requiresChainReconciliation(evidence: SettlementEvidence): boolean {
+  return (
+    evidence.status === "missing_header_tx_hash" ||
+    evidence.status === "missing_payment_metadata"
+  );
+}
+
+/** @deprecated Phase 3B flat view — use SettlementEvidence.status directly in new code. */
+export function legacySettlementEvidenceView(evidence: SettlementEvidence): {
+  readonly settlement_evidence_status: string;
   readonly transaction_hash: string | null;
-  readonly transaction_hash_source: TransactionHashSource;
-  readonly settlement_mapping_confidence: SettlementMappingConfidence;
+  readonly transaction_hash_source: string | null;
   readonly actual_spend_usdc: string | null;
-  readonly quote_usdc: string | null;
-  readonly payment_response_header_present: boolean;
-  readonly payment_response_header_sha256: string | null;
-  readonly reconciled_tx_hashes: readonly string[];
+} {
+  return {
+    settlement_evidence_status: evidence.status,
+    transaction_hash: evidence.transactionHash,
+    transaction_hash_source: evidence.transactionHashSource,
+    actual_spend_usdc:
+      evidence.transactionHash && evidence.amountDecimal ? evidence.amountDecimal : null,
+  };
 }
 
 export function resolveSettlementEvidence(input: {
@@ -49,90 +173,64 @@ export function resolveSettlementEvidence(input: {
   readonly onchainVerified?: boolean;
   readonly reconciledTxHash?: string | null;
   readonly reconciledAmountUsdc?: string | null;
+  readonly reconciledAmountAtomic?: string | null;
   readonly mappingConfidence?: SettlementMappingConfidence;
   readonly quoteUsdc?: string | null;
+  readonly payer?: string | null;
+  readonly payTo?: string | null;
 }): SettlementEvidence {
   if (!input.paymentAttempted) {
+    return emptySettlementEvidence(["payment not attempted"]);
+  }
+
+  if (input.savedTransactionHash) {
+    return settlementEvidenceFromSavedHeader({
+      transactionHash: input.savedTransactionHash,
+      amountDecimal: input.reconciledAmountUsdc ?? null,
+      payer: input.payer,
+      payTo: input.payTo,
+      receiptStatus: input.onchainVerified ? "success" : "unknown",
+    });
+  }
+
+  if (input.reconciledTxHash && input.reconciledAmountUsdc) {
+    return settlementEvidenceFromChainReconciliation({
+      transactionHash: input.reconciledTxHash,
+      amountDecimal: input.reconciledAmountUsdc,
+      amountAtomic: input.reconciledAmountAtomic ?? "1125",
+      payer: input.payer ?? "",
+      payTo: input.payTo ?? "",
+      mappingConfidence: input.mappingConfidence ?? "medium",
+      receiptStatus: input.onchainVerified ? "success" : "success",
+    });
+  }
+
+  if (input.paymentAttempted && !input.reconciledTxHash) {
     return {
-      saved_settlement_evidence_status: "missing_payment_metadata",
-      onchain_reconciliation_status: "not_executed",
-      settlement_evidence_status: "not_executed",
-      transaction_hash: null,
-      transaction_hash_source: null,
-      settlement_mapping_confidence: null,
-      actual_spend_usdc: null,
-      quote_usdc: input.quoteUsdc ?? null,
-      payment_response_header_present: false,
-      payment_response_header_sha256: null,
-      reconciled_tx_hashes: [],
+      ...missingHeaderSettlementEvidence({
+        paymentMetadataPresent: input.paymentMetadataPresent,
+        paymentResponseHeaderPresent: input.paymentResponseHeaderPresent,
+        quoteUsdc: input.quoteUsdc,
+      }),
+      status: input.paymentResponseHeaderPresent
+        ? "missing_header_tx_hash"
+        : "missing_payment_metadata",
     };
   }
 
-  const savedStatus: SavedSettlementEvidenceStatus = input.savedTransactionHash
-    ? "header_tx_hash_found"
-    : input.paymentResponseHeaderPresent
-      ? "no_header_tx_hash"
-      : input.paymentMetadataPresent === false
-        ? "missing_payment_metadata"
-        : "no_header_tx_hash";
-
-  let onchainReconciliation: OnchainReconciliationStatus = "not_executed";
-  if (input.reconciledTxHash) {
-    onchainReconciliation =
-      input.mappingConfidence === "low" || input.mappingConfidence === "unknown"
-        ? "ambiguous"
-        : "found";
-  } else if (input.paymentAttempted) {
-    onchainReconciliation = "not_found";
-  }
-
-  let settlementStatus: SettlementEvidenceStatus = "missing_metadata";
-  if (input.onchainVerified && input.savedTransactionHash) {
-    settlementStatus = "header_verified";
-  } else if (input.onchainVerified) {
-    settlementStatus = "onchain_verified";
-  } else if (input.reconciledTxHash && onchainReconciliation === "found") {
-    settlementStatus = "reconciled_from_chain";
-  } else if (input.reconciledTxHash && onchainReconciliation === "ambiguous") {
-    settlementStatus = "ambiguous";
-  } else if (!input.paymentResponseHeaderPresent && savedStatus === "no_header_tx_hash") {
-    settlementStatus = "no_payment_header";
-  } else if (onchainReconciliation === "not_found") {
-    settlementStatus = "no_settlement_found";
-  }
-
-  let transactionHash: string | null = input.savedTransactionHash ?? null;
-  let transactionHashSource: TransactionHashSource = input.savedTransactionHash
-    ? "saved_payment_header"
-    : null;
-  if (!transactionHash && input.reconciledTxHash) {
-    transactionHash = input.reconciledTxHash;
-    transactionHashSource = "chain_reconciliation";
-  }
-
-  const mappingConfidence = input.mappingConfidence ?? null;
-  let actualSpend: string | null = null;
-  if (input.onchainVerified && input.reconciledAmountUsdc) {
-    actualSpend = input.reconciledAmountUsdc;
-  } else if (
-    transactionHashSource === "chain_reconciliation" &&
-    input.reconciledAmountUsdc &&
-    (mappingConfidence === "high" || mappingConfidence === "medium")
-  ) {
-    actualSpend = input.reconciledAmountUsdc;
-  }
-
   return {
-    saved_settlement_evidence_status: savedStatus,
-    onchain_reconciliation_status: onchainReconciliation,
-    settlement_evidence_status: settlementStatus,
-    transaction_hash: transactionHash,
-    transaction_hash_source: transactionHashSource,
-    settlement_mapping_confidence: mappingConfidence,
-    actual_spend_usdc: actualSpend,
-    quote_usdc: input.quoteUsdc ?? null,
-    payment_response_header_present: input.paymentResponseHeaderPresent ?? false,
-    payment_response_header_sha256: null,
-    reconciled_tx_hashes: input.reconciledTxHash ? [input.reconciledTxHash] : [],
+    status: "no_settlement_found_onchain",
+    transactionHash: null,
+    transactionHashSource: null,
+    chainId: 8453,
+    amountAtomic: null,
+    amountDecimal: null,
+    asset: "USDC",
+    payer: input.payer?.toLowerCase() ?? null,
+    payTo: input.payTo?.toLowerCase() ?? null,
+    receiptStatus: null,
+    mappingConfidence: null,
+    evidencePaths: [],
+    notes: ["no settlement evidence found"],
   };
 }

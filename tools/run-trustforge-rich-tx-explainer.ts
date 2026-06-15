@@ -27,6 +27,7 @@ import {
   performRichTxExplainerPaidRequest,
 } from "./trustforge/rich-tx-explainer-live-bindings";
 import { evaluateRichTxExplainerProbe } from "./trustforge/evaluate-rich-tx-explainer-probe";
+import { evaluateRichProbeEligibility } from "./trustforge/rich-probe-invariants";
 import {
   classifySellerResponseKind,
   resolveSellerResponseSemanticStatus,
@@ -503,8 +504,26 @@ export async function runRichTxExplainerPhase3(options: {
       now,
     });
 
-    const status =
-      evaluation.status === "pass" && onchainPayment.status === "ONCHAIN_VERIFIED"
+    const eligibility = evaluateRichProbeEligibility({
+      paymentIntegrityStatus:
+        onchainPayment.status === "ONCHAIN_VERIFIED"
+          ? "pass"
+          : paymentTxHash
+            ? "ambiguous"
+            : paidResponse.paymentBearingRequestCount > 0
+              ? "ambiguous"
+              : "not_executed",
+      semanticEvaluationStatus: facts.passed
+        ? "pass"
+        : facts.wrong_claims.length === 0
+          ? "incomplete"
+          : "fail",
+    });
+
+    let status =
+      evaluation.status === "pass" &&
+      onchainPayment.status === "ONCHAIN_VERIFIED" &&
+      eligibility.trustScoreEligible
         ? "PASS_RICH_TX_EXPLAINER_SCORE"
         : "FAIL_AFTER_PAYMENT_RECORDED";
 
@@ -599,6 +618,9 @@ export async function runRichTxExplainerPhase3(options: {
       probeRunCreated: true,
       evaluationResultCreated: true,
       trustScoreRichCreated: status === "PASS_RICH_TX_EXPLAINER_SCORE",
+      positiveScoreBlockedReason: eligibility.trustScoreEligible
+        ? null
+        : eligibility.blockedReasons.join("; ") || "settlement/semantic incomplete",
     });
     await writeText(join(runDir, "RESULT.txt"), resultLines.join("\n"));
     return { status, runDir, resultLines };
@@ -658,6 +680,7 @@ function buildResult(input: {
   readonly probeRunCreated?: boolean;
   readonly evaluationResultCreated?: boolean;
   readonly trustScoreRichCreated?: boolean;
+  readonly positiveScoreBlockedReason?: string | null;
   readonly error?: string;
   readonly unitTestsPassed?: boolean;
   readonly existingSuitePassed?: boolean;
@@ -722,6 +745,7 @@ function buildResult(input: {
     `probe_run_created: ${input.probeRunCreated ? "yes" : input.status === "PASS_RICH_TX_EXPLAINER_SCORE" ? "yes" : "no"}`,
     `evaluation_result_created: ${input.evaluationResultCreated ? "yes" : input.status === "PASS_RICH_TX_EXPLAINER_SCORE" ? "yes" : "no"}`,
     `trust_score_rich_created: ${input.trustScoreRichCreated ? "yes" : "no"}`,
+    `positive_score_blocked_reason: ${input.positiveScoreBlockedReason ?? "null"}`,
     `trust_score_sample_size: ${input.status === "PASS_RICH_TX_EXPLAINER_SCORE" ? 1 : "null"}`,
     `trust_score_confidence: ${input.status === "PASS_RICH_TX_EXPLAINER_SCORE" ? "low" : "null"}`,
     `semantic_richness: ${input.status === "PASS_RICH_TX_EXPLAINER_SCORE" ? "high" : "null"}`,

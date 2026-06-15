@@ -47,6 +47,9 @@ Not yet claimed as live proof:
 - Phase 3 Zapper rich tx_explainer received **no passing TrustScore**; two
   on-chain `0.001125 USDC` settlements were reconciled read-only in Phase 3B
   (`docs/trustforge-phase3b-reconciliation.md`);
+- Phase 4 settlement-first architecture blocks positive rich TrustScore without
+  `payment_integrity: pass` and `semantic_evaluation: pass`
+  (`docs/trustforge-settlement-first-architecture.md`);
 - public Trust API.
 
 ## Product thesis

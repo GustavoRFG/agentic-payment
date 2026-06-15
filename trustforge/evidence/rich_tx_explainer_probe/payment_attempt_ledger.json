@@ -1,0 +1,158 @@
+{
+  "schema_version": "trustforge_payment_attempt_ledger_v0.1.0",
+  "service_id": "zapper_tx_explainer",
+  "entries": [
+    {
+      "attemptId": "run_20260614_214953__attempt_1",
+      "runId": "run_20260614_214953",
+      "serviceId": "zapper_tx_explainer",
+      "endpoint": "https://public.zapper.xyz/x402/transaction-details",
+      "method": "POST",
+      "targetTaskId": "rich_tx_explainer__base_usdc_payment_tx_v1",
+      "targetTxHash": "0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4",
+      "quoteUsdc": "0.001125",
+      "capUsdc": "0.10",
+      "paymentBearingHttpRequestCount": 1,
+      "walletFingerprint": "49b14ebd8f578d41",
+      "sellerResponseCaptured": true,
+      "sellerResponseBodySha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09",
+      "savedSettlementEvidence": {
+        "status": "missing_payment_metadata",
+        "transactionHash": null,
+        "transactionHashSource": null,
+        "chainId": 8453,
+        "amountAtomic": null,
+        "amountDecimal": null,
+        "asset": "USDC",
+        "payer": null,
+        "payTo": null,
+        "receiptStatus": null,
+        "mappingConfidence": null,
+        "evidencePaths": [],
+        "notes": [
+          "no payment-response header metadata saved",
+          "quote_usdc=0.001125 is not actual spend"
+        ]
+      },
+      "chainReconciledSettlementEvidence": {
+        "status": "chain_reconciled",
+        "transactionHash": "0x9b605be3d78e4b64168842548612f3ceb671c61df8fab069aa7a815d934c35ed",
+        "transactionHashSource": "chain_reconciliation",
+        "chainId": 8453,
+        "amountAtomic": "1125",
+        "amountDecimal": "0.001125",
+        "asset": "USDC",
+        "payer": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+        "payTo": "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+        "receiptStatus": "success",
+        "mappingConfidence": "medium",
+        "evidencePaths": [
+          "D:\\agentic-payments-lab\\trustforge\\evidence\\rich_tx_explainer_probe\\reconciled_settlements.json"
+        ],
+        "notes": [
+          "settlement recovered via read-only chain reconciliation"
+        ]
+      },
+      "actualSpendUsdc": "0.001125",
+      "actualSpendSource": "chain_reconciliation",
+      "finalPaymentIntegrity": "pass",
+      "createdAtUtc": "20260614T2149:53:00.000Z"
+    },
+    {
+      "attemptId": "run_20260614_215030__attempt_1",
+      "runId": "run_20260614_215030",
+      "serviceId": "zapper_tx_explainer",
+      "endpoint": "https://public.zapper.xyz/x402/transaction-details",
+      "method": "POST",
+      "targetTaskId": "rich_tx_explainer__base_usdc_payment_tx_v1",
+      "targetTxHash": "0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4",
+      "quoteUsdc": "0.001125",
+      "capUsdc": "0.10",
+      "paymentBearingHttpRequestCount": 1,
+      "walletFingerprint": "49b14ebd8f578d41",
+      "sellerResponseCaptured": true,
+      "sellerResponseBodySha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09",
+      "savedSettlementEvidence": {
+        "status": "missing_payment_metadata",
+        "transactionHash": null,
+        "transactionHashSource": null,
+        "chainId": 8453,
+        "amountAtomic": null,
+        "amountDecimal": null,
+        "asset": "USDC",
+        "payer": null,
+        "payTo": null,
+        "receiptStatus": null,
+        "mappingConfidence": null,
+        "evidencePaths": [],
+        "notes": [
+          "no payment-response header metadata saved",
+          "quote_usdc=0.001125 is not actual spend"
+        ]
+      },
+      "chainReconciledSettlementEvidence": {
+        "status": "chain_reconciled",
+        "transactionHash": "0x8f5edd95fb36ae7bcc129dc600ec7815db5d979ffe6cd7088b711ff94a0c2b86",
+        "transactionHashSource": "chain_reconciliation",
+        "chainId": 8453,
+        "amountAtomic": "1125",
+        "amountDecimal": "0.001125",
+        "asset": "USDC",
+        "payer": "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+        "payTo": "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+        "receiptStatus": "success",
+        "mappingConfidence": "medium",
+        "evidencePaths": [
+          "D:\\agentic-payments-lab\\trustforge\\evidence\\rich_tx_explainer_probe\\reconciled_settlements.json"
+        ],
+        "notes": [
+          "settlement recovered via read-only chain reconciliation"
+        ]
+      },
+      "actualSpendUsdc": "0.001125",
+      "actualSpendSource": "chain_reconciliation",
+      "finalPaymentIntegrity": "pass",
+      "createdAtUtc": "20260614T2150:30:00.000Z"
+    },
+    {
+      "attemptId": "run_20260614_215039__attempt_1",
+      "runId": "run_20260614_215039",
+      "serviceId": "zapper_tx_explainer",
+      "endpoint": "https://public.zapper.xyz/x402/transaction-details",
+      "method": "POST",
+      "targetTaskId": "rich_tx_explainer__base_usdc_payment_tx_v1",
+      "targetTxHash": "0xff5ec5e20c42aff2d6d96b7854441a0d0357178a2263f02ea381a00db12d26d4",
+      "quoteUsdc": "0.001125",
+      "capUsdc": "0.10",
+      "paymentBearingHttpRequestCount": 1,
+      "walletFingerprint": "49b14ebd8f578d41",
+      "sellerResponseCaptured": true,
+      "sellerResponseBodySha256": "1674d4733cdb8bf8fddfdd51813467f6d04702cd00aaa79aae2256bf865e4d09",
+      "savedSettlementEvidence": {
+        "status": "missing_payment_metadata",
+        "transactionHash": null,
+        "transactionHashSource": null,
+        "chainId": 8453,
+        "amountAtomic": null,
+        "amountDecimal": null,
+        "asset": "USDC",
+        "payer": null,
+        "payTo": null,
+        "receiptStatus": null,
+        "mappingConfidence": null,
+        "evidencePaths": [],
+        "notes": [
+          "no payment-response header metadata saved",
+          "quote_usdc=0.001125 is not actual spend"
+        ]
+      },
+      "chainReconciledSettlementEvidence": null,
+      "actualSpendUsdc": null,
+      "actualSpendSource": null,
+      "finalPaymentIntegrity": "fail",
+      "createdAtUtc": "20260614T2150:39:00.000Z"
+    }
+  ],
+  "actual_total_spend_usdc": "0.00225",
+  "reconciled_settlement_count": 2
+}

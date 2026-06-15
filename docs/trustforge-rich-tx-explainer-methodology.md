@@ -52,6 +52,11 @@ The rich Zapper target did **not** receive a passing TrustScore. Saved runs miss
 settlement tx hashes; Phase 3B reconciles outbound USDC `Transfer` logs on Base.
 See `docs/trustforge-phase3b-reconciliation.md`.
 
+## Phase 4 settlement-first architecture
+
+Rich paid probes must pass through settlement-first accounting before TrustScore
+eligibility. See `docs/trustforge-settlement-first-architecture.md`.
+
 ## Confidence
 
 - `sample_size=1` → confidence **low**

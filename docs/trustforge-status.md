@@ -7,6 +7,9 @@ verification of purchased third-party artifacts over time.
 
 ## Current Phase
 Phase 3B (rich `tx_explainer` settlement reconciliation) is **complete (no-payment)**.
+Phase 4 (settlement-first architecture) is **complete (no-payment)** — rich probes
+require settlement evidence or chain reconciliation before TrustScore eligibility.
+
 Three Phase 3 paid attempts saved Zapper responses but missed settlement hashes.
 Read-only chain reconciliation found **two** `0.001125 USDC` settlements; evaluation
 remains `fail_after_payment_recorded` / incomplete semantic status with **no**

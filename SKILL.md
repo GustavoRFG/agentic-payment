@@ -53,6 +53,10 @@ Stop earlier on repeated identical failure without progress.
 - semantic correctness required;
 - receipt or documented settlement evidence required;
 - actual spend validation required;
+- quote_usdc is never actual_spend_usdc without settlement evidence;
+- HTTP 200 seller body is not payment proof;
+- missing saved tx hash requires chain reconciliation before concluding no settlement;
+- rich TrustScore requires payment_integrity pass and semantic_evaluation pass;
 - evidence written on success and post-payment failure;
 - private keys never printed or persisted.
 
@@ -69,7 +73,7 @@ Do not create new TrustForge scratch directories directly under `D:\`.
 5. implement first ServiceEvalTask; ✅ (chain-id + block-number)
 6. produce EvaluationResult; ✅ (two real evaluations)
 7. add temporal TrustScore; ✅ (per-service history + portfolio roll-up + regression/consistency)
-8. richer paid probe — OATP `tx_explainer` (prepared, unpaid; separate authorization + higher cap);
+8. richer paid probe — OATP `tx_explainer` (Phase 3 paid attempts; Phase 3B reconciliation; Phase 4 settlement-first architecture — no passing TrustScore);
 9. expose Trust API later.
 
 ## Anti-goals

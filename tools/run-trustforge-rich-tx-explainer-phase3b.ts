@@ -14,7 +14,7 @@ import {
   mapRichPaymentAttempts,
   summarizeSavedRichRun,
 } from "./trustforge/map-rich-payment-attempts";
-import { resolveSettlementEvidence } from "./trustforge/settlement-evidence";
+import { resolveSettlementEvidence, legacySettlementEvidenceView } from "./trustforge/settlement-evidence";
 import type { TxGroundTruth } from "./trustforge/build-tx-ground-truth";
 
 const WORKSPACE = "D:\\trustforge";
@@ -392,8 +392,8 @@ function buildResult(input: {
     `reconciled_total_usdc: ${reconciledTotal}`,
     `reconciled_tx_hashes: ${input.reconciledTxHashes?.join(",") ?? "null"}`,
     `attempt_mapping_status: ${input.mapping?.attempt_mapping_status ?? "FAIL"}`,
-    `transaction_hash_source: ${input.sampleEvidence?.transaction_hash_source ?? "null"}`,
-    `actual_spend_usdc_corrected: ${input.sampleEvidence?.actual_spend_usdc ?? "null"}`,
+    `transaction_hash_source: ${legacySettlementEvidenceView(input.sampleEvidence ?? resolveSettlementEvidence({ paymentAttempted: false })).transaction_hash_source ?? "null"}`,
+    `actual_spend_usdc_corrected: ${legacySettlementEvidenceView(input.sampleEvidence ?? resolveSettlementEvidence({ paymentAttempted: false })).actual_spend_usdc ?? "null"}`,
     `previous_actual_spend_usdc_was_wrong: yes`,
     `previous_settlement_status_was_wrong: yes`,
     `zapper_response_factually_wrong: no`,
