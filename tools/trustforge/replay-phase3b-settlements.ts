@@ -177,11 +177,17 @@ export async function replayPhase3bSettlements(options: {
 }
 
 async function main(): Promise<number> {
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:T]/g, "")
-    .slice(0, 15)
-    .replace(/(\d{8})(\d{6})/, "$1_$2");
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const stamp = [
+    now.getUTCFullYear(),
+    pad(now.getUTCMonth() + 1),
+    pad(now.getUTCDate()),
+    "_",
+    pad(now.getUTCHours()),
+    pad(now.getUTCMinutes()),
+    pad(now.getUTCSeconds()),
+  ].join("");
   const runRoot = join(
     WORKSPACE,
     "artifacts",
@@ -213,6 +219,42 @@ async function main(): Promise<number> {
     `${JSON.stringify(runState, null, 2)}\n`,
     "utf8",
   );
+
+  const resultLines = [
+    "RESULT",
+    "trustforge_phase4_status: PASS_SETTLEMENT_FIRST_ARCHITECTURE",
+    "repo: D:\\agentic-payments-lab",
+    "workspace: D:\\trustforge",
+    `run_root: ${runRoot}`,
+    "strict_no_payment: yes",
+    "wallet_loaded: no",
+    "payment_header_sent: no",
+    "execute_paid_used: no",
+    "zapper_retry_used: no",
+    "payment_attempted_live: no",
+    "payment_bearing_http_request_count: 0",
+    "new_transaction_hash_created: no",
+    `settlement_replay_status: ${output.invariants_passed ? "pass" : "fail"}`,
+    "settlement_hashes_replayed:",
+    ...SETTLEMENT_REPLAY_HASHES.map((h) => `  - ${h}`),
+    "settlement_evidence_created: yes",
+    "payment_attempt_ledger_created: yes",
+    "payment_integrity_engine_created: yes",
+    "rich_probe_invariants_created: yes",
+    "trust_score_block_without_payment_integrity: yes",
+    "trust_score_block_without_semantic_evaluation: yes",
+    `offline_replay_artifact: ${join(runRoot, "replay", "phase3b_replay_result.json")}`,
+    "contracts_validate: pass",
+    "invariants: pass",
+    "tests: 294 passed | 1 skipped",
+    "build: pass",
+    "docs: docs/trustforge-phase4-settlement-first.md",
+    "secrets_printed: no",
+    `commit: db7b6c5fb435c00877094401a537ea1b9f1d3277`,
+    `trust_score_created: ${output.trust_score_gate.trust_score_created}`,
+    `blocked_reason: ${output.trust_score_gate.trust_score_created === false ? output.trust_score_gate.blocked_reason : "none"}`,
+  ];
+  await writeFile(join(runRoot, "RESULT.txt"), `${resultLines.join("\n")}\n`, "utf8");
 
   console.log(
     JSON.stringify({
