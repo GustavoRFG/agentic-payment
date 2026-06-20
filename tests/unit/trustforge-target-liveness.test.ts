@@ -137,4 +137,33 @@ describe("Target liveness handshake probe", () => {
     expect(outcome.paymentBearingHttpRequestCount).toBe(0);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps Bazaar discovery and probe modules disconnected from wallet and settlement code", () => {
+    const guardedFiles = [
+      "tools/trustforge/target-liveness.ts",
+      "tools/trustforge/target-resolution.ts",
+      "tools/run-trustforge-targets-discover.ts",
+    ];
+    const forbiddenPaidSymbols = [
+      "loadRichBuyerWallet",
+      "performRichTxExplainerPaidRequest",
+      "runRichTxExplainerPhase3",
+      "privateKeyToAccount",
+      "createWalletClient",
+    ];
+
+    for (const file of guardedFiles) {
+      const source = readFileSync(join(repoRoot, file), "utf8");
+      expect(source).not.toContain("dotenv");
+      for (const symbol of forbiddenPaidSymbols) {
+        expect(source).not.toContain(symbol);
+      }
+    }
+
+    const probeSource = readFileSync(
+      join(repoRoot, "tools", "trustforge", "target-liveness.ts"),
+      "utf8",
+    );
+    expect(probeSource).not.toContain("BUYER_PRIVATE_KEY");
+  });
 });
