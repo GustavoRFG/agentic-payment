@@ -61,10 +61,12 @@
     "demo:paid-real-local-controlled": "npm --prefix seller-api exec -- tsx tools/run-paid-real-local-controlled-payment.ts",
     "install:all": "npm --prefix seller-api install && npm --prefix buyer-client install"
   },
+  "dependencies": {
+    "@x402/core": "2.13.0",
+    "@x402/extensions": "2.13.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@x402/core": "2.13.0",
-    "@x402/extensions": "2.13.0",
     "vitest": "^2.1.0"
   }
 }
