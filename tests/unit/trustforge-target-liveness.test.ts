@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import type { BazaarResource } from "../../tools/trustforge/bazaar-client";
+import { runTargetResolution } from "../../tools/trustforge/target-resolution";
 import {
   classifyTargetProbeResponse,
   probeTargetLiveness,
@@ -12,6 +14,36 @@ import {
 import type { TargetCandidate } from "../../tools/trustforge/target-candidates";
 
 const repoRoot = join(__dirname, "..", "..");
+
+function headerNames(headers?: HeadersInit): string[] {
+  if (!headers) return [];
+  if (headers instanceof Headers) {
+    const names: string[] = [];
+    headers.forEach((_value, name) => names.push(name.toLowerCase()));
+    return names;
+  }
+  if (Array.isArray(headers)) {
+    return headers.map(([name]) => name.toLowerCase());
+  }
+  return Object.keys(headers).map((name) => name.toLowerCase());
+}
+
+function assertNoPaymentBearingHeaders(headers?: HeadersInit): void {
+  expect(containsX402PaymentHeader(headers)).toBe(false);
+  const names = headerNames(headers);
+  expect(names).not.toContain("authorization");
+  expect(names).not.toContain("x-payment");
+  expect(names).not.toContain("payment-signature");
+}
+
+function assertUnsignedDiscoveryBody(body: BodyInit | null | undefined): void {
+  if (body == null || body === "") return;
+  const text = typeof body === "string" ? body : String(body);
+  expect(text.toLowerCase()).not.toContain("payment-signature");
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  expect(parsed).not.toHaveProperty("payment");
+  expect(parsed).not.toHaveProperty("signature");
+}
 
 function readFixture(name: string): RecordedProbeResponse {
   const raw = JSON.parse(
@@ -62,6 +94,26 @@ function candidate(): TargetCandidate {
         maxTimeoutSeconds: 10,
       },
     ],
+  };
+}
+
+function zapperResource(): BazaarResource {
+  const probeCandidate = candidate();
+  return {
+    resourceUrl: probeCandidate.resourceUrl,
+    type: "http",
+    x402Version: probeCandidate.x402Version,
+    lastUpdated: probeCandidate.freshness.lastUpdated,
+    extensions: probeCandidate.registrationMetadata,
+    accepts: probeCandidate.accepts.map((accept) => ({
+      scheme: accept.scheme,
+      network: accept.network,
+      asset: accept.asset,
+      amount: accept.amountAtomic,
+      payTo: accept.payTo,
+      maxTimeoutSeconds: accept.maxTimeoutSeconds,
+      extra: { name: "USDC" },
+    })),
   };
 }
 
@@ -120,8 +172,11 @@ describe("Target liveness handshake probe", () => {
 
   it("does not send a payment-bearing header during the probe", async () => {
     const fixture = readFixture("zapper_phase5_live_402.json");
+    let capturedInit: RequestInit | undefined;
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      expect(containsX402PaymentHeader(init?.headers)).toBe(false);
+      capturedInit = init;
+      assertNoPaymentBearingHeaders(init?.headers);
+      assertUnsignedDiscoveryBody(init?.body ?? null);
       return new Response(JSON.stringify(fixture.body), {
         status: fixture.httpStatus ?? 402,
         headers: fixture.headers,
@@ -133,37 +188,42 @@ describe("Target liveness handshake probe", () => {
       maxTargetPriceAtomic: "10000",
     });
 
+    expect(capturedInit).toBeDefined();
+    assertNoPaymentBearingHeaders(capturedInit?.headers);
+    assertUnsignedDiscoveryBody(capturedInit?.body ?? null);
     expect(outcome.status).toBe("live_402_ok");
     expect(outcome.paymentBearingHttpRequestCount).toBe(0);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps Bazaar discovery and probe modules disconnected from wallet and settlement code", () => {
-    const guardedFiles = [
-      "tools/trustforge/target-liveness.ts",
-      "tools/trustforge/target-resolution.ts",
-      "tools/run-trustforge-targets-discover.ts",
-    ];
-    const forbiddenPaidSymbols = [
-      "loadRichBuyerWallet",
-      "performRichTxExplainerPaidRequest",
-      "runRichTxExplainerPhase3",
-      "privateKeyToAccount",
-      "createWalletClient",
-    ];
+  it("makes zero payment-bearing HTTP requests across full target resolution", async () => {
+    const fixture = readFixture("zapper_phase5_live_402.json");
+    const captured: Array<{ headers?: HeadersInit; body?: BodyInit | null }> = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      captured.push({ headers: init?.headers, body: init?.body ?? null });
+      assertNoPaymentBearingHeaders(init?.headers);
+      assertUnsignedDiscoveryBody(init?.body ?? null);
+      return new Response(JSON.stringify(fixture.body), {
+        status: fixture.httpStatus ?? 402,
+        headers: fixture.headers,
+      });
+    }) as unknown as typeof fetch;
 
-    for (const file of guardedFiles) {
-      const source = readFileSync(join(repoRoot, file), "utf8");
-      expect(source).not.toContain("dotenv");
-      for (const symbol of forbiddenPaidSymbols) {
-        expect(source).not.toContain(symbol);
-      }
+    const report = await runTargetResolution({
+      bazaarResources: [zapperResource()],
+      fetchImpl,
+      maxTargetPriceAtomic: "10000",
+      env: {},
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    for (const request of captured) {
+      assertNoPaymentBearingHeaders(request.headers);
+      assertUnsignedDiscoveryBody(request.body);
     }
-
-    const probeSource = readFileSync(
-      join(repoRoot, "tools", "trustforge", "target-liveness.ts"),
-      "utf8",
-    );
-    expect(probeSource).not.toContain("BUYER_PRIVATE_KEY");
+    expect(report.safety.paymentBearingHttpRequestCount).toBe(0);
+    expect(report.safety.walletLoaded).toBe(false);
+    expect(report.safety.settlementAttempted).toBe(false);
+    expect(report.handshakeOutcomes[0]?.status).toBe("live_402_ok");
   });
 });
