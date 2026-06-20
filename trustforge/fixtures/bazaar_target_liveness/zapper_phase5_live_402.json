@@ -1,0 +1,49 @@
+{
+  "fixture_schema": "trustforge_target_liveness_fixture.v1",
+  "source": "D:\\trustforge\\artifacts\\runs\\phase5-rich-provider-discovery\\run_20260615_031340\\03_unpaid_liveness_handshake.json",
+  "fixture_note": "Recorded real unpaid Zapper HTTP 402 challenge; no payment header, wallet, signature, or settlement.",
+  "httpStatus": 402,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "www-authenticate": "Payment id=\"7cbc2c3e-fbcb-4e15-a559-7136ed44b3d2\", realm=\"public.zapper.xyz\", method=\"tempo\", intent=\"charge\", request=\"eyJhbW91bnQiOiIxMTI1IiwiY3VycmVuY3kiOiIweDIwYzAwMDAwMDAwMDAwMDAwMDAwMDAwMGI5NTM3ZDExYzYwZThiNTAiLCJtZXRob2REZXRhaWxzIjp7ImNoYWluSWQiOjQyMTd9LCJyZWNpcGllbnQiOiIweDQzYTJhNzIwY2QwOTExNjkwYzI0ODA3NWY0YTI5YTVlNzcxNmY3NTgifQ\", description=\"Get human-readable interpretation, metadata, and balance changes for a specific transaction.\", expires=\"2026-06-15T03:14:15.241Z\""
+  },
+  "body": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://public.zapper.xyz/x402/transaction-details",
+      "description": "Get human-readable interpretation, metadata, and balance changes for a specific transaction.",
+      "mimeType": "application/json"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1125",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+        "maxTimeoutSeconds": 10,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "method": "POST",
+            "bodyType": "json",
+            "body": {
+              "hash": "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
+              "chainId": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

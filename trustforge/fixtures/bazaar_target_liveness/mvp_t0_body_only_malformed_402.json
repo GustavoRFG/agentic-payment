@@ -1,0 +1,17 @@
+{
+  "fixture_schema": "trustforge_target_liveness_fixture.v1",
+  "source": "D:\\trustforge\\artifacts\\runs\\mvp-t0-paid\\run_20260611_023143\\unpaid_body.json",
+  "fixture_note": "Recorded real HTTP 402 body from early MVP-T0 endpoint body capture. It intentionally lacks parseable x402 accepts[] in the body and is used as a malformed classifier regression.",
+  "httpStatus": 402,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "error": "Payment required",
+    "meta": {
+      "cost_usdc": "0.001",
+      "endpoint": "/api/chain/chain-id",
+      "network": "eip155:8453"
+    }
+  }
+}
