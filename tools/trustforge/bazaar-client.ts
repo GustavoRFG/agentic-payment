@@ -112,7 +112,16 @@ export class BazaarClient {
       const response = await client.extensions.bazaar.listResources({
         type: "http",
       });
-      const raw = Array.isArray(response.items) ? response.items : [];
+      if (!Array.isArray(response.items)) {
+        return {
+          ok: false,
+          facilitatorUrl: this.facilitatorUrl,
+          resources: [],
+          rawCount: 0,
+          error: "bazaar response missing items[] (shape mismatch)",
+        };
+      }
+      const raw = response.items;
       return {
         ok: true,
         facilitatorUrl: this.facilitatorUrl,

@@ -1,10 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  BazaarClient,
   DEFAULT_BAZAAR_FACILITATOR_URL,
   normalizeBazaarResource,
   resolveBazaarFacilitatorUrl,
 } from "../../tools/trustforge/bazaar-client";
+
+const listResourcesMock = vi.fn();
+
+vi.mock("@x402/core/http", () => ({
+  HTTPFacilitatorClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("@x402/extensions", () => ({
+  withBazaar: vi.fn(() => ({
+    extensions: {
+      bazaar: {
+        listResources: listResourcesMock,
+      },
+    },
+  })),
+}));
 
 describe("BazaarClient discovery wrapper", () => {
   it("defaults to the public x402 facilitator and allows env override", () => {
@@ -53,6 +70,22 @@ describe("BazaarClient discovery wrapper", () => {
         },
       ],
       extensions: { bazaar: { score: "ignored" } },
+    });
+  });
+
+  it("surfaces a shape mismatch instead of returning an empty ok result", async () => {
+    listResourcesMock.mockResolvedValueOnce({ resources: [] });
+
+    const result = await new BazaarClient({
+      facilitatorUrl: "https://facilitator.example",
+    }).listHttpResources();
+
+    expect(result).toEqual({
+      ok: false,
+      facilitatorUrl: "https://facilitator.example",
+      resources: [],
+      rawCount: 0,
+      error: "bazaar response missing items[] (shape mismatch)",
     });
   });
 });
