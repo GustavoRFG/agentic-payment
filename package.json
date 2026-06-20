@@ -35,6 +35,7 @@
     "trustforge:phase5:discovery": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-phase5-rich-provider-discovery.ts",
     "trustforge:phase6:paid-rich-probe": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-phase6-single-paid-rich-probe.ts",
     "trustforge:phase6:invariants": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-phase6-invariants.ts",
+    "trustforge:targets:discover": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-targets-discover.ts",
     "trustforge:onchain:reconcile": "python tools/run-onchain-settlement-reconciliation.py",
     "trustforge:rich:assert-invariants": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-rich-invariants.ts",
     "mcp:build": "npm --prefix mcp-gateway run build",
