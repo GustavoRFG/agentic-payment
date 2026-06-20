@@ -12,6 +12,7 @@ import { runRichTxExplainerPhase3 } from "./run-trustforge-rich-tx-explainer";
 import {
   validateHumanPaymentAuthorization,
   type HumanPaymentAuthorization,
+  type TargetSelectionAuditMetadata,
 } from "./trustforge/validate-human-payment-authorization";
 import {
   TRUSTFORGE_AUTHORIZE_RICH_TX_EXPLAINER_ENV,
@@ -142,6 +143,7 @@ export async function runPhase6SinglePaidRichProbe(
     endpoint: string;
     quote_amount_usdc?: string;
     recommended_max_usdc?: string;
+    target_selection_audit?: TargetSelectionAuditMetadata | null;
   }>(selectedPath);
 
   const validation = validateHumanPaymentAuthorization(auth, selected);
@@ -166,6 +168,8 @@ export async function runPhase6SinglePaidRichProbe(
     options.runDir ??
     join(WORKSPACE, "artifacts", "runs", "phase6-single-paid-rich-probe", runId);
   await mkdir(runDir, { recursive: true });
+  const targetSelectionAudit =
+    selected.target_selection_audit ?? auth.target_selection_audit ?? null;
 
   if (!options.finalizeOnly) {
     try {
@@ -202,6 +206,7 @@ export async function runPhase6SinglePaidRichProbe(
     phase5_run: phase5RunDir,
     commit_before: commitBefore,
     strict_one_payment: true,
+    target_selection_audit: targetSelectionAudit,
   });
 
   const armedEnv: Record<string, string | undefined> = {
@@ -241,12 +246,15 @@ export async function finalizePhase6Run(input: {
     service_id: string;
     endpoint: string;
     quote_amount_usdc?: string;
+    target_selection_audit?: TargetSelectionAuditMetadata | null;
   };
   readonly commitBefore: string;
   readonly phase5RunDir: string;
 }): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
   const { runDir, richRunDir, auth, selected, commitBefore, phase5RunDir } = input;
   const runId = runDir.split(/[\\/]/).pop() ?? "phase6_unknown";
+  const targetSelectionAudit =
+    selected.target_selection_audit ?? auth.target_selection_audit ?? null;
 
   const richResult = existsSync(join(richRunDir, "RESULT.txt"))
     ? await readFile(join(richRunDir, "RESULT.txt"), "utf8")
@@ -394,6 +402,7 @@ export async function finalizePhase6Run(input: {
   await writeJson(join(runDir, "payment_attempt_ledger.json"), {
     schema_version: "trustforge_payment_attempt_ledger_v0.1.0",
     service_id: selected.service_id,
+    target_selection_audit: targetSelectionAudit,
     entries: [ledgerEntry],
     actual_total_spend_usdc: actualSpend,
     reconciled_settlement_count: txHash ? 1 : 0,
@@ -477,6 +486,9 @@ export async function finalizePhase6Run(input: {
     `provider: ${auth.provider}`,
     `service_id: ${auth.service_id}`,
     `endpoint: ${auth.endpoint}`,
+    `selected_resource_url: ${targetSelectionAudit?.selected_resource_url ?? selected.endpoint}`,
+    `target_handshake_status: ${targetSelectionAudit?.handshake_status ?? "not_recorded"}`,
+    `target_fallback_count: ${targetSelectionAudit?.fallback_resource_urls.length ?? 0}`,
     `authorized_max_usdc: ${auth.max_usdc}`,
     `actual_spend_usdc: ${actualSpend ?? "null"}`,
     `payment_attempt_count: ${paymentAttempted ? 1 : 0}`,
@@ -511,6 +523,8 @@ export async function finalizePhase6Run(input: {
       `- Status: **${phase6Status}**`,
       `- Rich orchestrator: ${probeStatus}`,
       `- Provider: ${auth.provider}`,
+      `- Selected resource: ${targetSelectionAudit?.selected_resource_url ?? selected.endpoint}`,
+      `- Target handshake: ${targetSelectionAudit?.handshake_status ?? "not recorded"}`,
       `- Settlement tx: ${txHash ?? "null"}`,
       `- Payment integrity: ${paymentIntegrity.status}`,
       `- Semantic: ${semanticStatus}`,
@@ -518,6 +532,12 @@ export async function finalizePhase6Run(input: {
       "",
       "## PAID invariants",
       ...paidInvariants.map((i) => `- ${i.id}: ${i.passed ? "PASS" : "FAIL"} — ${i.detail}`),
+      "",
+      "## Target selection audit",
+      targetSelectionAudit
+        ? `- Fallbacks considered: ${targetSelectionAudit.fallback_resource_urls.join(", ") || "none"}`
+        : "- No target_selection_audit supplied",
+      ...(targetSelectionAudit?.scoring_rationale.map((r) => `- ${r}`) ?? []),
     ].join("\n"),
   );
   await writeText(join(runDir, "RESULT.txt"), `${resultLines.join("\n")}\n`);
@@ -532,6 +552,7 @@ export async function finalizePhase6Run(input: {
     payment_header_sent: paymentAttempted,
     payment_bearing_http_request_count: paymentBearingCount,
     settlement_tx_hash: txHash,
+    target_selection_audit: targetSelectionAudit,
   });
 
   return { runDir, status: phase6Status, resultLines };
@@ -555,6 +576,7 @@ async function main(): Promise<number> {
         service_id: string;
         endpoint: string;
         quote_amount_usdc?: string;
+        target_selection_audit?: TargetSelectionAuditMetadata | null;
       }>(join(phase5RunDir, "selected_candidate.json"));
       const result = await finalizePhase6Run({
         runDir,

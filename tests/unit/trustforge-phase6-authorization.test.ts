@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   validateHumanPaymentAuthorization,
   type HumanPaymentAuthorization,
+  type TargetSelectionAuditMetadata,
 } from "../../tools/trustforge/validate-human-payment-authorization";
 
 const selected = {
@@ -22,6 +23,13 @@ const validAuth: HumanPaymentAuthorization = {
   require_dedicated_wallet: true,
   decided_at: "2026-06-15T03:30:00-03:00",
   rationale: "authorized once",
+};
+
+const audit: TargetSelectionAuditMetadata = {
+  selected_resource_url: "https://public.zapper.xyz/x402/transaction-details",
+  handshake_status: "live_402_ok",
+  fallback_resource_urls: ["https://fallback.example/x402"],
+  scoring_rationale: ["price ascending", "handshake live_402_ok"],
 };
 
 describe("validateHumanPaymentAuthorization", () => {
@@ -45,5 +53,47 @@ describe("validateHumanPaymentAuthorization", () => {
       selected,
     );
     expect(result.valid).toBe(false);
+  });
+
+  it("accepts matching target selection audit metadata", () => {
+    const result = validateHumanPaymentAuthorization(
+      { ...validAuth, target_selection_audit: audit },
+      { ...selected, target_selection_audit: audit },
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects target selection audit selected URL mismatch", () => {
+    const result = validateHumanPaymentAuthorization(
+      validAuth,
+      {
+        ...selected,
+        target_selection_audit: {
+          ...audit,
+          selected_resource_url: "https://other.example/x402",
+        },
+      },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reasons).toContain(
+      "selected_candidate target_selection_audit selected_resource_url mismatch vs selected_candidate",
+    );
+  });
+
+  it("rejects conflicting authorization and selected audit metadata", () => {
+    const result = validateHumanPaymentAuthorization(
+      {
+        ...validAuth,
+        target_selection_audit: {
+          ...audit,
+          scoring_rationale: ["different rationale"],
+        },
+      },
+      { ...selected, target_selection_audit: audit },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reasons).toContain(
+      "authorization target_selection_audit mismatch vs selected_candidate",
+    );
   });
 });
