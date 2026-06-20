@@ -180,4 +180,32 @@ describe("deterministic target selection", () => {
       stableStringifyTargetSelection(second),
     );
   });
+
+  it("uses reliability as advisory third key after price and freshness", () => {
+    const lower = candidate({
+      id: "lower_reliability",
+      url: "https://lower.example/x402",
+      freshness: "2026-06-20T00:00:00.000Z",
+    });
+    const higher = candidate({
+      id: "higher_reliability",
+      url: "https://higher.example/x402",
+      freshness: "2026-06-20T00:00:00.000Z",
+    });
+
+    const report = selectTargets({
+      candidates: [lower, higher],
+      outcomes: [
+        outcome({ id: "lower_reliability", url: lower.resourceUrl, quoteAtomic: "1000" }),
+        outcome({ id: "higher_reliability", url: higher.resourceUrl, quoteAtomic: "1000" }),
+      ],
+      reliabilityMetrics: [
+        { resourceUrl: lower.resourceUrl, reliabilityScore: 1 },
+        { resourceUrl: higher.resourceUrl, reliabilityScore: 10 },
+      ],
+    });
+
+    expect(report.primary?.candidateId).toBe("higher_reliability");
+    expect(report.primary?.score.reliabilityScore).toBe(10);
+  });
 });
