@@ -3,6 +3,7 @@
  */
 
 import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { BazaarClient, type BazaarDiscoveryResult, type BazaarResource } from "./bazaar-client";
 import {
   filterTargetCandidates,
@@ -77,6 +78,42 @@ export interface TargetResolutionReport {
   readonly safety: TargetResolutionSafety;
 }
 
+export interface CanonicalTargetHandshakeSummary {
+  readonly candidateId: string;
+  readonly resourceUrl: string;
+  readonly status: TargetHandshakeOutcome["status"];
+  readonly quoteAtomic: string | null;
+  readonly quoteUsdc: string | null;
+  readonly challengeNoncePresent: boolean;
+  readonly challengeExpiryPresent: boolean;
+}
+
+export interface CanonicalTargetResolution {
+  readonly schema_version: "trustforge_target_resolution.v1";
+  readonly stage: TargetResolutionReport["stage"];
+  readonly mode: TargetResolutionReport["mode"];
+  readonly discovery: TargetResolutionReport["discovery"];
+  readonly filter: TargetResolutionReport["filter"];
+  readonly reliability: {
+    readonly enabled: boolean;
+    readonly skipped: boolean;
+    readonly skipReason: string | null;
+    readonly cacheHit: boolean;
+    readonly source: ReliabilityEnrichmentResult["source"];
+  };
+  readonly candidates: TargetResolutionReport["candidates"];
+  readonly handshakeSummary: readonly CanonicalTargetHandshakeSummary[];
+  readonly selection: TargetSelectionReport;
+  readonly chosenTarget: TargetSelectionReport["primary"];
+  readonly orderedFallbacks: TargetSelectionReport["fallbacks"];
+  readonly safety: TargetResolutionSafety;
+}
+
+export interface TargetResolutionEvidence {
+  readonly schema_version: "trustforge_target_resolution_evidence.v1";
+  readonly handshakeOutcomes: readonly TargetHandshakeOutcome[];
+}
+
 export interface TargetResolutionOptions {
   readonly bazaarClient?: Pick<BazaarClient, "listHttpResources">;
   readonly bazaarResources?: readonly BazaarResource[];
@@ -144,6 +181,73 @@ function reliabilitySummary(result: ReliabilityEnrichmentResult): TargetResoluti
 
 export function stableStringifyTargetResolution(report: TargetResolutionReport): string {
   return `${JSON.stringify(report, null, 2)}\n`;
+}
+
+function canonicalReliability(
+  reliability: TargetResolutionReport["reliability"],
+): CanonicalTargetResolution["reliability"] {
+  return {
+    enabled: reliability.enabled,
+    skipped: reliability.skipped,
+    skipReason: reliability.skipReason,
+    cacheHit: reliability.cacheHit,
+    source: reliability.source,
+  };
+}
+
+export function canonicalTargetResolution(
+  report: TargetResolutionReport,
+): CanonicalTargetResolution {
+  return {
+    schema_version: report.schema_version,
+    stage: report.stage,
+    mode: report.mode,
+    discovery: report.discovery,
+    filter: report.filter,
+    reliability: canonicalReliability(report.reliability),
+    candidates: report.candidates,
+    handshakeSummary: report.handshakeOutcomes.map((outcome) => ({
+      candidateId: outcome.candidateId,
+      resourceUrl: outcome.resourceUrl,
+      status: outcome.status,
+      quoteAtomic: outcome.quoteAtomic,
+      quoteUsdc: outcome.quoteUsdc,
+      challengeNoncePresent: Boolean(outcome.challenge.nonce),
+      challengeExpiryPresent: Boolean(outcome.challenge.expiresAt),
+    })),
+    selection: report.selection,
+    chosenTarget: report.chosenTarget,
+    orderedFallbacks: report.orderedFallbacks,
+    safety: report.safety,
+  };
+}
+
+export function targetResolutionEvidence(
+  report: TargetResolutionReport,
+): TargetResolutionEvidence {
+  return {
+    schema_version: "trustforge_target_resolution_evidence.v1",
+    handshakeOutcomes: report.handshakeOutcomes,
+  };
+}
+
+export function stableStringifyCanonicalTargetResolution(
+  canonical: CanonicalTargetResolution,
+): string {
+  return `${JSON.stringify(canonical, null, 2)}\n`;
+}
+
+export function stableStringifyTargetResolutionEvidence(
+  evidence: TargetResolutionEvidence,
+): string {
+  return `${JSON.stringify(evidence, null, 2)}\n`;
+}
+
+export function targetResolutionEvidencePath(outputPath: string): string {
+  if (outputPath.endsWith("target_selection.json")) {
+    return outputPath.replace(/target_selection\.json$/, "target_selection_evidence.json");
+  }
+  return join(dirname(outputPath), "target_selection_evidence.json");
 }
 
 export async function runTargetResolution(
@@ -225,7 +329,18 @@ export async function runTargetResolution(
   };
 
   if (options.outputPath) {
-    await writeFile(options.outputPath, stableStringifyTargetResolution(report), "utf8");
+    const canonical = canonicalTargetResolution(report);
+    await writeFile(
+      options.outputPath,
+      stableStringifyCanonicalTargetResolution(canonical),
+      "utf8",
+    );
+    const evidencePath = targetResolutionEvidencePath(options.outputPath);
+    await writeFile(
+      evidencePath,
+      stableStringifyTargetResolutionEvidence(targetResolutionEvidence(report)),
+      "utf8",
+    );
   }
 
   return report;

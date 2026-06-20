@@ -5,7 +5,12 @@ import { describe, expect, it } from "vitest";
 
 import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import type { BazaarResource } from "../../tools/trustforge/bazaar-client";
-import { runTargetResolution } from "../../tools/trustforge/target-resolution";
+import {
+  canonicalTargetResolution,
+  runTargetResolution,
+  stableStringifyCanonicalTargetResolution,
+  targetResolutionEvidencePath,
+} from "../../tools/trustforge/target-resolution";
 import type { TargetCandidate } from "../../tools/trustforge/target-candidates";
 import type { TargetHandshakeOutcome } from "../../tools/trustforge/target-liveness";
 
@@ -38,7 +43,14 @@ function resource(input: {
   };
 }
 
-function liveOutcome(candidate: TargetCandidate, quoteAtomic: string): TargetHandshakeOutcome {
+function liveOutcome(
+  candidate: TargetCandidate,
+  quoteAtomic: string,
+  challenge: { nonce: string; expiresAt: string } = {
+    nonce: "nonce",
+    expiresAt: "2026-06-20T00:00:00.000Z",
+  },
+): TargetHandshakeOutcome {
   return {
     candidateId: candidate.candidateId,
     resourceUrl: candidate.resourceUrl,
@@ -52,13 +64,15 @@ function liveOutcome(candidate: TargetCandidate, quoteAtomic: string): TargetHan
       payTo: "0x1111111111111111111111111111111111111111",
       maxTimeoutSeconds: 300,
     },
-    challenge: {
-      nonce: "nonce",
-      expiresAt: "2026-06-20T00:00:00.000Z",
-    },
+    challenge,
     quoteAtomic,
     quoteUsdc: quoteAtomic === "1000" ? "0.001" : "0.002",
-    rawResponse: { httpStatus: 402, headers: {}, body: {}, bodySha256: null },
+    rawResponse: {
+      httpStatus: 402,
+      headers: { "www-authenticate": `Payment id="${challenge.nonce}"` },
+      body: {},
+      bodySha256: challenge.nonce,
+    },
     detail: null,
     walletUsed: false,
     paymentAttempted: false,
@@ -112,7 +126,60 @@ describe("TARGET RESOLUTION dry-run stage", () => {
         paymentBearingHttpRequestCount: 0,
       });
       expect(readFileSync(outputPath, "utf8")).toBe(
-        JSON.stringify(report, null, 2) + "\n",
+        stableStringifyCanonicalTargetResolution(canonicalTargetResolution(report)),
+      );
+      expect(readFileSync(targetResolutionEvidencePath(outputPath), "utf8")).toContain(
+        '"handshakeOutcomes"',
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps target_selection.json byte-stable when only challenge nonce and expiry differ", async () => {
+    const resources = [
+      resource({
+        url: "https://stable.example/x402",
+        amount: "1000",
+        lastUpdated: "2026-06-20T00:00:00.000Z",
+      }),
+    ];
+    const root = mkdtempSync(join(tmpdir(), "trustforge-target-resolution-stable-"));
+    const dirA = join(root, "a");
+    const dirB = join(root, "b");
+    mkdirSync(dirA, { recursive: true });
+    mkdirSync(dirB, { recursive: true });
+    const outputA = join(dirA, "target_selection.json");
+    const outputB = join(dirB, "target_selection.json");
+    const baseOptions = {
+      bazaarResources: resources,
+      maxTargetPriceAtomic: "10000",
+      env: {},
+    };
+
+    try {
+      await runTargetResolution({
+        ...baseOptions,
+        outputPath: outputA,
+        probeTarget: async (candidate) =>
+          liveOutcome(candidate, "1000", {
+            nonce: "nonce-a",
+            expiresAt: "2026-06-20T00:00:00.000Z",
+          }),
+      });
+      await runTargetResolution({
+        ...baseOptions,
+        outputPath: outputB,
+        probeTarget: async (candidate) =>
+          liveOutcome(candidate, "1000", {
+            nonce: "nonce-b",
+            expiresAt: "2026-06-21T00:00:00.000Z",
+          }),
+      });
+
+      expect(readFileSync(outputA, "utf8")).toBe(readFileSync(outputB, "utf8"));
+      expect(readFileSync(targetResolutionEvidencePath(outputA), "utf8")).not.toBe(
+        readFileSync(targetResolutionEvidencePath(outputB), "utf8"),
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
