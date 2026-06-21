@@ -37,7 +37,7 @@ Useful flags:
 
 ```powershell
 npm run trustforge:targets:discover -- --max-target-price-atomic 10000
-npm run trustforge:targets:discover -- --facilitator-url https://x402.org/facilitator
+npm run trustforge:targets:discover -- --facilitator-url https://api.cdp.coinbase.com/platform/v2/x402
 npm run trustforge:targets:discover -- --with-indexer --indexer-url <url>
 ```
 

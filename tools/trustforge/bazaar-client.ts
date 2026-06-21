@@ -2,12 +2,14 @@
  * bazaar-client - thin TrustForge boundary over official x402 Bazaar discovery.
  */
 
+import { MAINNET_FACILITATOR_URL } from "../../shared/payment-safety";
 import { HTTPFacilitatorClient } from "@x402/core/http";
 import { withBazaar } from "@x402/extensions";
 import type { DiscoveryResource } from "@x402/extensions";
 import type { PaymentRequirements } from "@x402/core/types";
 
-export const DEFAULT_BAZAAR_FACILITATOR_URL = "https://x402.org/facilitator" as const;
+/** CDP Bazaar discovery (x402.org/facilitator no longer serves /discovery/resources). */
+export const DEFAULT_BAZAAR_FACILITATOR_URL = MAINNET_FACILITATOR_URL;
 export const TRUSTFORGE_BAZAAR_FACILITATOR_URL_ENV =
   "TRUSTFORGE_BAZAAR_FACILITATOR_URL" as const;
 

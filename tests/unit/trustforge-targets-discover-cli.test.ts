@@ -79,7 +79,7 @@ describe("trustforge:targets:discover CLI", () => {
       "--max-target-price-atomic",
       "1000",
       "--facilitator-url",
-      "https://x402.org/facilitator",
+      "https://api.cdp.coinbase.com/platform/v2/x402",
       "--with-indexer",
       "--indexer-url",
       "https://indexer.example/metrics",
@@ -89,7 +89,7 @@ describe("trustforge:targets:discover CLI", () => {
 
     expect(parsed).toMatchObject({
       maxTargetPriceAtomic: "1000",
-      facilitatorUrl: "https://x402.org/facilitator",
+      facilitatorUrl: "https://api.cdp.coinbase.com/platform/v2/x402",
       withIndexer: true,
       indexerUrl: "https://indexer.example/metrics",
       reliabilityCachePath: "cache.json",

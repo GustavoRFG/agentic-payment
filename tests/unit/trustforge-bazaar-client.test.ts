@@ -24,8 +24,11 @@ vi.mock("@x402/extensions", () => ({
 }));
 
 describe("BazaarClient discovery wrapper", () => {
-  it("defaults to the public x402 facilitator and allows env override", () => {
+  it("defaults to the CDP mainnet facilitator and allows env override", () => {
     expect(resolveBazaarFacilitatorUrl({})).toBe(DEFAULT_BAZAAR_FACILITATOR_URL);
+    expect(DEFAULT_BAZAAR_FACILITATOR_URL).toBe(
+      "https://api.cdp.coinbase.com/platform/v2/x402",
+    );
     expect(
       resolveBazaarFacilitatorUrl({
         TRUSTFORGE_BAZAAR_FACILITATOR_URL: "https://facilitator.example",
