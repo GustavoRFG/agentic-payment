@@ -1,30 +1,26 @@
 /**
- * sepolia-settlement-executor — single-shot Base Sepolia x402 payment (human key only).
+ * sepolia-settlement-executor — Sepolia orchestration wrapper over shared x402 executor.
  */
 
-import { randomUUID } from "node:crypto";
-import { privateKeyToAccount } from "viem/accounts";
-import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
-import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import {
   PAYMENT_AMOUNT_USD,
   TESTNET_NETWORK,
   TESTNET_USDC_ADDRESS,
 } from "../../shared/payment-safety";
-import { createPaidInvocationGuard } from "../../buyer-client/src/paid-invocation-guard";
-import { createPaymentBearingRequestGuard } from "../../buyer-client/src/payment-bearing-request-guard";
 import { runPaidQuoteFreshnessPreflight } from "./paid-quote-freshness-preflight";
-import {
-  assertMainnetBuyerKeyAbsent,
-  preSignSepoliaGuards,
-  readSepoliaBuyerPrivateKey,
-} from "./sepolia-settlement-guards";
+import { assertMainnetBuyerKeyAbsent } from "./sepolia-settlement-guards";
 import {
   validateHumanPaymentAuthorization,
   type HumanPaymentAuthorization,
 } from "./validate-human-payment-authorization";
 import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
-import { SEPOLIA_CHAIN_ID } from "./network-config";
+import { hashAuthorizationContent } from "./authorization-consumption-ledger";
+import { parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
+import {
+  executeSingleX402Settlement,
+  type SingleSettlementExecutionResult,
+} from "./x402-single-settlement-executor";
+import { SEPOLIA_BUYER_PRIVATE_KEY_ENV, SEPOLIA_TESTNET_BUYER_WALLET } from "./network-config";
 
 export interface SepoliaSettlementExecutionResult {
   readonly ok: boolean;
@@ -35,11 +31,25 @@ export interface SepoliaSettlementExecutionResult {
   readonly responseBodyPreview: string;
   readonly buyerAddress: string;
   readonly network: typeof TESTNET_NETWORK;
+  readonly facilitatorTransactionHash: string | null;
+  readonly attemptId: string;
+  readonly intentPath: string;
 }
 
-function decodePaymentRequiredHeader(value: string): { accepts?: Array<Record<string, unknown>> } {
-  const decoded = Buffer.from(value, "base64").toString("utf-8");
-  return JSON.parse(decoded) as { accepts?: Array<Record<string, unknown>> };
+function mapSepoliaResult(result: SingleSettlementExecutionResult): SepoliaSettlementExecutionResult {
+  return {
+    ok: result.ok,
+    status: result.status,
+    httpStatus: result.httpStatus,
+    paymentAttempted: result.paymentAttempted,
+    paymentBearingHttpRequestCount: result.paymentBearingHttpRequestCount,
+    responseBodyPreview: result.responseBodyPreview,
+    buyerAddress: result.buyerAddress,
+    network: TESTNET_NETWORK,
+    facilitatorTransactionHash: result.facilitatorTransactionHash,
+    attemptId: result.attemptId,
+    intentPath: result.intentPath,
+  };
 }
 
 export async function executeSepoliaSingleSettlement(input: {
@@ -49,6 +59,7 @@ export async function executeSepoliaSingleSettlement(input: {
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly skipFreshnessPreflight?: boolean;
+  readonly authorizationHash?: string;
 }): Promise<SepoliaSettlementExecutionResult> {
   const env = input.env ?? process.env;
   assertMainnetBuyerKeyAbsent(env);
@@ -79,80 +90,36 @@ export async function executeSepoliaSingleSettlement(input: {
     }
   }
 
-  const privateKey = readSepoliaBuyerPrivateKey(env);
-  const { buyerAddress } = preSignSepoliaGuards({
-    privateKey,
-    network: input.selected.network,
-    chainId: SEPOLIA_CHAIN_ID,
-    env,
-  });
-
-  const fetchImpl = input.fetchImpl ?? fetch;
-  const requestId = randomUUID();
+  const authorizationHash =
+    input.authorizationHash ?? hashAuthorizationContent(JSON.stringify(input.auth));
+  const maxAmountAtomic = parseUsdcDecimalToAtomic(input.auth.max_usdc).toString();
   const requestBody = {
     text: "TrustForge Sepolia settlement proof — single authorized attempt.",
     mode: "full",
   };
 
-  const unpaid = await fetchImpl(input.selected.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Agentic-Request-Id": requestId,
+  const result = await executeSingleX402Settlement({
+    request: {
+      network: input.selected.network,
+      privateKeyEnvName: SEPOLIA_BUYER_PRIVATE_KEY_ENV,
+      expectedBuyerAddress: SEPOLIA_TESTNET_BUYER_WALLET,
+      endpoint: input.selected.endpoint,
+      method: "POST",
+      body: requestBody,
+      asset: input.selected.asset ?? TESTNET_USDC_ADDRESS,
+      payTo: input.selected.authorized_pay_to,
+      quotedAmountAtomic: input.selected.quote_atomic,
+      maxAmountAtomic,
+      runDir: input.runDir,
+      authorizationHash,
+      require402BeforePayment: true,
+      expectedNetworkIn402: TESTNET_NETWORK,
     },
-    body: JSON.stringify(requestBody),
+    env,
+    fetchImpl: input.fetchImpl,
   });
-  if (unpaid.status !== 402) {
-    throw new Error(`BLOCKED_SELLER_API: expected 402, got ${unpaid.status}`);
-  }
-  const rawHeader =
-    unpaid.headers.get("payment-required") ?? unpaid.headers.get("PAYMENT-REQUIRED");
-  if (!rawHeader) {
-    throw new Error("BLOCKED_SELLER_API: missing PAYMENT-REQUIRED header");
-  }
-  const envelope = decodePaymentRequiredHeader(rawHeader);
-  const accepts = envelope.accepts ?? [];
-  const rail = accepts.find(
-    (entry) =>
-      entry.network === TESTNET_NETWORK &&
-      String(entry.asset ?? "").toLowerCase() === TESTNET_USDC_ADDRESS.toLowerCase(),
-  );
-  if (!rail) {
-    throw new Error("BLOCKED_SELLER_API: no Sepolia USDC accept entry");
-  }
 
-  const paidInvocationGuard = createPaidInvocationGuard();
-  const paymentBearingGuard = createPaymentBearingRequestGuard();
-  const signer = privateKeyToAccount(privateKey as `0x${string}`);
-  const client = new x402Client();
-  registerExactEvmScheme(client, { signer });
-  const guardedFetch: typeof fetch = async (reqInput, init) => {
-    paymentBearingGuard.inspectRequest(reqInput, init);
-    return fetchImpl(reqInput, init);
-  };
-  const fetchWithPayment = wrapFetchWithPayment(guardedFetch, client);
-  paidInvocationGuard.assertNext();
-  const response = await fetchWithPayment(input.selected.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Agentic-Request-Id": requestId,
-    },
-    body: JSON.stringify(requestBody),
-  });
-  const body = await response.text();
-  const paymentBearingCount = paymentBearingGuard.getPaymentBearingRequests();
-  const ok = response.status >= 200 && response.status < 300;
-  return {
-    ok,
-    status: ok ? "SETTLEMENT_HTTP_OK" : "SETTLEMENT_HTTP_FAIL",
-    httpStatus: response.status,
-    paymentAttempted: paymentBearingCount > 0,
-    paymentBearingHttpRequestCount: paymentBearingCount,
-    responseBodyPreview: body.slice(0, 500),
-    buyerAddress,
-    network: TESTNET_NETWORK,
-  };
+  return mapSepoliaResult(result);
 }
 
 export function assertSepoliaQuoteWithinMax(

@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { adaptDiscoveredPrimaryToSelectedCandidate } from "../../tools/trustforge/discovered-target-to-selected-candidate";
 import {
   classifySepoliaSettlement,
+  confirmSepoliaSettlementBinding,
   parseReconciliationLedger,
 } from "../../tools/trustforge/sepolia-settlement-classify";
+import { buildSettlementIntent } from "../../tools/trustforge/settlement-run-binding";
 import {
   buildSepoliaTargetSelectionFromHandshake,
   parseSepoliaSeller402Response,
@@ -175,6 +177,44 @@ describe("Sepolia settlement proof pipeline", () => {
       settlements: [{ tx_hash: "0xdead", matched_run: "Sepolia_settlement_proof" }],
     });
     expect(parsed.settlementTxHash).toBe("0xdead");
+  });
+
+  it("binding metrics reach 1/1 when independent match agrees with facilitator hash", () => {
+    const intent = buildSettlementIntent({
+      attemptId: "attempt_1",
+      runId: "run_1",
+      authorizationHash: "hash",
+      network: TESTNET_NETWORK,
+      buyer: SEPOLIA_TESTNET_BUYER_WALLET,
+      payTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",
+      asset: TESTNET_USDC_ADDRESS,
+      amountAtomic: "1000",
+      now: new Date("2026-06-21T04:53:46.000Z"),
+    });
+    const ledger = {
+      reconciliation_status: "RECONCILIATION_PASS",
+      safe_to_use_for_payment_verification: true,
+      unattributed_settlements_found: 0,
+      balance_identity_status: "pass",
+      settlements: [
+        {
+          tx_hash: "0xb3329fecc3ec9e5470f21d9c255475c7d8acb2f596aaa7fcf1c18fd579c4e99b",
+          to: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",
+          value_atomic: "1000",
+          timestamp_utc: "2026-06-21T04:54:00.000Z",
+        },
+      ],
+    };
+    const { binding, metrics } = confirmSepoliaSettlementBinding({
+      intent,
+      ledger,
+      facilitatorReportedHash:
+        "0xb3329fecc3ec9e5470f21d9c255475c7d8acb2f596aaa7fcf1c18fd579c4e99b",
+    });
+    expect(binding.settlement_status).toBe("confirmed");
+    expect(metrics.total_outflow_settlements_found).toBe(1);
+    expect(metrics.phase6_settlements_identified).toBe(1);
+    expect(metrics.unattributed_settlements_found).toBe(0);
   });
 });
 

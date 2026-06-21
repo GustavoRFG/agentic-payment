@@ -1,5 +1,7 @@
 /**
  * rich-tx-explainer-live-bindings — wallet load + paid POST for allowlisted tx_explainer.
+ *
+ * Settlement signing/send core delegates to x402-single-settlement-executor.
  */
 
 import { createHash } from "node:crypto";
@@ -12,13 +14,18 @@ import {
   createPaymentBearingRequestGuard,
   type PaymentBearingRequestGuard,
 } from "../../buyer-client/src/payment-bearing-request-guard";
-import { compareUsdcDecimal } from "./external-x402-get-policy";
+import { compareUsdcDecimal, parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
 import {
   buildPaid402Capture,
   PaidRequest402Error,
 } from "./paid-402-response-sanitize";
 import type { RichTxExplainerHandshake } from "./rich-tx-explainer-handshake";
 import type { RichTxExplainerPolicy } from "./rich-tx-explainer-policy";
+import {
+  MAINNET_BUYER_PRIVATE_KEY_ENV,
+  MAINNET_BUYER_WALLET,
+} from "./network-config";
+import { executeSingleX402Settlement } from "./x402-single-settlement-executor";
 
 export interface RichPaidResponse {
   readonly httpStatus: number;
@@ -36,12 +43,13 @@ export interface RichPaidResponse {
   readonly paymentHeaderSent: boolean;
   readonly paymentResponseHeaderPresent: boolean;
   readonly paymentResponseHeaderSha256: string | null;
+  readonly settlementIntentPath: string | null;
+  readonly settlementAttemptId: string | null;
 }
 
 export interface RichWalletHandle {
   readonly walletFingerprint: string;
   readonly publicAddress?: string;
-  readonly signer: unknown;
 }
 
 function sha256(value: string): string {
@@ -50,20 +58,19 @@ function sha256(value: string): string {
 
 export async function loadRichBuyerWallet(
   env: Record<string, string | undefined>,
-  importModule: (specifier: string) => Promise<unknown> = (specifier) => import(specifier),
 ): Promise<RichWalletHandle> {
   const privateKey = env.BUYER_PRIVATE_KEY?.trim() ?? "";
   if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
     throw new Error("BUYER_PRIVATE_KEY is not configured for rich tx explainer paid probe");
   }
-  const accounts = (await importModule(
-    "../../buyer-client/node_modules/viem/_esm/accounts/index.js",
-  )) as { readonly privateKeyToAccount: (key: `0x${string}`) => { address: string } };
-  const account = accounts.privateKeyToAccount(privateKey as `0x${string}`);
+  if (env.SEPOLIA_BUYER_PRIVATE_KEY?.trim()) {
+    throw new Error(
+      "BLOCKED_CROSS_NETWORK_KEY: SEPOLIA_BUYER_PRIVATE_KEY must be absent during mainnet paid probe",
+    );
+  }
   return {
-    signer: account,
-    publicAddress: account.address,
-    walletFingerprint: sha256(account.address.toLowerCase()).slice(0, 16),
+    publicAddress: MAINNET_BUYER_WALLET,
+    walletFingerprint: sha256(MAINNET_BUYER_WALLET.toLowerCase()).slice(0, 16),
   };
 }
 
@@ -75,12 +82,16 @@ export async function performRichTxExplainerPaidRequest(options: {
   readonly paidInvocationGuard: PaidInvocationGuard;
   readonly paymentBearingGuard: PaymentBearingRequestGuard;
   readonly attemptId?: string | null;
+  readonly runDir?: string;
+  readonly authorizationHash?: string;
+  readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly importModule?: (specifier: string) => Promise<unknown>;
   readonly now?: () => Date;
 }): Promise<RichPaidResponse> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const importModule = options.importModule ?? ((specifier) => import(specifier));
+  const env = options.env ?? process.env;
 
   if (compareUsdcDecimal(options.handshake.quoteUsdc, options.policy.maxTotalSpendUsdc) > 0) {
     throw new Error("handshake quote exceeds policy cap");
@@ -88,73 +99,58 @@ export async function performRichTxExplainerPaidRequest(options: {
   if (options.handshake.network !== MAINNET_NETWORK) {
     throw new Error("handshake network is not Base mainnet");
   }
-  if (
-    options.handshake.assetAddress &&
-    options.handshake.assetAddress.toLowerCase() !== MAINNET_USDC_ADDRESS.toLowerCase()
-  ) {
+  const asset = options.handshake.assetAddress ?? MAINNET_USDC_ADDRESS;
+  if (asset.toLowerCase() !== MAINNET_USDC_ADDRESS.toLowerCase()) {
     throw new Error("handshake asset is not Base USDC");
   }
-
-  let totalHttp = 0;
-  const guardedFetch: typeof fetch = async (input, init) => {
-    totalHttp += 1;
-    const safeInit: RequestInit = { ...init, redirect: "manual" };
-    options.paymentBearingGuard.inspectRequest(input, safeInit);
-    return fetchImpl(input, safeInit);
-  };
-
-  const fetchModule = (await importModule(
-    "../../buyer-client/node_modules/@x402/fetch/dist/esm/index.mjs",
-  )) as {
-    readonly x402Client: new () => unknown;
-    readonly wrapFetchWithPayment: (fetchImpl: typeof fetch, client: unknown) => typeof fetch;
-  };
-  const evmModule = (await importModule(
-    "../../buyer-client/node_modules/@x402/evm/dist/esm/exact/client/index.mjs",
-  )) as {
-    readonly registerExactEvmScheme: (
-      client: unknown,
-      options: { readonly signer: unknown; readonly networks: readonly string[] },
-    ) => void;
-  };
-
-  const client = new fetchModule.x402Client();
-  evmModule.registerExactEvmScheme(client, {
-    signer: options.wallet.signer,
-    networks: [options.policy.allowedNetwork],
-  });
-  const paymentFetch = fetchModule.wrapFetchWithPayment(guardedFetch, client);
 
   const requestBody = options.policy.buildRequestBody(
     options.txHash,
     options.policy.targetChainId,
   );
-  const url = options.handshake.endpointUrl;
+  const maxAmountAtomic = parseUsdcDecimalToAtomic(options.policy.maxTotalSpendUsdc).toString();
 
-  options.paidInvocationGuard.assertNext();
-  const response = await paymentFetch(url, {
-    method: options.policy.method,
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
+  const settlement = await executeSingleX402Settlement({
+    request: {
+      network: options.handshake.network,
+      privateKeyEnvName: MAINNET_BUYER_PRIVATE_KEY_ENV,
+      expectedBuyerAddress: MAINNET_BUYER_WALLET,
+      endpoint: options.handshake.endpointUrl,
+      method: options.policy.method,
+      body: requestBody,
+      asset,
+      payTo: options.handshake.payTo,
+      quotedAmountAtomic: options.handshake.amountAtomic,
+      maxAmountAtomic,
+      runDir: options.runDir ?? process.cwd(),
+      authorizationHash: options.authorizationHash ?? "",
+      attemptId: options.attemptId ?? undefined,
+      runId: options.attemptId ?? undefined,
+      registerNetworks: [options.policy.allowedNetwork],
+      require402BeforePayment: false,
     },
-    body: options.policy.method === "POST" ? JSON.stringify(requestBody) : undefined,
-    redirect: "manual",
+    env,
+    fetchImpl,
+    paidInvocationGuard: options.paidInvocationGuard,
+    paymentBearingGuard: options.paymentBearingGuard,
   });
 
-  const paymentBearingRequestCount = options.paymentBearingGuard.getPaymentBearingRequests();
+  const paymentBearingRequestCount = settlement.paymentBearingHttpRequestCount;
   const paymentHeaderSent = paymentBearingRequestCount > 0;
   const paymentHeaderCreated = paymentHeaderSent;
+  const text = settlement.responseBody;
 
-  if (response.status >= 300 && response.status < 400) {
-    throw new Error(`paid request redirect HTTP ${response.status}`);
+  if (settlement.httpStatus !== null && settlement.httpStatus >= 300 && settlement.httpStatus < 400) {
+    throw new Error(`paid request redirect HTTP ${settlement.httpStatus}`);
   }
 
-  const text = await response.text();
-
-  if (response.status === 402) {
+  if (settlement.httpStatus === 402) {
+    const replayResponse = new Response(text, {
+      status: settlement.httpStatus,
+      headers: settlement.responseHeaders,
+    });
     const capture = buildPaid402Capture({
-      response,
+      response: replayResponse,
       responseBodyText: text,
       attemptId: options.attemptId ?? null,
       provider: options.policy.provider,
@@ -173,9 +169,10 @@ export async function performRichTxExplainerPaidRequest(options: {
     });
   }
 
-  if (response.status !== 200) {
-    throw new Error(`paid request HTTP ${response.status}`);
+  if (settlement.httpStatus !== 200) {
+    throw new Error(`paid request HTTP ${settlement.httpStatus}`);
   }
+
   let body: unknown = text;
   try {
     body = JSON.parse(text);
@@ -184,11 +181,12 @@ export async function performRichTxExplainerPaidRequest(options: {
   }
 
   const paymentHeader =
-    response.headers.get("payment-response") ?? response.headers.get("x-payment-response");
+    settlement.responseHeaders.get("payment-response") ??
+    settlement.responseHeaders.get("x-payment-response");
   let paymentEvidence: unknown = { payment_response_header_present: Boolean(paymentHeader) };
   let settlementEvidence: unknown = null;
   let receipt: unknown = null;
-  let transactionHash: string | null = null;
+  let transactionHash: string | null = settlement.facilitatorTransactionHash;
 
   if (paymentHeader) {
     try {
@@ -201,7 +199,7 @@ export async function performRichTxExplainerPaidRequest(options: {
       paymentEvidence = { decoded, payment_response_header_present: true };
       settlementEvidence = decoded;
       receipt = decoded;
-      if (decoded && typeof decoded === "object") {
+      if (!transactionHash && decoded && typeof decoded === "object") {
         const record = decoded as Record<string, unknown>;
         const tx =
           record.transactionHash ??
@@ -218,10 +216,10 @@ export async function performRichTxExplainerPaidRequest(options: {
   }
 
   return {
-    httpStatus: response.status,
+    httpStatus: settlement.httpStatus ?? 0,
     responseBody: body,
     responseBodySha256: sha256(text),
-    contentType: response.headers.get("content-type") ?? "application/json",
+    contentType: settlement.responseHeaders.get("content-type") ?? "application/json",
     actualAmountUsdc: options.handshake.quoteUsdc,
     transactionHash,
     paymentEvidence,
@@ -233,6 +231,8 @@ export async function performRichTxExplainerPaidRequest(options: {
     paymentHeaderSent,
     paymentResponseHeaderPresent: Boolean(paymentHeader),
     paymentResponseHeaderSha256: paymentHeader ? sha256(paymentHeader) : null,
+    settlementIntentPath: settlement.intentPath,
+    settlementAttemptId: settlement.attemptId,
   };
 }
 

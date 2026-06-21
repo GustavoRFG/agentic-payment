@@ -21,6 +21,7 @@ import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
   TRUSTFORGE_RICH_TX_EXPLAINER_RUN_ID_ENV,
   TRUSTFORGE_RICH_TX_EXPLAINER_MAX_USDC_ENV,
+  TRUSTFORGE_AUTHORIZATION_HASH_ENV,
 } from "./trustforge/rich-tx-explainer-policy";
 import {
   settlementEvidenceFromSavedHeader,
@@ -266,6 +267,7 @@ export async function runPhase6SinglePaidRichProbe(
     [TRUSTFORGE_EXTERNAL_PAID_ARMING_ENV]: TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
     [TRUSTFORGE_RICH_TX_EXPLAINER_RUN_ID_ENV]: runId,
     [TRUSTFORGE_RICH_TX_EXPLAINER_MAX_USDC_ENV]: auth.max_usdc,
+    [TRUSTFORGE_AUTHORIZATION_HASH_ENV]: authorizationHash,
   };
 
   const richRunDir = options.richRunDir ?? join(runDir, "rich_probe_run");

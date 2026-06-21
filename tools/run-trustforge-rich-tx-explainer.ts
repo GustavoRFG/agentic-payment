@@ -18,6 +18,7 @@ import { inspectRichTxExplainerUnpaidHandshake } from "./trustforge/rich-tx-expl
 import {
   PHASE2_FIXTURE_TX,
   T0C_FIXTURE_TX,
+  TRUSTFORGE_AUTHORIZATION_HASH_ENV,
   validateRichHumanGates,
   applyCapToPolicy,
 } from "./trustforge/rich-tx-explainer-policy";
@@ -403,6 +404,9 @@ export async function runRichTxExplainerPhase3(options: {
       paidInvocationGuard: guards.paidInvocationGuard,
       paymentBearingGuard: guards.paymentBearingGuard,
       attemptId: gate.runId ?? null,
+      runDir,
+      authorizationHash: env[TRUSTFORGE_AUTHORIZATION_HASH_ENV] ?? "",
+      env,
       fetchImpl: options.fetchImpl,
       now,
     });

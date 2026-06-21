@@ -3,7 +3,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,11 +11,20 @@ import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target
 import {
   buildSepoliaReconcileArgs,
   classifySepoliaSettlement,
+  confirmSepoliaSettlementBinding,
   parseReconciliationLedger,
 } from "./trustforge/sepolia-settlement-classify";
 import { assertMainnetBuyerKeyAbsent } from "./trustforge/sepolia-settlement-guards";
+import type { SettlementIntent } from "./trustforge/settlement-run-binding";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+async function findSettlementIntent(runDir: string): Promise<SettlementIntent | null> {
+  if (!existsSync(runDir)) return null;
+  const intentFile = readdirSync(runDir).find((name) => name.startsWith("settlement_intent_"));
+  if (!intentFile) return null;
+  return JSON.parse(await readFile(join(runDir, intentFile), "utf8")) as SettlementIntent;
+}
 
 async function main(): Promise<number> {
   assertMainnetBuyerKeyAbsent();
@@ -38,6 +47,8 @@ async function main(): Promise<number> {
     paymentBearingHttpRequestCount: number;
     httpStatus: number | null;
     balanceBeforeUsdc?: string;
+    facilitatorTransactionHash?: string | null;
+    intentPath?: string;
   };
 
   const reconcileDir = join(runDir, "sepolia_reconciliation");
@@ -58,21 +69,54 @@ async function main(): Promise<number> {
     await readFile(join(reconcileDir, "onchain_settlement_ledger.json"), "utf8"),
   ) as Record<string, unknown>;
   const parsed = parseReconciliationLedger(ledger);
+
+  let bindingResult: ReturnType<typeof confirmSepoliaSettlementBinding> | null = null;
+  let intent: SettlementIntent | null = null;
+  if (execution.intentPath && existsSync(execution.intentPath)) {
+    intent = JSON.parse(await readFile(execution.intentPath, "utf8")) as SettlementIntent;
+  } else {
+    intent = await findSettlementIntent(runDir);
+  }
+  if (intent) {
+    bindingResult = confirmSepoliaSettlementBinding({
+      intent,
+      ledger,
+      facilitatorReportedHash: execution.facilitatorTransactionHash ?? null,
+    });
+    await writeFile(
+      join(runDir, `settlement_binding_${intent.attempt_id}.json`),
+      `${JSON.stringify(bindingResult.binding, null, 2)}\n`,
+      "utf8",
+    );
+  }
+
+  const settlementTxHash =
+    bindingResult?.binding.settlement_tx_hash ??
+    parsed.settlementTxHash ??
+    execution.facilitatorTransactionHash ??
+    null;
+  const onChainConfirmed = Boolean(
+    bindingResult?.binding.settlement_status === "confirmed" ||
+      (parsed.safeToUseForPaymentVerification && Boolean(parsed.settlementTxHash)),
+  );
+
   const classification = classifySepoliaSettlement({
     probe: {
       paymentAttempted: execution.paymentAttempted,
       paymentBearingHttpRequestCount: execution.paymentBearingHttpRequestCount,
       httpStatus: execution.httpStatus,
       balanceBeforeUsdc: execution.balanceBeforeUsdc,
-      onChainConfirmed: parsed.safeToUseForPaymentVerification && Boolean(parsed.settlementTxHash),
-      settlementTxHash: parsed.settlementTxHash,
+      onChainConfirmed,
+      settlementTxHash,
     },
     reconciliationUnavailable: parsed.rpcUnavailable,
     reconciliationStatus: parsed.reconciliationStatus,
     safeToUseForPaymentVerification: parsed.safeToUseForPaymentVerification,
     unattributedSettlementsFound: parsed.unattributedSettlementsFound,
     balanceIdentityStatus: parsed.balanceIdentityStatus,
-    settlementTxHash: parsed.settlementTxHash,
+    settlementTxHash,
+    binding: bindingResult?.binding ?? null,
+    bindingMetrics: bindingResult?.metrics ?? null,
   });
 
   await writeFile(
@@ -82,6 +126,7 @@ async function main(): Promise<number> {
   );
 
   const proven = classification.outcome === "PASS_SETTLED";
+  const metrics = bindingResult?.metrics;
   const lines = [
     "RESULT",
     proven ? "SEPOLIA_SETTLEMENT_PROVEN" : `sepolia_classification_status: ${classification.outcome}`,
@@ -89,7 +134,12 @@ async function main(): Promise<number> {
     `paid_probe_outcome: ${classification.outcome}`,
     `settlement_tx_hash: ${classification.settlementTxHash ?? "null"}`,
     `reconciliation_status: ${classification.reconciliationStatus ?? "null"}`,
-    `unattributed_settlements_found: ${classification.unattributedSettlementsFound ?? "null"}`,
+    `unattributed_settlements_found: ${metrics?.unattributed_settlements_found ?? classification.unattributedSettlementsFound ?? "null"}`,
+    `total_outflow_settlements_found: ${metrics?.total_outflow_settlements_found ?? "null"}`,
+    `known_settlements_confirmed_onchain: ${metrics?.known_settlements_confirmed_onchain ?? "null"}`,
+    `phase6_settlements_identified: ${metrics?.phase6_settlements_identified ?? "null"}`,
+    `binding_status: ${bindingResult?.binding.settlement_status ?? "not_run"}`,
+    `facilitator_hash_agrees: ${bindingResult?.binding.facilitator_hash_agrees ?? "null"}`,
     `balance_identity_status: ${classification.balanceIdentityStatus ?? "null"}`,
     `safe_to_use_for_payment_verification: ${classification.safeToUseForPaymentVerification ? "yes" : "no"}`,
     "agent_signed: no",
@@ -97,7 +147,7 @@ async function main(): Promise<number> {
     `detail: ${classification.detail}`,
     "NEXT",
     proven
-      ? "Mainnet path unblocked pending human authorization."
+      ? "Shared executor Sepolia regression complete; mainnet settlement core is Sepolia-proven pending human authorization."
       : classification.outcome === "PASS_NO_SETTLE_CLEAN"
         ? "Happy path not proven — do not retry without new authorization."
         : "Resolve blocker; do not retry-grind.",
