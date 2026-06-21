@@ -1,0 +1,197 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { adaptDiscoveredPrimaryToSelectedCandidate } from "../../tools/trustforge/discovered-target-to-selected-candidate";
+import {
+  classifySepoliaSettlement,
+  parseReconciliationLedger,
+} from "../../tools/trustforge/sepolia-settlement-classify";
+import {
+  buildSepoliaTargetSelectionFromHandshake,
+  parseSepoliaSeller402Response,
+} from "../../tools/trustforge/sepolia-seller-handshake";
+import {
+  assertMainnetBuyerKeyAbsent,
+  assertSepoliaNetwork,
+  preSignSepoliaGuards,
+} from "../../tools/trustforge/sepolia-settlement-guards";
+import { validateHumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
+import { evaluateFresh402AgainstAuthorizedQuote } from "../../tools/trustforge/paid-quote-freshness-preflight";
+import {
+  MAINNET_NETWORK,
+  PAYMENT_AMOUNT_ATOMIC,
+  TESTNET_NETWORK,
+  TESTNET_USDC_ADDRESS,
+} from "../../shared/payment-safety";
+import { SEPOLIA_TESTNET_BUYER_WALLET } from "../../tools/trustforge/network-config";
+
+describe("Sepolia settlement proof pipeline", () => {
+  it("builds target_selection from seller 402 handshake", () => {
+    const handshake = parseSepoliaSeller402Response({
+      sellerBaseUrl: "http://localhost:4021",
+      statusCode: 402,
+      paymentRequiredHeader: Buffer.from(
+        JSON.stringify({
+          x402Version: 2,
+          accepts: [
+            {
+              scheme: "exact",
+              network: TESTNET_NETWORK,
+              asset: TESTNET_USDC_ADDRESS,
+              amount: PAYMENT_AMOUNT_ATOMIC,
+              payTo: SEPOLIA_TESTNET_BUYER_WALLET,
+            },
+          ],
+        }),
+      ).toString("base64"),
+    });
+    const doc = buildSepoliaTargetSelectionFromHandshake(handshake);
+    expect(doc.network).toBe(TESTNET_NETWORK);
+    expect(doc.selection.primary.handshakeStatus).toBe("live_402_ok");
+  });
+
+  it("adapts Sepolia local seller to selected_candidate", () => {
+    const adapted = adaptDiscoveredPrimaryToSelectedCandidate({
+      selection: {
+        primary: {
+          handshakeStatus: "live_402_ok",
+          resourceUrl: "http://localhost:4021/paid/analyze-text",
+          quoteUsdc: "0.001",
+          quoteAtomic: "1000",
+          selectedPayTo: SEPOLIA_TESTNET_BUYER_WALLET,
+          network: TESTNET_NETWORK,
+          asset: TESTNET_USDC_ADDRESS,
+          scoringRationale: ["local sepolia seller"],
+        },
+        fallbacks: [],
+      },
+    });
+    expect(adapted.ok).toBe(true);
+    if (adapted.ok) {
+      expect(adapted.candidate.network).toBe(TESTNET_NETWORK);
+      expect(adapted.candidate.buyer_wallet).toBe(SEPOLIA_TESTNET_BUYER_WALLET);
+    }
+  });
+
+  it("requires network 84532 on testnet authorization", () => {
+    const selected = {
+      provider: "TrustForgeLocalSeller",
+      service_id: "local_analyze_text",
+      endpoint: "http://localhost:4021/paid/analyze-text",
+      network: TESTNET_NETWORK,
+      buyer_wallet: SEPOLIA_TESTNET_BUYER_WALLET,
+    };
+    const bad = validateHumanPaymentAuthorization(
+      {
+        authorization_schema_version: "trustforge_paid_probe_authorization.v1",
+        decision: "authorize_one_payment",
+        provider: selected.provider,
+        service_id: selected.service_id,
+        endpoint: selected.endpoint,
+        network: MAINNET_NETWORK,
+        buyer_wallet: SEPOLIA_TESTNET_BUYER_WALLET,
+        max_usdc: "0.002",
+        max_payment_attempts: 1,
+        allow_retry: false,
+        require_dedicated_wallet: true,
+        decided_at: "2026-06-21T00:00:00Z",
+        rationale: "test",
+      },
+      selected,
+    );
+    expect(bad.valid).toBe(false);
+  });
+
+  it("freshness accepts Sepolia network params", () => {
+    const result = evaluateFresh402AgainstAuthorizedQuote(
+      {
+        status: "live_402_ok",
+        quoteAtomic: "1000",
+        quoteUsdc: "0.001",
+        selectedAccept: {
+          scheme: "exact",
+          network: TESTNET_NETWORK,
+          asset: TESTNET_USDC_ADDRESS,
+          amountAtomic: "1000",
+          payTo: SEPOLIA_TESTNET_BUYER_WALLET,
+        },
+        challenge: { expiresAt: new Date(Date.now() + 60_000).toISOString(), nonce: "n1" },
+      },
+      {
+        endpoint: "http://localhost:4021/paid/analyze-text",
+        quote_amount_usdc: "0.001",
+        quote_atomic: "1000",
+        authorized_max_usdc: "0.002",
+        pay_to: SEPOLIA_TESTNET_BUYER_WALLET,
+        network: TESTNET_NETWORK,
+        asset: TESTNET_USDC_ADDRESS,
+      },
+    );
+    expect(result.go).toBe(true);
+  });
+
+  it("refuses mainnet buyer key during Sepolia guards", () => {
+    expect(() =>
+      assertMainnetBuyerKeyAbsent({ BUYER_PRIVATE_KEY: "0x" + "11".repeat(32) }),
+    ).toThrow(/BLOCKED_MAINNET_KEY_PRESENT/);
+  });
+
+  it("RPC unavailable is not settlement-not-found", () => {
+    const outcome = classifySepoliaSettlement({
+      probe: {
+        paymentAttempted: false,
+        paymentBearingHttpRequestCount: 0,
+        httpStatus: null,
+      },
+      reconciliationUnavailable: true,
+      reconciliationStatus: "RECONCILIATION_RPC_UNAVAILABLE",
+    });
+    expect(outcome.outcome).toBe("BLOCKED_RECONCILIATION_UNAVAILABLE");
+  });
+
+  it("classifies reconciled transfer as PASS_SETTLED", () => {
+    const outcome = classifySepoliaSettlement({
+      probe: {
+        paymentAttempted: true,
+        paymentBearingHttpRequestCount: 1,
+        httpStatus: 200,
+        onChainConfirmed: true,
+        settlementTxHash: "0xabc",
+      },
+      reconciliationStatus: "RECONCILIATION_PASS",
+      safeToUseForPaymentVerification: true,
+      unattributedSettlementsFound: 0,
+      balanceIdentityStatus: "pass",
+      settlementTxHash: "0xabc",
+    });
+    expect(outcome.outcome).toBe("PASS_SETTLED");
+  });
+
+  it("parseReconciliationLedger detects Sepolia proof hash", () => {
+    const parsed = parseReconciliationLedger({
+      reconciliation_status: "RECONCILIATION_PASS",
+      safe_to_use_for_payment_verification: true,
+      unattributed_settlements_found: 0,
+      balance_identity_status: "pass",
+      settlements: [{ tx_hash: "0xdead", matched_run: "Sepolia_settlement_proof" }],
+    });
+    expect(parsed.settlementTxHash).toBe("0xdead");
+  });
+});
+
+describe("preSignSepoliaGuards", () => {
+  it("refuses wrong testnet wallet", () => {
+    expect(() =>
+      preSignSepoliaGuards({
+        privateKey: "0x" + "22".repeat(32),
+        network: TESTNET_NETWORK,
+        chainId: 84532,
+      }),
+    ).toThrow(/BLOCKED_WRONG_TESTNET_WALLET/);
+  });
+});
+
+describe("assertSepoliaNetwork", () => {
+  it("hard-refuses mainnet caip2", () => {
+    expect(() => assertSepoliaNetwork(MAINNET_NETWORK)).toThrow(/BLOCKED_MAINNET_SIGNAL/);
+  });
+});

@@ -15,6 +15,9 @@ const candidate: DiscoveredSelectedCandidate = {
   quote_atomic: "1125",
   authorized_pay_to: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
   recommended_max_usdc: "0.002125",
+  network: "eip155:8453",
+  asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  buyer_wallet: "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
   target_selection_audit: {
     selected_resource_url: "https://public.zapper.xyz/x402/transaction-details",
     handshake_status: "live_402_ok",

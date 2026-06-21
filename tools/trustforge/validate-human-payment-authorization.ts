@@ -3,6 +3,8 @@
  */
 
 import { compareUsdcDecimal } from "./external-x402-get-policy";
+import { MAINNET_NETWORK, TESTNET_NETWORK } from "../../shared/payment-safety";
+import { MAINNET_BUYER_WALLET, SEPOLIA_TESTNET_BUYER_WALLET } from "./network-config";
 
 export interface TargetSelectionAuditMetadata {
   readonly selected_resource_url: string;
@@ -17,6 +19,9 @@ export interface HumanPaymentAuthorization {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  readonly network?: string;
+  readonly asset?: string;
+  readonly buyer_wallet?: string;
   readonly max_usdc: string;
   readonly max_payment_attempts: number;
   readonly allow_retry: boolean;
@@ -34,6 +39,9 @@ export interface SelectedCandidateRef {
   readonly endpoint: string;
   readonly quote_amount_usdc?: string;
   readonly recommended_max_usdc?: string;
+  readonly network?: string;
+  readonly asset?: string;
+  readonly buyer_wallet?: string;
   readonly target_selection_audit?: TargetSelectionAuditMetadata | null;
 }
 
@@ -93,6 +101,24 @@ export function validateHumanPaymentAuthorization(
   }
   if (auth.endpoint !== selected.endpoint) {
     reasons.push("endpoint mismatch vs selected_candidate");
+  }
+  if (auth.network && selected.network && auth.network !== selected.network) {
+    reasons.push("network mismatch vs selected_candidate");
+  }
+  if (selected.network === TESTNET_NETWORK) {
+    if (auth.network !== TESTNET_NETWORK) {
+      reasons.push(`testnet authorization requires network ${TESTNET_NETWORK}`);
+    }
+    if (auth.network === MAINNET_NETWORK) {
+      reasons.push("mainnet network refused for testnet authorization");
+    }
+    const buyer = auth.buyer_wallet ?? selected.buyer_wallet;
+    if (buyer?.toLowerCase() !== SEPOLIA_TESTNET_BUYER_WALLET.toLowerCase()) {
+      reasons.push("testnet authorization buyer_wallet must be Sepolia test wallet");
+    }
+    if (buyer?.toLowerCase() === MAINNET_BUYER_WALLET.toLowerCase()) {
+      reasons.push("mainnet buyer wallet refused for testnet authorization");
+    }
   }
   if (!auth.decided_at) {
     reasons.push("decided_at is required");

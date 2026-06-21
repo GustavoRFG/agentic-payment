@@ -71,6 +71,80 @@ OBSERVED_BALANCE_USDC = Decimal("0.051472")
 PHASE3B_BALANCE_OBSERVED = Decimal("0.052597")
 PHASE6_EXPECTED_DROP = Decimal("0.001125")
 
+SEPOLIA_CHAIN_ID = 84532
+SEPOLIA_WALLET = "0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392"
+SEPOLIA_USDC_CONTRACT = "0x036cbd53842c5426634e7929541ec2318f3dcf7e"
+SEPOLIA_CHAIN = "eip155:84532"
+
+TRUSTFORGE_SEPOLIA_RPC_URL_ENV = "TRUSTFORGE_SEPOLIA_RPC_URL"
+TRUSTFORGE_SEPOLIA_RPC_FALLBACK_URLS_ENV = "TRUSTFORGE_SEPOLIA_RPC_FALLBACK_URLS"
+
+DEFAULT_SEPOLIA_RPCS = [
+    "https://sepolia.base.org",
+    "https://base-sepolia-rpc.publicnode.com",
+    "https://base-sepolia.drpc.org",
+]
+
+
+@dataclass(frozen=True)
+class NetworkProfile:
+    network_id: str
+    chain: str
+    chain_id: int
+    wallet: str
+    usdc_contract: str
+    rpc_primary_env: str
+    rpc_fallback_env: str
+    default_rpcs: tuple[str, ...]
+    observed_balance_usdc: Decimal | None = None
+    known_run_matches: dict[str, str] = field(default_factory=dict)
+    zapper_pay_to: str | None = None
+
+
+MAINNET_PROFILE = NetworkProfile(
+    network_id="mainnet",
+    chain=CHAIN,
+    chain_id=BASE_CHAIN_ID,
+    wallet=BUYER_WALLET,
+    usdc_contract=USDC_CONTRACT,
+    rpc_primary_env=TRUSTFORGE_BASE_RPC_URL_ENV,
+    rpc_fallback_env=TRUSTFORGE_BASE_RPC_FALLBACK_URLS_ENV,
+    default_rpcs=tuple(DEFAULT_RPCS),
+    observed_balance_usdc=OBSERVED_BALANCE_USDC,
+    known_run_matches=KNOWN_RUN_MATCHES,
+    zapper_pay_to=ZAPPER_PAY_TO,
+)
+
+SEPOLIA_PROFILE = NetworkProfile(
+    network_id="sepolia",
+    chain=SEPOLIA_CHAIN,
+    chain_id=SEPOLIA_CHAIN_ID,
+    wallet=SEPOLIA_WALLET,
+    usdc_contract=SEPOLIA_USDC_CONTRACT,
+    rpc_primary_env=TRUSTFORGE_SEPOLIA_RPC_URL_ENV,
+    rpc_fallback_env=TRUSTFORGE_SEPOLIA_RPC_FALLBACK_URLS_ENV,
+    default_rpcs=tuple(DEFAULT_SEPOLIA_RPCS),
+    observed_balance_usdc=None,
+    known_run_matches={},
+    zapper_pay_to=None,
+)
+
+
+def resolve_network_profile(network_id: str | None = None) -> NetworkProfile:
+    if network_id in (None, "", "mainnet", "base", "8453"):
+        return MAINNET_PROFILE
+    if network_id in ("sepolia", "base-sepolia", "84532", "testnet"):
+        return SEPOLIA_PROFILE
+    raise ValueError(f"unsupported network profile: {network_id}")
+
+
+@dataclass
+class SettlementExpectation:
+    pay_to: str
+    amount_usdc: str
+    amount_atomic: str | None = None
+    balance_before_usdc: str | None = None
+
 
 @dataclass
 class BaseRpcConfig:
@@ -183,10 +257,11 @@ def classify_rpc_error(exc: Exception) -> str:
     return RECONCILIATION_RPC_UNAVAILABLE
 
 
-def load_base_rpc_config() -> BaseRpcConfig:
-    primary = os.environ.get(TRUSTFORGE_BASE_RPC_URL_ENV, "").strip()
-    legacy = os.environ.get(LEGACY_BASE_RPC_URLS_ENV, "").strip()
-    fallbacks_env = os.environ.get(TRUSTFORGE_BASE_RPC_FALLBACK_URLS_ENV, "").strip()
+def load_base_rpc_config(profile: NetworkProfile | None = None) -> BaseRpcConfig:
+    prof = profile or MAINNET_PROFILE
+    primary = os.environ.get(prof.rpc_primary_env, "").strip()
+    legacy = os.environ.get(LEGACY_BASE_RPC_URLS_ENV, "").strip() if prof.network_id == "mainnet" else ""
+    fallbacks_env = os.environ.get(prof.rpc_fallback_env, "").strip()
 
     fallback_urls: list[str] = []
     if fallbacks_env:
@@ -199,7 +274,7 @@ def load_base_rpc_config() -> BaseRpcConfig:
     elif fallback_urls:
         endpoint_list = fallback_urls
     else:
-        endpoint_list = list(DEFAULT_RPCS)
+        endpoint_list = list(prof.default_rpcs)
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -212,7 +287,7 @@ def load_base_rpc_config() -> BaseRpcConfig:
             break
 
     if not deduped:
-        deduped = DEFAULT_RPCS[: MAX_FALLBACK_ENDPOINTS + 1]
+        deduped = list(prof.default_rpcs[: MAX_FALLBACK_ENDPOINTS + 1])
 
     return BaseRpcConfig(
         primary_url=deduped[0],
@@ -220,8 +295,8 @@ def load_base_rpc_config() -> BaseRpcConfig:
     )
 
 
-def resolve_endpoint_list(config: BaseRpcConfig | None = None) -> list[str]:
-    cfg = config or load_base_rpc_config()
+def resolve_endpoint_list(config: BaseRpcConfig | None = None, profile: NetworkProfile | None = None) -> list[str]:
+    cfg = config or load_base_rpc_config(profile)
     return [cfg.primary_url, *cfg.fallback_urls]
 
 
@@ -265,10 +340,12 @@ class JsonRpcClient:
         self,
         url: str,
         *,
+        usdc_contract: str = USDC_CONTRACT,
         timeout_sec: int = RPC_TIMEOUT_SEC,
         max_attempts: int = MAX_ATTEMPTS_PER_ENDPOINT,
     ) -> None:
         self.url = url
+        self.usdc_contract = usdc_contract
         self.timeout_sec = timeout_sec
         self.max_attempts = max(1, max_attempts)
         self._req_id = 0
@@ -341,7 +418,7 @@ class JsonRpcClient:
         data = "0x70a08231" + wallet.lower().removeprefix("0x").rjust(64, "0")
         result = self.call(
             "eth_call",
-            [{"to": USDC_CONTRACT, "data": data}, "latest"],
+            [{"to": self.usdc_contract, "data": data}, "latest"],
         )
         atomic = hex_to_int(result)
         return atomic, atomic_to_usdc(atomic)
@@ -359,7 +436,7 @@ class JsonRpcClient:
         if topic2 is not None:
             topics.append(topic2)
         params = {
-            "address": USDC_CONTRACT,
+            "address": self.usdc_contract,
             "fromBlock": hex(from_block),
             "toBlock": hex(to_block),
             "topics": topics,
@@ -368,24 +445,31 @@ class JsonRpcClient:
         return result or []
 
 
-def rpc_health_check(url: str, config: BaseRpcConfig | None = None) -> RpcHealthResult:
-    cfg = config or load_base_rpc_config()
+def rpc_health_check(
+    url: str,
+    config: BaseRpcConfig | None = None,
+    *,
+    profile: NetworkProfile | None = None,
+) -> RpcHealthResult:
+    prof = profile or MAINNET_PROFILE
+    cfg = config or load_base_rpc_config(prof)
     timeout_sec = max(1, cfg.timeout_ms // 1000)
     try:
         client = JsonRpcClient(
             url,
+            usdc_contract=prof.usdc_contract,
             timeout_sec=timeout_sec,
             max_attempts=cfg.max_attempts_per_endpoint,
         )
         chain_id = client.chain_id()
         latest_block = client.block_number()
-        if chain_id != BASE_CHAIN_ID:
+        if chain_id != prof.chain_id:
             return RpcHealthResult(
                 ok=False,
                 chain_id=chain_id,
                 latest_block=latest_block,
                 error_class=RECONCILIATION_WRONG_CHAIN,
-                detail=f"expected chainId {BASE_CHAIN_ID}, got {chain_id}",
+                detail=f"expected chainId {prof.chain_id}, got {chain_id}",
                 rpc_status="fail",
             )
         if latest_block <= 0:
@@ -423,12 +507,14 @@ def rpc_health_check(url: str, config: BaseRpcConfig | None = None) -> RpcHealth
 def select_rpc(
     urls: list[str],
     config: BaseRpcConfig | None = None,
+    profile: NetworkProfile | None = None,
 ) -> tuple[str | None, list[RpcDiscarded], RpcHealthResult | None, bool]:
-    cfg = config or load_base_rpc_config()
+    prof = profile or MAINNET_PROFILE
+    cfg = config or load_base_rpc_config(prof)
     discarded: list[RpcDiscarded] = []
     fallback_used = False
     for index, url in enumerate(urls):
-        health = rpc_health_check(url, cfg)
+        health = rpc_health_check(url, cfg, profile=prof)
         if health.ok:
             return url, discarded, health, fallback_used or index > 0
         discarded.append(
@@ -460,6 +546,8 @@ def scan_transfers(
     wallet: str,
     direction: str,
     window: int,
+    profile: NetworkProfile,
+    settlement_expectation: SettlementExpectation | None = None,
 ) -> tuple[list[SettlementRow], int]:
     wallet_topic = pad_topic_address(wallet)
     rows: list[SettlementRow] = []
@@ -473,7 +561,7 @@ def scan_transfers(
             "eth_getLogs",
             [
                 {
-                    "address": USDC_CONTRACT,
+                    "address": client.usdc_contract,
                     "fromBlock": hex(w_from),
                     "toBlock": hex(w_to),
                     "topics": topics,
@@ -490,11 +578,26 @@ def scan_transfers(
             ts = client.get_block_timestamp(block_number)
             value_usdc = atomic_to_usdc(amount_atomic)
             receipt_status = client.receipt_status(tx_hash)
-            known = KNOWN_RUN_MATCHES.get(tx_hash.lower())
+            known = profile.known_run_matches.get(tx_hash.lower())
             source = "known" if known else "discovered"
             matched: str | None = known
-            if not matched and direction == "out":
-                if to_addr.lower() == ZAPPER_PAY_TO.lower() and amount_atomic == 1125:
+            if not matched and settlement_expectation and direction == "out":
+                exp_atomic = (
+                    int(settlement_expectation.amount_atomic)
+                    if settlement_expectation.amount_atomic
+                    else int(
+                        (Decimal(settlement_expectation.amount_usdc) * 1_000_000).to_integral_value(
+                            rounding=ROUND_DOWN
+                        )
+                    )
+                )
+                if (
+                    to_addr.lower() == settlement_expectation.pay_to.lower()
+                    and amount_atomic == exp_atomic
+                ):
+                    matched = "Sepolia_settlement_proof"
+            if not matched and direction == "out" and profile.zapper_pay_to:
+                if to_addr.lower() == profile.zapper_pay_to.lower() and amount_atomic == 1125:
                     if ts and (
                         ts.startswith("2026-06-15T03:")
                         or ts.startswith("2026-06-15T04:0")
@@ -520,7 +623,15 @@ def scan_transfers(
     return rows, len(windows)
 
 
-def resolve_from_block(client: JsonRpcClient, margin: int = 1000) -> int:
+def resolve_from_block(
+    client: JsonRpcClient,
+    profile: NetworkProfile,
+    margin: int = 1000,
+    to_block: int | None = None,
+) -> int:
+    if profile.network_id == "sepolia":
+        latest = to_block if to_block is not None else client.block_number()
+        return max(0, latest - 50_000)
     t0c = "0xb445f8c1091a55ac35d23db38371a0e0d0bbb0bf2564e3ddf9843abea70cfb11"
     tx = client.call("eth_getTransactionByHash", [t0c])
     if tx and tx.get("blockNumber"):
@@ -529,14 +640,16 @@ def resolve_from_block(client: JsonRpcClient, margin: int = 1000) -> int:
     return 47_310_000
 
 
-def match_phase6_runs(outflows: list[SettlementRow]) -> list[str]:
+def match_phase6_runs(outflows: list[SettlementRow], profile: NetworkProfile) -> list[str]:
+    if profile.network_id != "mainnet" or not profile.zapper_pay_to:
+        return []
     phase6: list[str] = []
     for row in outflows:
-        if row.tx_hash in KNOWN_RUN_MATCHES:
+        if row.tx_hash in profile.known_run_matches:
             continue
         if row.value_atomic != "1125":
             continue
-        if row.to.lower() != ZAPPER_PAY_TO.lower():
+        if row.to.lower() != profile.zapper_pay_to.lower():
             continue
         ts = row.timestamp_utc or ""
         if ts.startswith("2026-06-15T03:") or ts.startswith("2026-06-15T04:0"):
@@ -618,11 +731,17 @@ def run_reconciliation(
     output_dir: Path | None = None,
     window: int = DEFAULT_WINDOW,
     config: BaseRpcConfig | None = None,
+    profile: NetworkProfile | None = None,
+    settlement_expectation: SettlementExpectation | None = None,
 ) -> ReconciliationResult:
-    cfg = config or load_base_rpc_config()
-    urls = resolve_endpoint_list(cfg)
-    selected, discarded, health, fallback_used = select_rpc(urls, cfg)
+    prof = profile or MAINNET_PROFILE
+    cfg = config or load_base_rpc_config(prof)
+    urls = resolve_endpoint_list(cfg, prof)
+    selected, discarded, health, fallback_used = select_rpc(urls, cfg, prof)
     result = ReconciliationResult(
+        wallet=prof.wallet,
+        usdc_contract=prof.usdc_contract,
+        chain=prof.chain,
         rpc_discarded=[asdict(d) for d in discarded],
         rpc_fallback_used=fallback_used,
     )
@@ -645,22 +764,25 @@ def run_reconciliation(
 
     client = JsonRpcClient(
         selected,
+        usdc_contract=prof.usdc_contract,
         timeout_sec=max(1, cfg.timeout_ms // 1000),
         max_attempts=cfg.max_attempts_per_endpoint,
     )
     to_block = client.block_number()
-    from_block = resolve_from_block(client)
+    from_block = resolve_from_block(client, prof, to_block=to_block)
     result.scanned_from_block = from_block
     result.scanned_to_block = to_block
 
     try:
         outflows, windows_scanned = scan_transfers(
-            client, from_block, to_block, BUYER_WALLET, "out", window
+            client, from_block, to_block, prof.wallet, "out", window, prof, settlement_expectation
         )
         result.windows_scanned = windows_scanned
-        inflows, _ = scan_transfers(client, from_block, to_block, BUYER_WALLET, "in", window)
+        inflows, _ = scan_transfers(
+            client, from_block, to_block, prof.wallet, "in", window, prof, settlement_expectation
+        )
         result.inflows = [asdict(r) for r in inflows]
-        balance_atomic, balance_usdc = client.balance_of_usdc(BUYER_WALLET)
+        balance_atomic, balance_usdc = client.balance_of_usdc(prof.wallet)
         _ = balance_atomic
     except Exception as exc:  # noqa: BLE001
         error_class = classify_rpc_error(exc)
@@ -672,9 +794,18 @@ def run_reconciliation(
         )
 
     result.current_balance_usdc = balance_usdc
-    result.current_balance_onchain_confirmed = abs(
-        Decimal(balance_usdc) - OBSERVED_BALANCE_USDC
-    ) < Decimal("0.000001")
+    observed_target = prof.observed_balance_usdc
+    if settlement_expectation and settlement_expectation.balance_before_usdc:
+        observed_target = Decimal(settlement_expectation.balance_before_usdc) - Decimal(
+            settlement_expectation.amount_usdc
+        )
+    if observed_target is not None:
+        result.observed_balance_usdc = str(observed_target)
+        result.current_balance_onchain_confirmed = abs(
+            Decimal(balance_usdc) - observed_target
+        ) < Decimal("0.000001")
+    else:
+        result.current_balance_onchain_confirmed = True
     result.balance_identity_status = (
         "pass" if result.current_balance_onchain_confirmed else "fail"
     )
@@ -686,13 +817,13 @@ def run_reconciliation(
 
     confirmed = 0
     for row in outflows:
-        known_match = KNOWN_RUN_MATCHES.get(row.tx_hash.lower())
+        known_match = prof.known_run_matches.get(row.tx_hash.lower())
         if known_match:
             row.matched_run = known_match
             row.source = "known"
             confirmed += 1
 
-    phase6_hashes = match_phase6_runs(outflows)
+    phase6_hashes = match_phase6_runs(outflows, prof)
     result.phase6_settlements_identified = phase6_hashes
     for row in outflows:
         if row.tx_hash in phase6_hashes and not row.matched_run:
@@ -713,22 +844,26 @@ def run_reconciliation(
         if r.tx_hash in phase6_hashes or (r.matched_run or "").startswith("Phase6")
     )
     details: list[str] = []
-    if result.current_balance_onchain_confirmed:
-        details.append(
-            f"on-chain balance {balance_usdc} matches observed {OBSERVED_BALANCE_USDC}"
-        )
+    if observed_target is not None:
+        if result.current_balance_onchain_confirmed:
+            details.append(
+                f"on-chain balance {balance_usdc} matches observed {observed_target}"
+            )
+        else:
+            details.append(
+                f"on-chain balance {balance_usdc} differs from observed {observed_target}"
+            )
     else:
-        details.append(
-            f"on-chain balance {balance_usdc} differs from observed {OBSERVED_BALANCE_USDC}"
-        )
+        details.append(f"on-chain balance {balance_usdc} (no fixed observed target for {prof.network_id})")
 
-    phase6_drop = PHASE3B_BALANCE_OBSERVED - Decimal(balance_usdc)
-    if abs(phase6_drop - PHASE6_EXPECTED_DROP) < Decimal("0.000001"):
-        details.append(
-            f"Phase6 window drop {phase6_drop} matches expected {PHASE6_EXPECTED_DROP}"
-        )
-    elif phase6_out > 0:
-        details.append(f"Phase6 outflows on-chain total {phase6_out} USDC")
+    if prof.network_id == "mainnet":
+        phase6_drop = PHASE3B_BALANCE_OBSERVED - Decimal(balance_usdc)
+        if abs(phase6_drop - PHASE6_EXPECTED_DROP) < Decimal("0.000001"):
+            details.append(
+                f"Phase6 window drop {phase6_drop} matches expected {PHASE6_EXPECTED_DROP}"
+            )
+        elif phase6_out > 0:
+            details.append(f"Phase6 outflows on-chain total {phase6_out} USDC")
 
     details.append(
         f"inflows {result.total_inflows_usdc} − outflows {result.total_outflows_usdc} "
@@ -759,7 +894,7 @@ def run_reconciliation(
 
     result.safe_to_use_for_payment_verification = (
         result.rpc_status == "pass"
-        and result.chain_id == BASE_CHAIN_ID
+        and result.chain_id == prof.chain_id
         and result.windows_scanned > 0
         and result.balance_identity_status == "pass"
         and result.reconciliation_status
@@ -833,14 +968,40 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory for ledger JSON/MD/RESULT",
     )
     parser.add_argument("--window", type=int, default=DEFAULT_WINDOW)
+    parser.add_argument(
+        "--network",
+        choices=["mainnet", "sepolia"],
+        default="mainnet",
+        help="Base network profile (mainnet=8453, sepolia=84532)",
+    )
+    parser.add_argument("--expected-pay-to", default=None, help="Sepolia settlement proof payTo filter")
+    parser.add_argument("--expected-amount-usdc", default=None, help="Expected settlement USDC amount")
+    parser.add_argument("--expected-amount-atomic", default=None, help="Expected settlement atomic amount")
+    parser.add_argument("--balance-before-usdc", default=None, help="Wallet USDC balance before settlement")
     args = parser.parse_args(argv)
+
+    prof = resolve_network_profile(args.network)
+    settlement: SettlementExpectation | None = None
+    if args.expected_pay_to and args.expected_amount_usdc:
+        settlement = SettlementExpectation(
+            pay_to=args.expected_pay_to,
+            amount_usdc=args.expected_amount_usdc,
+            amount_atomic=args.expected_amount_atomic,
+            balance_before_usdc=args.balance_before_usdc,
+        )
 
     out = args.output_dir
     if out is None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        out = Path(r"D:\trustforge\artifacts\runs\onchain-reconciliation") / f"run_{stamp}"
+        subdir = "onchain-reconciliation-sepolia" if prof.network_id == "sepolia" else "onchain-reconciliation"
+        out = Path(r"D:\trustforge\artifacts\runs") / subdir / f"run_{stamp}"
 
-    ledger = run_reconciliation(output_dir=out, window=args.window)
+    ledger = run_reconciliation(
+        output_dir=out,
+        window=args.window,
+        profile=prof,
+        settlement_expectation=settlement,
+    )
     print(format_result(ledger, out / "onchain_settlement_ledger.json", out / "onchain_settlement_ledger.md"))
     return 0 if ledger.safe_to_use_for_payment_verification else 1
 

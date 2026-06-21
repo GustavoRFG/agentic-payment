@@ -33,6 +33,7 @@ describe("discovered target adapter", () => {
       provider: "Zapper",
       service_id: "zapper_tx_explainer",
       endpoint,
+      network: "eip155:8453",
       quote_amount_usdc: "0.001125",
       quote_atomic: "1125",
       authorized_pay_to: "0x43a2a720cd0911690c248075f4a29a5e7716f758",

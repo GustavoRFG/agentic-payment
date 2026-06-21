@@ -18,6 +18,9 @@ export interface HumanPaymentAuthorizationDraft {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  readonly network: string;
+  readonly asset: string;
+  readonly buyer_wallet: string;
   readonly max_usdc: string;
   readonly max_payment_attempts: 1;
   readonly allow_retry: false;
@@ -37,6 +40,9 @@ export function buildHumanPaymentAuthorizationDraft(
     provider: candidate.provider,
     service_id: candidate.service_id,
     endpoint: candidate.endpoint,
+    network: candidate.network,
+    asset: candidate.asset,
+    buyer_wallet: candidate.buyer_wallet,
     max_usdc: candidate.recommended_max_usdc,
     max_payment_attempts: 1,
     allow_retry: false,

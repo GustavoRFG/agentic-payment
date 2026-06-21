@@ -24,6 +24,9 @@ from onchain_settlement_reconciliation import (  # noqa: E402
     RECONCILIATION_RPC_RATE_LIMITED,
     RECONCILIATION_RPC_UNAVAILABLE,
     RECONCILIATION_UNATTRIBUTED_SETTLEMENTS,
+    SEPOLIA_CHAIN_ID,
+    SEPOLIA_PROFILE,
+    SettlementExpectation,
     BaseRpcConfig,
     JsonRpcClient,
     atomic_to_usdc,
@@ -37,6 +40,7 @@ from onchain_settlement_reconciliation import (  # noqa: E402
     select_rpc,
     sum_usdc,
     unpad_topic_address,
+    resolve_network_profile,
 )
 
 
@@ -279,3 +283,87 @@ def test_json_rpc_client_single_attempt(monkeypatch):
     with pytest.raises(Exception):
         client.call("eth_chainId", [])
     assert attempts["count"] == 1
+
+
+def test_resolve_network_profile_sepolia():
+    prof = resolve_network_profile("sepolia")
+    assert prof.chain_id == SEPOLIA_CHAIN_ID
+    assert prof.usdc_contract.lower() == "0x036cbd53842c5426634e7929541ec2318f3dcf7e"
+
+
+def test_sepolia_rpc_wrong_chain_refused(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        if payload["method"] == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if payload["method"] == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(1000)})
+        raise AssertionError(payload["method"])
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    health = rpc_health_check("https://sepolia.base.org", profile=SEPOLIA_PROFILE)
+    assert health.ok is False
+    assert health.error_class == "RECONCILIATION_WRONG_CHAIN"
+
+
+def test_sepolia_settlement_expectation_marks_proof(monkeypatch):
+    pay_to = "0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392"
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        method = payload["method"]
+        if method == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(SEPOLIA_CHAIN_ID)})
+        if method == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(5000)})
+        if method == "eth_getLogs":
+            return _rpc_response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": [
+                        {
+                            "transactionHash": "0x" + "ab" * 32,
+                            "blockNumber": hex(4000),
+                            "logIndex": hex(0),
+                            "data": hex(1000),
+                            "topics": [
+                                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                                "0x" + "0" * 24 + SEPOLIA_PROFILE.wallet[2:].lower(),
+                                "0x" + "0" * 24 + pay_to[2:].lower(),
+                            ],
+                        }
+                    ],
+                }
+            )
+        if method == "eth_getTransactionReceipt":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": {"status": "0x1"}})
+        if method == "eth_getBlockByNumber":
+            return _rpc_response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"timestamp": hex(1_700_000_000)},
+                }
+            )
+        if method == "eth_call":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(19_999_000)})
+        raise AssertionError(method)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(primary_url="https://sepolia.base.org", fallback_urls=[]),
+        profile=SEPOLIA_PROFILE,
+        window=5000,
+        settlement_expectation=SettlementExpectation(
+            pay_to=pay_to,
+            amount_usdc="0.001",
+            amount_atomic="1000",
+            balance_before_usdc="20",
+        ),
+    )
+    assert ledger.reconciliation_status == RECONCILIATION_PASS
+    assert ledger.unattributed_settlements_found == 0
+    assert any(
+        s.get("matched_run") == "Sepolia_settlement_proof" for s in ledger.settlements
+    )

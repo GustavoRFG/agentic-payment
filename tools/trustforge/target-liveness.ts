@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
-import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { atomicUsdcToDecimal } from "./external-x402-get-policy";
 import type { TargetAccept, TargetCandidate } from "./target-candidates";
 
@@ -200,7 +200,9 @@ function parseAtomic(value: string | undefined): bigint | null {
   }
 }
 
-function isUsdc(entry: AcceptEntry): boolean {
+function isUsdc(entry: AcceptEntry, expectedNetwork: string): boolean {
+  const expectedUsdc =
+    expectedNetwork === TESTNET_NETWORK ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS;
   const candidates = [
     entry.asset,
     entry.extra?.asset,
@@ -210,8 +212,7 @@ function isUsdc(entry: AcceptEntry): boolean {
   ];
   return candidates.some(
     (value) =>
-      typeof value === "string" &&
-      value.toLowerCase() === MAINNET_USDC_ADDRESS.toLowerCase(),
+      typeof value === "string" && value.toLowerCase() === expectedUsdc.toLowerCase(),
   );
 }
 
@@ -252,8 +253,9 @@ function requestBodyFromCandidate(candidate: TargetCandidate): unknown {
 export function classifyTargetProbeResponse(
   candidate: TargetCandidate,
   response: RecordedProbeResponse,
-  options: { readonly maxTargetPriceAtomic: string },
+  options: { readonly maxTargetPriceAtomic: string; readonly expectedNetwork?: string },
 ): TargetHandshakeOutcome {
+  const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
   const text = bodyToText(response.body, response.bodyText);
   const body = typeof response.body === "string" ? parseJsonMaybe(response.body) : response.body;
   const rawResponse: TargetProbeRawResponse = {
@@ -297,7 +299,7 @@ export function classifyTargetProbeResponse(
     };
   }
 
-  const baseEntries = envelope.accepts.filter((entry) => entry.network === MAINNET_NETWORK);
+  const baseEntries = envelope.accepts.filter((entry) => entry.network === expectedNetwork);
   if (baseEntries.length === 0) {
     return {
       ...base,
@@ -306,12 +308,14 @@ export function classifyTargetProbeResponse(
       challenge: { nonce: null, expiresAt: null },
       quoteAtomic: null,
       quoteUsdc: null,
-      detail: `HTTP 402 accepts[] did not include ${MAINNET_NETWORK}`,
+      detail: `HTTP 402 accepts[] did not include ${expectedNetwork}`,
     };
   }
 
-  const usdcEntries = baseEntries.filter(isUsdc);
+  const usdcEntries = baseEntries.filter((entry) => isUsdc(entry, expectedNetwork));
   if (usdcEntries.length === 0) {
+    const expectedUsdc =
+      expectedNetwork === TESTNET_NETWORK ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS;
     return {
       ...base,
       status: "wrong_asset",
@@ -319,7 +323,7 @@ export function classifyTargetProbeResponse(
       challenge: { nonce: null, expiresAt: null },
       quoteAtomic: null,
       quoteUsdc: null,
-      detail: `HTTP 402 accepts[] did not include Base USDC ${MAINNET_USDC_ADDRESS}`,
+      detail: `HTTP 402 accepts[] did not include Base USDC ${expectedUsdc}`,
     };
   }
 
@@ -387,10 +391,27 @@ export function classifyTargetProbeResponse(
 
   const headerChallenge = parseWwwAuthenticateChallenge(response.headers);
   const fallbackChallenge = bodyChallenge(body);
-  const challenge = {
+  let challenge = {
     nonce: headerChallenge.nonce ?? fallbackChallenge.nonce,
     expiresAt: headerChallenge.expiresAt ?? fallbackChallenge.expiresAt,
   };
+  if (
+    (!challenge.nonce || !challenge.expiresAt) &&
+    expectedNetwork === TESTNET_NETWORK &&
+    selectedAccept.maxTimeoutSeconds
+  ) {
+    const timeoutSec = selectedAccept.maxTimeoutSeconds;
+    challenge = {
+      nonce:
+        challenge.nonce ??
+        sha256(
+          `${candidate.resourceUrl}:${selectedAccept.payTo}:${selectedAccept.amountAtomic}`,
+        ).slice(0, 32),
+      expiresAt:
+        challenge.expiresAt ??
+        new Date(Date.now() + timeoutSec * 1000).toISOString(),
+    };
+  }
   if (!challenge.nonce || !challenge.expiresAt) {
     return {
       ...base,
@@ -448,6 +469,7 @@ export async function probeTargetLiveness(
     };
     return classifyTargetProbeResponse(candidate, recorded, {
       maxTargetPriceAtomic: options.maxTargetPriceAtomic,
+      expectedNetwork: candidate.accepts[0]?.network ?? MAINNET_NETWORK,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

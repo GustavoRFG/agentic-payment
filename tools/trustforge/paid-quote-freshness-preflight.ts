@@ -2,7 +2,7 @@
  * paid-quote-freshness-preflight — unsigned pay-time 402 re-handshake before key load.
  */
 
-import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
 import {
   classifyTargetProbeResponse,
@@ -22,6 +22,8 @@ export interface AuthorizedPaymentQuote {
   readonly quote_atomic: string;
   readonly authorized_max_usdc: string;
   readonly pay_to: string;
+  readonly network?: string;
+  readonly asset?: string;
 }
 
 export interface PaidQuoteFreshnessPreflightResult {
@@ -34,6 +36,14 @@ function policyForEndpoint(endpoint: string) {
   for (const policy of Object.values(ALLOWLISTED_RICH_TX_EXPLAINER_POLICIES)) {
     if (policy.endpointUrl === endpoint) return policy;
   }
+  if (endpoint.includes("/paid/analyze-text")) {
+    return {
+      serviceId: "local_analyze_text",
+      method: "POST" as const,
+      policyId: "sepolia_local_analyze_text",
+      buildRequestBody: () => ({}),
+    };
+  }
   return null;
 }
 
@@ -43,7 +53,10 @@ export function buildProbeCandidateForAuthorizedQuote(
   const policy = policyForEndpoint(quote.endpoint);
   if (!policy) return null;
 
+  const expectedNetwork = quote.network ?? MAINNET_NETWORK;
+  const expectedAsset = quote.asset ?? MAINNET_USDC_ADDRESS;
   const isZapper = policy.policyId === ZAPPER_TX_EXPLAINER_POLICY.policyId;
+  const isSepoliaLocal = quote.endpoint.includes("/paid/analyze-text");
   return {
     candidateId: policy.serviceId,
     resourceUrl: quote.endpoint,
@@ -69,12 +82,25 @@ export function buildProbeCandidateForAuthorizedQuote(
             },
           },
         }
-      : {},
+      : isSepoliaLocal
+        ? {
+            bazaar: {
+              info: {
+                input: {
+                  type: "http",
+                  method: "POST",
+                  bodyType: "json",
+                  body: { text: "TrustForge Sepolia freshness probe.", mode: "full" },
+                },
+              },
+            },
+          }
+        : {},
     accepts: [
       {
         scheme: "exact",
-        network: MAINNET_NETWORK,
-        asset: MAINNET_USDC_ADDRESS,
+        network: expectedNetwork,
+        asset: expectedAsset,
         amountAtomic: quote.quote_atomic,
         payTo: quote.pay_to,
         maxTimeoutSeconds: 300,
@@ -94,6 +120,8 @@ export function evaluateFresh402AgainstAuthorizedQuote(
     reasons.push(`fresh handshake status ${outcome.status}`);
   }
 
+  const expectedNetwork = quote.network ?? MAINNET_NETWORK;
+  const expectedAsset = (quote.asset ?? MAINNET_USDC_ADDRESS).toLowerCase();
   const selected = outcome.selectedAccept;
   if (!selected) {
     reasons.push("fresh 402 missing selectedAccept");
@@ -101,10 +129,10 @@ export function evaluateFresh402AgainstAuthorizedQuote(
     if (selected.scheme !== "exact") {
       reasons.push(`unsupported scheme ${selected.scheme}`);
     }
-    if (selected.network !== MAINNET_NETWORK) {
+    if (selected.network !== expectedNetwork) {
       reasons.push(`wrong network ${selected.network}`);
     }
-    if (selected.asset.toLowerCase() !== MAINNET_USDC_ADDRESS.toLowerCase()) {
+    if (selected.asset.toLowerCase() !== expectedAsset) {
       reasons.push(`wrong asset ${selected.asset}`);
     }
     if ((selected.payTo ?? "").toLowerCase() !== quote.pay_to.toLowerCase()) {
