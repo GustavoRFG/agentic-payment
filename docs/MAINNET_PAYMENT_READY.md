@@ -49,12 +49,32 @@ npm run trustforge:phase6:paid-rich-probe -- --phase5-run "D:\trustforge\artifac
 
 Pay-time freshness pre-flight runs automatically before key load. Abort if quote/payTo/challenge drift.
 
-## Post-run verification (required)
+## Pre-payment reconciliation gate (required)
 
-Success is **on-chain**, not HTTP status:
+Before loading `BUYER_PRIVATE_KEY`, reconciliation must pass from committed code:
 
 ```powershell
 cd D:\agentic-payments-lab
+$env:TRUSTFORGE_BASE_RPC_URL = "<human read-only Base RPC — do not commit>"
+npm run trustforge:onchain:reconcile
+```
+
+Required output:
+
+- `rpc_status: pass`, `chain_id: 8453`
+- `unattributed_settlements_found: 0`
+- `balance_identity_status: pass`
+- `safe_to_use_for_payment_verification: yes`
+
+If RPC returns 403/429/timeout, stop — that is **not** “no settlement found”. See [TRUSTFORGE_RPC_RECONCILIATION.md](./TRUSTFORGE_RPC_RECONCILIATION.md).
+
+**Testnet:** TrustForge Phase 6 discovered-target Sepolia settlement not yet executed (`TESTNET_SETTLEMENT_NOT_EXECUTED`).
+
+## Post-run verification (required)
+
+Success is **on-chain**, not HTTP status — re-run reconcile after payment:
+
+```powershell
 npm run trustforge:onchain:reconcile
 ```
 
@@ -63,7 +83,7 @@ Confirm:
 - Exactly **one** new USDC `Transfer` to `0x43a2a720cd0911690c248075f4a29a5e7716f758` for **0.001125 USDC**
 - `unattributed_settlements_found: 0`
 - Balance identity closes
-- Phase 6 `RESULT.txt` shows `settlement_tx_hash` populated (not null)
+- Phase 6 outcome `PASS_SETTLED` (not HTTP 200 alone)
 
 ## Safety reminders
 

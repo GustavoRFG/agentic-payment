@@ -2,17 +2,39 @@
 
 from __future__ import annotations
 
+import io
+import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "trustforge"))
 
 from onchain_settlement_reconciliation import (  # noqa: E402
+    BASE_CHAIN_ID,
     BUYER_WALLET,
+    RECONCILIATION_INVALID_RESPONSE,
+    RECONCILIATION_NO_NEW_SETTLEMENT,
+    RECONCILIATION_PASS,
+    RECONCILIATION_RPC_FORBIDDEN,
+    RECONCILIATION_RPC_RATE_LIMITED,
+    RECONCILIATION_RPC_UNAVAILABLE,
+    RECONCILIATION_UNATTRIBUTED_SETTLEMENTS,
+    BaseRpcConfig,
+    JsonRpcClient,
     atomic_to_usdc,
+    classify_rpc_error,
+    load_base_rpc_config,
     paginate_range,
     pad_topic_address,
+    redact_rpc_url,
+    rpc_health_check,
+    run_reconciliation,
+    select_rpc,
     sum_usdc,
     unpad_topic_address,
 )
@@ -54,8 +76,206 @@ def test_balance_identity_fixture():
     outflows = ["0.001", "0.001125", "0.001125"]
     current = "0.052472"
     net_out = sum_usdc(outflows)
-    # initial - net_out should equal current for this synthetic fixture
     initial_micro = int(float(initial) * 1_000_000)
     out_micro = int(float(net_out) * 1_000_000)
     current_micro = int(float(current) * 1_000_000)
     assert initial_micro - out_micro == current_micro
+
+
+def test_redact_rpc_url_hides_path_and_keys():
+    assert redact_rpc_url("https://base-mainnet.g.alchemy.com/v2/secret-key") == (
+        "https://base-mainnet.g.alchemy.com/..."
+    )
+    assert redact_rpc_url("https://mainnet.base.org") == "https://mainnet.base.org"
+
+
+def test_classify_rpc_error_distinct_classes():
+    assert classify_rpc_error(urllib.error.HTTPError("url", 403, "", {}, None)) == (
+        RECONCILIATION_RPC_FORBIDDEN
+    )
+    assert classify_rpc_error(urllib.error.HTTPError("url", 429, "", {}, None)) == (
+        RECONCILIATION_RPC_RATE_LIMITED
+    )
+    assert classify_rpc_error(json.JSONDecodeError("bad", "doc", 0)) == (
+        RECONCILIATION_INVALID_RESPONSE
+    )
+
+
+def _rpc_response(payload: dict) -> MagicMock:
+    body = json.dumps(payload).encode("utf-8")
+    resp = MagicMock()
+    resp.read.return_value = body
+    resp.__enter__.return_value = resp
+    resp.__exit__.return_value = False
+    return resp
+
+
+def test_rpc_health_primary_success(monkeypatch):
+    calls: list[str] = []
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        calls.append(payload["method"])
+        if payload["method"] == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if payload["method"] == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(1000)})
+        if payload["method"] == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        raise AssertionError(f"unexpected method {payload['method']}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    health = rpc_health_check("https://mainnet.base.org")
+    assert health.ok is True
+    assert health.chain_id == BASE_CHAIN_ID
+    assert health.latest_block == 1000
+
+
+def test_rpc_health_primary_403_then_fallback_success(monkeypatch):
+    state = {"count": 0}
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        url = req.full_url
+        if "bad.example" in url:
+            raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+        payload = json.loads(req.data.decode("utf-8"))
+        if payload["method"] == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if payload["method"] == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(2000)})
+        if payload["method"] == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        raise AssertionError(payload["method"])
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    selected, discarded, health, fallback_used = select_rpc(
+        ["https://bad.example/rpc", "https://good.example/rpc"],
+        BaseRpcConfig(primary_url="https://bad.example/rpc", fallback_urls=["https://good.example/rpc"]),
+    )
+    assert selected == "https://good.example/rpc"
+    assert fallback_used is True
+    assert health and health.ok
+    assert discarded[0].error_class == RECONCILIATION_RPC_FORBIDDEN
+
+
+def test_rpc_health_primary_429_classified(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    health = rpc_health_check("https://rate-limited.example/rpc")
+    assert health.ok is False
+    assert health.error_class == RECONCILIATION_RPC_RATE_LIMITED
+
+
+def test_rpc_health_wrong_chain(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        if payload["method"] == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(1)})
+        if payload["method"] == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(1000)})
+        raise AssertionError(payload["method"])
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    health = rpc_health_check("https://mainnet.base.org")
+    assert health.ok is False
+    assert health.error_class == "RECONCILIATION_WRONG_CHAIN"
+
+
+def test_rpc_health_malformed_json(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        resp = MagicMock()
+        resp.read.return_value = b"not-json"
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        return resp
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    health = rpc_health_check("https://mainnet.base.org")
+    assert health.ok is False
+    assert health.error_class == RECONCILIATION_INVALID_RESPONSE
+
+
+def test_all_rpcs_fail_returns_unavailable(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://bad1.example/rpc",
+            fallback_urls=["https://bad2.example/rpc"],
+        ),
+    )
+    assert ledger.reconciliation_status == RECONCILIATION_RPC_FORBIDDEN
+    assert ledger.safe_to_use_for_payment_verification is False
+    assert ledger.unattributed_settlements_found is None
+
+
+def test_rpc_failure_is_not_settlement_not_found(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(primary_url="https://bad.example/rpc", fallback_urls=[]),
+    )
+    assert ledger.reconciliation_status != RECONCILIATION_UNATTRIBUTED_SETTLEMENTS
+    assert "settlement_not_found" not in ledger.reconciliation_detail.lower()
+
+
+def test_reconciliation_pass_when_unattributed_zero_and_balance_pass(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        method = payload["method"]
+        if method == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if method == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(5000)})
+        if method == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        if method == "eth_getTransactionByHash":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": {"blockNumber": hex(1000)}})
+        if method == "eth_call":
+            # 51472 atomic = 0.051472 USDC observed balance
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(51472)})
+        raise AssertionError(method)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(primary_url="https://mainnet.base.org", fallback_urls=[]),
+        window=5000,
+    )
+    assert ledger.reconciliation_status == RECONCILIATION_NO_NEW_SETTLEMENT
+    assert ledger.unattributed_settlements_found == 0
+    assert ledger.balance_identity_status == "pass"
+    assert ledger.safe_to_use_for_payment_verification is True
+
+
+def test_load_base_rpc_config_prefers_env_primary(monkeypatch):
+    monkeypatch.setenv("TRUSTFORGE_BASE_RPC_URL", "https://primary.example/rpc")
+    monkeypatch.setenv(
+        "TRUSTFORGE_BASE_RPC_FALLBACK_URLS",
+        "https://fallback1.example/rpc,https://fallback2.example/rpc",
+    )
+    cfg = load_base_rpc_config()
+    assert cfg.primary_url == "https://primary.example/rpc"
+    assert cfg.fallback_urls == [
+        "https://fallback1.example/rpc",
+        "https://fallback2.example/rpc",
+    ]
+
+
+def test_json_rpc_client_single_attempt(monkeypatch):
+    attempts = {"count": 0}
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        attempts["count"] += 1
+        raise urllib.error.HTTPError(req.full_url, 500, "err", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = JsonRpcClient("https://mainnet.base.org", max_attempts=1)
+    with pytest.raises(Exception):
+        client.call("eth_chainId", [])
+    assert attempts["count"] == 1
