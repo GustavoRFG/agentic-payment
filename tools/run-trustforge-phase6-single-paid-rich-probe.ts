@@ -46,6 +46,10 @@ import {
   reserveAuthorizationAttempt,
   AUTHORIZATION_ALREADY_CONSUMED,
 } from "./trustforge/authorization-consumption-ledger";
+import { runPaidQuoteFreshnessPreflight } from "./trustforge/paid-quote-freshness-preflight";
+import { ZAPPER_TX_EXPLAINER_POLICY } from "./trustforge/rich-tx-explainer-policy";
+import { verifyBaseUsdcPayment } from "./trustforge/verify-base-usdc-payment";
+import { parseUsdcDecimalToAtomic } from "./trustforge/external-x402-get-policy";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -123,6 +127,9 @@ export interface Phase6RunOptions {
   readonly env?: Record<string, string | undefined>;
   readonly finalizeOnly?: boolean;
   readonly richRunDir?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly skipFreshnessPreflight?: boolean;
+  readonly now?: Date;
 }
 
 export async function runPhase6SinglePaidRichProbe(
@@ -142,6 +149,8 @@ export async function runPhase6SinglePaidRichProbe(
     service_id: string;
     endpoint: string;
     quote_amount_usdc?: string;
+    quote_atomic?: string;
+    authorized_pay_to?: string;
     recommended_max_usdc?: string;
     target_selection_audit?: TargetSelectionAuditMetadata | null;
   }>(selectedPath);
@@ -170,6 +179,48 @@ export async function runPhase6SinglePaidRichProbe(
   await mkdir(runDir, { recursive: true });
   const targetSelectionAudit =
     selected.target_selection_audit ?? auth.target_selection_audit ?? null;
+
+  if (!options.finalizeOnly && !options.skipFreshnessPreflight) {
+    const quoteAtomic =
+      selected.quote_atomic ??
+      parseUsdcDecimalToAtomic(selected.quote_amount_usdc ?? "0.001125").toString();
+    const payTo =
+      selected.authorized_pay_to ??
+      (selected.endpoint === ZAPPER_TX_EXPLAINER_POLICY.endpointUrl
+        ? "0x43a2a720cd0911690c248075f4a29a5e7716f758"
+        : null);
+    if (!payTo) {
+      throw new Error(
+        "BLOCKED_MISSING_AUTHORIZED_PAY_TO: selected_candidate missing authorized_pay_to",
+      );
+    }
+    const preflight = await runPaidQuoteFreshnessPreflight({
+      authorized: {
+        endpoint: selected.endpoint,
+        quote_amount_usdc: selected.quote_amount_usdc ?? "0.001125",
+        quote_atomic: quoteAtomic,
+        authorized_max_usdc: auth.max_usdc,
+        pay_to: payTo,
+      },
+      fetchImpl: options.fetchImpl,
+      now: options.now,
+    });
+    await writeJson(join(runDir, "00_pay_time_freshness_preflight.json"), preflight);
+    if (!preflight.go) {
+      const failLines = [
+        "RESULT",
+        "trustforge_phase6_status: FAIL_PAY_TIME_FRESHNESS",
+        `endpoint: ${selected.endpoint}`,
+        `preflight_reasons: ${preflight.reasons.join("; ")}`,
+        "wallet_loaded: no",
+        "payment_attempted_live: no",
+        "NEXT",
+        "Do not load BUYER_PRIVATE_KEY; obtain new human authorization after quote/challenge stabilizes.",
+      ];
+      await writeText(join(runDir, "RESULT.txt"), `${failLines.join("\n")}\n`);
+      throw new Error(`BLOCKED_PAY_TIME_FRESHNESS: ${preflight.reasons.join("; ")}`);
+    }
+  }
 
   if (!options.finalizeOnly) {
     try {
@@ -234,6 +285,7 @@ export async function runPhase6SinglePaidRichProbe(
     selected,
     commitBefore,
     phase5RunDir,
+    fetchImpl: options.fetchImpl,
   });
 }
 
@@ -246,12 +298,15 @@ export async function finalizePhase6Run(input: {
     service_id: string;
     endpoint: string;
     quote_amount_usdc?: string;
+    quote_atomic?: string;
+    authorized_pay_to?: string;
     target_selection_audit?: TargetSelectionAuditMetadata | null;
   };
+  readonly fetchImpl?: typeof fetch;
   readonly commitBefore: string;
   readonly phase5RunDir: string;
 }): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
-  const { runDir, richRunDir, auth, selected, commitBefore, phase5RunDir } = input;
+  const { runDir, richRunDir, auth, selected, commitBefore, phase5RunDir, fetchImpl } = input;
   const runId = runDir.split(/[\\/]/).pop() ?? "phase6_unknown";
   const targetSelectionAudit =
     selected.target_selection_audit ?? auth.target_selection_audit ?? null;
@@ -309,8 +364,28 @@ export async function finalizePhase6Run(input: {
     sellerResponse?.payment_metadata?.settlement_transaction_hash ??
     onchainParsed?.transaction_hash ??
     null;
-  const actualSpend = txHash
-    ? (onchainParsed?.amount_decimal ?? null)
+
+  const expectedPayTo =
+    selected.authorized_pay_to ??
+    (selected.endpoint === ZAPPER_TX_EXPLAINER_POLICY.endpointUrl
+      ? "0x43a2a720cd0911690c248075f4a29a5e7716f758"
+      : null);
+
+  const onchainVerified = txHash
+    ? await verifyBaseUsdcPayment({
+        transactionHash: txHash,
+        expectedAmountUsdc: selected.quote_amount_usdc ?? "0.001125",
+        expectedPayTo: expectedPayTo ?? undefined,
+        fetchImpl,
+      })
+    : null;
+  if (onchainVerified) {
+    await writeJson(join(runDir, "09_onchain_payment_verification.json"), onchainVerified);
+  }
+
+  const onChainConfirmed = onchainVerified?.status === "ONCHAIN_VERIFIED";
+  const actualSpend = onChainConfirmed
+    ? (onchainVerified?.amount_decimal ?? onchainParsed?.amount_decimal ?? null)
     : null;
 
   const savedLegacy = txHash
@@ -468,12 +543,14 @@ export async function finalizePhase6Run(input: {
   await writeJson(join(runDir, "paid_invariants.json"), paidInvariants);
 
   const invariantsOk = allPhase6PaidInvariantsPassed(paidInvariants);
-  const phase6Status =
-    probeStatus === "PASS_RICH_TX_EXPLAINER_SCORE" && invariantsOk
+  let phase6Status =
+    probeStatus === "PASS_RICH_TX_EXPLAINER_SCORE" && invariantsOk && onChainConfirmed
       ? "PASS_SINGLE_PAID_RICH_PROBE"
-      : paymentAttempted
-        ? "COMPLETED_PAID_PROBE_NO_TRUSTSCORE"
-        : "BLOCKED_PAID_PROBE_INCOMPLETE";
+      : paymentAttempted && !onChainConfirmed
+        ? "FAIL_SETTLEMENT_NOT_FOUND_ON_CHAIN"
+        : paymentAttempted
+          ? "COMPLETED_PAID_PROBE_NO_TRUSTSCORE"
+          : "BLOCKED_PAID_PROBE_INCOMPLETE";
 
   const resultLines = [
     "RESULT",
@@ -498,6 +575,8 @@ export async function finalizePhase6Run(input: {
     `payment_header_sent: ${paymentHeaderSent ? "yes" : "no"}`,
     `paid_402_capture_present: ${paid402CapturePresent ? "yes" : "no"}`,
     `settlement_evidence_status: ${settlementEvidenceV1.status}`,
+    `onchain_verified: ${onChainConfirmed ? "yes" : "no"}`,
+    `settlement_tx_hash: ${txHash ?? "null"}`,
     `payment_integrity_status: ${paymentIntegrity.status}`,
     `semantic_evaluation_status: ${semanticStatus}`,
     `trust_score_created: ${trustScoreGate.trust_score_created ? "yes" : "no"}`,
