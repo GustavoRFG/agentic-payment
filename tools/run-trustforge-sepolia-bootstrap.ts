@@ -2,8 +2,9 @@
  * run-trustforge-sepolia-bootstrap — synthesize target_selection, selected_candidate, DRAFT, freshness.
  */
 
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { adaptDiscoveredPrimaryToSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
 import { runPaidQuoteFreshnessPreflight } from "./trustforge/paid-quote-freshness-preflight";
@@ -13,6 +14,8 @@ import {
 } from "./trustforge/sepolia-seller-handshake";
 import { assertMainnetBuyerKeyAbsent } from "./trustforge/sepolia-settlement-guards";
 import { writeHumanPaymentAuthorizationDraft } from "./run-trustforge-emit-paid-authorization-draft";
+import { hashAuthorizationContent, parseJsonText } from "./trustforge/bom-safe-json";
+import type { HumanPaymentAuthorization } from "./trustforge/validate-human-payment-authorization";
 
 const WORKSPACE = "D:\\trustforge";
 
@@ -64,12 +67,21 @@ async function main(): Promise<number> {
     outputPath: join(runDir, "human_payment_authorization.DRAFT.json"),
   });
 
+  const authPath = join(runDir, "human_payment_authorization.json");
+  let authorizedMaxUsdc = adapted.candidate.recommended_max_usdc;
+  let authorizationHash: string | null = null;
+  if (existsSync(authPath)) {
+    const authFile = await readFile(authPath, "utf8");
+    authorizationHash = hashAuthorizationContent(authFile);
+    authorizedMaxUsdc = parseJsonText<HumanPaymentAuthorization>(authFile).max_usdc;
+  }
+
   const preflight = await runPaidQuoteFreshnessPreflight({
     authorized: {
       endpoint: adapted.candidate.endpoint,
       quote_amount_usdc: adapted.candidate.quote_amount_usdc,
       quote_atomic: adapted.candidate.quote_atomic,
-      authorized_max_usdc: adapted.candidate.recommended_max_usdc,
+      authorized_max_usdc: authorizedMaxUsdc,
       pay_to: adapted.candidate.authorized_pay_to,
       network: adapted.candidate.network,
       asset: adapted.candidate.asset,
@@ -90,6 +102,7 @@ async function main(): Promise<number> {
     `quote_usdc: ${adapted.candidate.quote_amount_usdc}`,
     `pay_to: ${adapted.candidate.authorized_pay_to}`,
     `freshness_go: ${preflight.go ? "yes" : "no"}`,
+    `authorization_hash: ${authorizationHash ?? "pending_human_auth"}`,
     "agent_signed: no",
     "NEXT",
     preflight.go

@@ -164,6 +164,7 @@ export async function readSepoliaTestnetWalletBalances(input: {
 
 export async function runSepoliaSettlementPreflight(input: {
   readonly sellerBaseUrl?: string;
+  readonly requiredUsdc?: string;
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
 }): Promise<SepoliaSettlementPreflightResult> {
@@ -200,7 +201,10 @@ export async function runSepoliaSettlementPreflight(input: {
     };
   }
 
-  const balances = await readSepoliaTestnetWalletBalances({ rpcUrl });
+  const balances = await readSepoliaTestnetWalletBalances({
+    rpcUrl,
+    requiredUsdc: input.requiredUsdc,
+  });
   if (!balances.ethSufficient || !balances.usdcSufficient) {
     return {
       ok: false,

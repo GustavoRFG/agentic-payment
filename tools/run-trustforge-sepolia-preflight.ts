@@ -2,10 +2,13 @@
  * run-trustforge-sepolia-preflight — read-only Sepolia infra verification.
  */
 
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runSepoliaSettlementPreflight } from "./trustforge/sepolia-settlement-preflight";
+import { readJsonFile } from "./trustforge/bom-safe-json";
+import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,7 +37,14 @@ async function main(): Promise<number> {
   const sellerArg = process.argv.indexOf("--seller-base-url");
   const sellerBaseUrl = sellerArg >= 0 ? process.argv[sellerArg + 1] : undefined;
 
-  const result = await runSepoliaSettlementPreflight({ sellerBaseUrl });
+  let requiredUsdc: string | undefined;
+  const selectedPath = join(runDir, "selected_candidate.json");
+  if (existsSync(selectedPath)) {
+    const selected = await readJsonFile<DiscoveredSelectedCandidate>(selectedPath);
+    requiredUsdc = selected.quote_amount_usdc;
+  }
+
+  const result = await runSepoliaSettlementPreflight({ sellerBaseUrl, requiredUsdc });
   await writeFile(
     join(runDir, "00_sepolia_preflight.json"),
     `${JSON.stringify(result, (_, value) => (typeof value === "bigint" ? value.toString() : value), 2)}\n`,

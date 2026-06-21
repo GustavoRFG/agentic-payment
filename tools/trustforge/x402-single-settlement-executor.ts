@@ -18,6 +18,7 @@ import {
   buildSettlementIntent,
   type SettlementIntent,
 } from "./settlement-run-binding";
+import { parseJsonText } from "./bom-safe-json";
 
 export interface SingleSettlementRequest {
   readonly network: string;
@@ -58,9 +59,46 @@ export interface SingleSettlementExecutionResult {
   readonly intentPath: string;
 }
 
-function decodePaymentRequiredHeader(value: string): { accepts?: Array<Record<string, unknown>> } {
+export interface PaymentRequiredIntentSpec {
+  readonly network: string;
+  readonly asset: string;
+  readonly payTo: string;
+  readonly amountAtomic: string;
+}
+
+export function decodePaymentRequiredHeader(value: string): { accepts?: Array<Record<string, unknown>> } {
   const decoded = Buffer.from(value, "base64").toString("utf-8");
-  return JSON.parse(decoded) as { accepts?: Array<Record<string, unknown>> };
+  return parseJsonText<{ accepts?: Array<Record<string, unknown>> }>(decoded);
+}
+
+function acceptAmountAtomic(entry: Record<string, unknown>): string {
+  return String(entry.amount ?? entry.maxAmountRequired ?? entry.maxAmount ?? "");
+}
+
+function acceptPayTo(entry: Record<string, unknown>): string {
+  return String(entry.payTo ?? entry.pay_to ?? "").toLowerCase();
+}
+
+export function assertPaymentRequiredRailMatchesIntent(
+  envelope: { accepts?: Array<Record<string, unknown>> },
+  intent: PaymentRequiredIntentSpec,
+  expectedNetwork?: string,
+): void {
+  const network = expectedNetwork ?? intent.network;
+  const accepts = envelope.accepts ?? [];
+  const rail = accepts.find((entry) => entry.network === network);
+  if (!rail) {
+    throw new Error("BLOCKED_PRE_PAYMENT_402_INTENT_MISMATCH: network");
+  }
+  if (String(rail.asset ?? "").toLowerCase() !== intent.asset.toLowerCase()) {
+    throw new Error("BLOCKED_PRE_PAYMENT_402_INTENT_MISMATCH: asset");
+  }
+  if (acceptPayTo(rail) !== intent.payTo.toLowerCase()) {
+    throw new Error("BLOCKED_PRE_PAYMENT_402_INTENT_MISMATCH: pay_to");
+  }
+  if (acceptAmountAtomic(rail) !== intent.amountAtomic) {
+    throw new Error("BLOCKED_PRE_PAYMENT_402_INTENT_MISMATCH: amount");
+  }
 }
 
 export function extractFacilitatorTransactionHash(response: Response): string | null {
@@ -159,15 +197,16 @@ export async function executeSingleX402Settlement(input: {
       throw new Error("BLOCKED_PRE_PAYMENT_402: missing PAYMENT-REQUIRED header");
     }
     const envelope = decodePaymentRequiredHeader(rawHeader);
-    const expectedNetwork = req.expectedNetworkIn402 ?? req.network;
-    const rail = (envelope.accepts ?? []).find(
-      (entry) =>
-        entry.network === expectedNetwork &&
-        String(entry.asset ?? "").toLowerCase() === req.asset.toLowerCase(),
+    assertPaymentRequiredRailMatchesIntent(
+      envelope,
+      {
+        network: req.expectedNetworkIn402 ?? req.network,
+        asset: req.asset,
+        payTo: req.payTo,
+        amountAtomic: req.quotedAmountAtomic,
+      },
+      req.expectedNetworkIn402 ?? req.network,
     );
-    if (!rail) {
-      throw new Error(`BLOCKED_PRE_PAYMENT_402: no accept for ${expectedNetwork} ${req.asset}`);
-    }
   }
 
   const paidInvocationGuard =

@@ -43,7 +43,7 @@ import {
 } from "./trustforge/phase6-paid-invariants";
 import {
   authorizationLedgerPath,
-  hashAuthorizationContent,
+  hashAuthorizationFile,
   reserveAuthorizationAttempt,
   AUTHORIZATION_ALREADY_CONSUMED,
 } from "./trustforge/authorization-consumption-ledger";
@@ -167,8 +167,7 @@ export async function runPhase6SinglePaidRichProbe(
     throw new Error("COMPLETED_HUMAN_REJECTED_PAID_PROBE");
   }
 
-  const authContent = await readFile(authPath, "utf8");
-  const authorizationHash = hashAuthorizationContent(authContent);
+  const authorizationHash = await hashAuthorizationFile(authPath);
   const ledgerPath = authorizationLedgerPath(phase5RunDir);
 
   const env = options.env ?? loadEnvForPaidProbe();

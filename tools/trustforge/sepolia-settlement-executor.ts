@@ -14,7 +14,6 @@ import {
   type HumanPaymentAuthorization,
 } from "./validate-human-payment-authorization";
 import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
-import { hashAuthorizationContent } from "./authorization-consumption-ledger";
 import { parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
 import {
   executeSingleX402Settlement,
@@ -59,7 +58,7 @@ export async function executeSepoliaSingleSettlement(input: {
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly skipFreshnessPreflight?: boolean;
-  readonly authorizationHash?: string;
+  readonly authorizationHash: string;
 }): Promise<SepoliaSettlementExecutionResult> {
   const env = input.env ?? process.env;
   assertMainnetBuyerKeyAbsent(env);
@@ -90,8 +89,7 @@ export async function executeSepoliaSingleSettlement(input: {
     }
   }
 
-  const authorizationHash =
-    input.authorizationHash ?? hashAuthorizationContent(JSON.stringify(input.auth));
+  const authorizationHash = input.authorizationHash;
   const maxAmountAtomic = parseUsdcDecimalToAtomic(input.auth.max_usdc).toString();
   const requestBody = {
     text: "TrustForge Sepolia settlement proof — single authorized attempt.",

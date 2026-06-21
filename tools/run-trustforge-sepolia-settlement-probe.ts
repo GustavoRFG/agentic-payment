@@ -6,12 +6,17 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
 import { executeSepoliaSingleSettlement } from "./trustforge/sepolia-settlement-executor";
 import { assertMainnetBuyerKeyAbsent } from "./trustforge/sepolia-settlement-guards";
 import type { HumanPaymentAuthorization } from "./trustforge/validate-human-payment-authorization";
+import {
+  hashAuthorizationContent,
+  parseJsonText,
+  readJsonFile,
+} from "./trustforge/bom-safe-json";
 
 const WORKSPACE = "D:\\trustforge";
 
@@ -30,16 +35,18 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const auth = JSON.parse(await readFile(authPath, "utf8")) as HumanPaymentAuthorization;
-  const selected = JSON.parse(await readFile(selectedPath, "utf8")) as DiscoveredSelectedCandidate;
+  const authRaw = await readFile(authPath, "utf8");
+  const authorizationHash = hashAuthorizationContent(authRaw);
+  const auth = parseJsonText<HumanPaymentAuthorization>(authRaw);
+  const selected = await readJsonFile<DiscoveredSelectedCandidate>(selectedPath);
   await mkdir(join(runDir, "settlement_probe"), { recursive: true });
 
   const balancesPath = join(runDir, "00_sepolia_preflight.json");
   let balanceBeforeUsdc: string | undefined;
   if (existsSync(balancesPath)) {
-    const preflight = JSON.parse(await readFile(balancesPath, "utf8")) as {
+    const preflight = await readJsonFile<{
       balances?: { usdcBalance?: string };
-    };
+    }>(balancesPath);
     balanceBeforeUsdc = preflight.balances?.usdcBalance;
   }
 
@@ -47,11 +54,13 @@ async function main(): Promise<number> {
     runDir,
     auth,
     selected,
+    authorizationHash,
   });
 
   const record = {
     ...result,
     balanceBeforeUsdc,
+    authorizationHash,
     executed_at_utc: new Date().toISOString(),
   };
   await writeFile(
@@ -69,6 +78,7 @@ async function main(): Promise<number> {
     `payment_attempted: ${result.paymentAttempted ? "yes" : "no"}`,
     `payment_bearing_http_request_count: ${result.paymentBearingHttpRequestCount}`,
     `http_status: ${result.httpStatus ?? "null"}`,
+    `authorization_hash: ${authorizationHash}`,
     "BUYER_PRIVATE_KEY: absent",
     "SEPOLIA_BUYER_PRIVATE_KEY: loaded_by_human_only",
     "single_shot: yes",

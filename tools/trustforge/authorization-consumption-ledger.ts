@@ -2,10 +2,12 @@
  * authorization-consumption-ledger — durable single-shot human authorization consumption.
  */
 
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { hashAuthorizationContent, readJsonFile } from "./bom-safe-json";
+
+export { hashAuthorizationContent, hashAuthorizationFile } from "./bom-safe-json";
 
 export const AUTHORIZATION_ALREADY_CONSUMED = "BLOCKED_AUTHORIZATION_ALREADY_CONSUMED" as const;
 
@@ -21,10 +23,6 @@ export interface AuthorizationConsumptionLedger {
   first_consumed_at: string | null;
   last_consumed_at: string | null;
   closed: boolean;
-}
-
-export function hashAuthorizationContent(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 export function authorizationLedgerPath(phase5RunDir: string): string {
@@ -60,7 +58,7 @@ async function acquireLock(ledgerPath: string, timeoutMs = 5000): Promise<() => 
 
 async function readLedger(ledgerPath: string): Promise<AuthorizationConsumptionLedger | null> {
   if (!existsSync(ledgerPath)) return null;
-  return JSON.parse(await readFile(ledgerPath, "utf8")) as AuthorizationConsumptionLedger;
+  return readJsonFile<AuthorizationConsumptionLedger>(ledgerPath);
 }
 
 async function writeLedgerAtomic(

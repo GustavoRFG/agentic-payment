@@ -4,7 +4,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
@@ -16,6 +16,7 @@ import {
 } from "./trustforge/sepolia-settlement-classify";
 import { assertMainnetBuyerKeyAbsent } from "./trustforge/sepolia-settlement-guards";
 import type { SettlementIntent } from "./trustforge/settlement-run-binding";
+import { readJsonFile } from "./trustforge/bom-safe-json";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -23,7 +24,7 @@ async function findSettlementIntent(runDir: string): Promise<SettlementIntent | 
   if (!existsSync(runDir)) return null;
   const intentFile = readdirSync(runDir).find((name) => name.startsWith("settlement_intent_"));
   if (!intentFile) return null;
-  return JSON.parse(await readFile(join(runDir, intentFile), "utf8")) as SettlementIntent;
+  return readJsonFile<SettlementIntent>(join(runDir, intentFile));
 }
 
 async function main(): Promise<number> {
@@ -34,22 +35,22 @@ async function main(): Promise<number> {
     return 1;
   }
   const runDir = process.argv[runArg + 1];
-  const selected = JSON.parse(
-    await readFile(join(runDir, "selected_candidate.json"), "utf8"),
-  ) as DiscoveredSelectedCandidate;
+  const selected = await readJsonFile<DiscoveredSelectedCandidate>(
+    join(runDir, "selected_candidate.json"),
+  );
   const executionPath = join(runDir, "settlement_probe", "01_execution.json");
   if (!existsSync(executionPath)) {
     console.error("BLOCKED_NO_SETTLEMENT_EXECUTION: run human settlement probe first");
     return 1;
   }
-  const execution = JSON.parse(await readFile(executionPath, "utf8")) as {
+  const execution = await readJsonFile<{
     paymentAttempted: boolean;
     paymentBearingHttpRequestCount: number;
     httpStatus: number | null;
     balanceBeforeUsdc?: string;
     facilitatorTransactionHash?: string | null;
     intentPath?: string;
-  };
+  }>(executionPath);
 
   const reconcileDir = join(runDir, "sepolia_reconciliation");
   await mkdir(reconcileDir, { recursive: true });
@@ -65,15 +66,15 @@ async function main(): Promise<number> {
     env: { ...process.env, BUYER_PRIVATE_KEY: "" },
   });
 
-  const ledger = JSON.parse(
-    await readFile(join(reconcileDir, "onchain_settlement_ledger.json"), "utf8"),
-  ) as Record<string, unknown>;
+  const ledger = await readJsonFile<Record<string, unknown>>(
+    join(reconcileDir, "onchain_settlement_ledger.json"),
+  );
   const parsed = parseReconciliationLedger(ledger);
 
   let bindingResult: ReturnType<typeof confirmSepoliaSettlementBinding> | null = null;
   let intent: SettlementIntent | null = null;
   if (execution.intentPath && existsSync(execution.intentPath)) {
-    intent = JSON.parse(await readFile(execution.intentPath, "utf8")) as SettlementIntent;
+    intent = await readJsonFile<SettlementIntent>(execution.intentPath);
   } else {
     intent = await findSettlementIntent(runDir);
   }
