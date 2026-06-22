@@ -22,6 +22,7 @@ from onchain_settlement_reconciliation import (  # noqa: E402
     RECONCILIATION_PASS,
     RECONCILIATION_RPC_FORBIDDEN,
     RECONCILIATION_RPC_RATE_LIMITED,
+    RECONCILIATION_RPC_TIMEOUT,
     RECONCILIATION_RPC_UNAVAILABLE,
     RECONCILIATION_UNATTRIBUTED_SETTLEMENTS,
     SEPOLIA_CHAIN_ID,
@@ -367,3 +368,26 @@ def test_sepolia_settlement_expectation_marks_proof(monkeypatch):
     assert any(
         s.get("matched_run") == "Sepolia_settlement_proof" for s in ledger.settlements
     )
+
+
+def test_global_deadline_returns_rpc_timeout(monkeypatch):
+    def slow_urlopen(*_args, **_kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("urllib.request.urlopen", slow_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://sepolia.base.org",
+            fallback_urls=[],
+            timeout_ms=1000,
+            max_attempts_per_endpoint=1,
+        ),
+        profile=SEPOLIA_PROFILE,
+        max_total_runtime_seconds=1,
+    )
+    assert ledger.reconciliation_status in {
+        RECONCILIATION_RPC_UNAVAILABLE,
+        RECONCILIATION_RPC_TIMEOUT,
+        RECONCILIATION_INVALID_RESPONSE,
+    }
+    assert ledger.safe_to_use_for_payment_verification is False

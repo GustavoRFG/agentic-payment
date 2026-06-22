@@ -57,6 +57,11 @@ RECONCILIATION_RPC_FORBIDDEN = "RECONCILIATION_RPC_FORBIDDEN"
 RECONCILIATION_RPC_RATE_LIMITED = "RECONCILIATION_RPC_RATE_LIMITED"
 RECONCILIATION_INVALID_RESPONSE = "RECONCILIATION_INVALID_RESPONSE"
 RECONCILIATION_WRONG_CHAIN = "RECONCILIATION_WRONG_CHAIN"
+RECONCILIATION_RPC_TIMEOUT = "RECONCILIATION_RPC_TIMEOUT"
+
+
+class RpcDeadlineExceeded(Exception):
+    """Raised when bounded reconciliation exceeds max total runtime."""
 
 # Known settlement tx hashes from TrustForge artifacts (to match, not assume on-chain)
 KNOWN_RUN_MATCHES: dict[str, str] = {
@@ -548,11 +553,15 @@ def scan_transfers(
     window: int,
     profile: NetworkProfile,
     settlement_expectation: SettlementExpectation | None = None,
+    *,
+    deadline_monotonic: float | None = None,
 ) -> tuple[list[SettlementRow], int]:
     wallet_topic = pad_topic_address(wallet)
     rows: list[SettlementRow] = []
     windows = paginate_range(from_block, to_block, window)
     for w_from, w_to in windows:
+        if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+            raise RpcDeadlineExceeded("global reconciliation deadline exceeded")
         if direction == "out":
             topics: list[Any] = [TRANSFER_TOPIC, wallet_topic]
         else:
@@ -733,9 +742,15 @@ def run_reconciliation(
     config: BaseRpcConfig | None = None,
     profile: NetworkProfile | None = None,
     settlement_expectation: SettlementExpectation | None = None,
+    max_total_runtime_seconds: int | None = None,
 ) -> ReconciliationResult:
     prof = profile or MAINNET_PROFILE
     cfg = config or load_base_rpc_config(prof)
+    deadline_monotonic = (
+        time.monotonic() + max(1, max_total_runtime_seconds)
+        if max_total_runtime_seconds is not None
+        else None
+    )
     urls = resolve_endpoint_list(cfg, prof)
     selected, discarded, health, fallback_used = select_rpc(urls, cfg, prof)
     result = ReconciliationResult(
@@ -775,15 +790,38 @@ def run_reconciliation(
 
     try:
         outflows, windows_scanned = scan_transfers(
-            client, from_block, to_block, prof.wallet, "out", window, prof, settlement_expectation
+            client,
+            from_block,
+            to_block,
+            prof.wallet,
+            "out",
+            window,
+            prof,
+            settlement_expectation,
+            deadline_monotonic=deadline_monotonic,
         )
         result.windows_scanned = windows_scanned
         inflows, _ = scan_transfers(
-            client, from_block, to_block, prof.wallet, "in", window, prof, settlement_expectation
+            client,
+            from_block,
+            to_block,
+            prof.wallet,
+            "in",
+            window,
+            prof,
+            settlement_expectation,
+            deadline_monotonic=deadline_monotonic,
         )
         result.inflows = [asdict(r) for r in inflows]
         balance_atomic, balance_usdc = client.balance_of_usdc(prof.wallet)
         _ = balance_atomic
+    except RpcDeadlineExceeded as exc:
+        return _apply_rpc_failure(
+            result,
+            discarded,
+            RECONCILIATION_RPC_TIMEOUT,
+            str(exc),
+        )
     except Exception as exc:  # noqa: BLE001
         error_class = classify_rpc_error(exc)
         return _apply_rpc_failure(
@@ -978,9 +1016,34 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-amount-usdc", default=None, help="Expected settlement USDC amount")
     parser.add_argument("--expected-amount-atomic", default=None, help="Expected settlement atomic amount")
     parser.add_argument("--balance-before-usdc", default=None, help="Wallet USDC balance before settlement")
+    parser.add_argument(
+        "--rpc-request-timeout-seconds",
+        type=int,
+        default=RPC_TIMEOUT_SEC,
+        help="Per-request RPC timeout in seconds",
+    )
+    parser.add_argument(
+        "--rpc-max-retries",
+        type=int,
+        default=MAX_ATTEMPTS_PER_ENDPOINT,
+        help="Maximum retries per RPC endpoint",
+    )
+    parser.add_argument(
+        "--max-total-runtime-seconds",
+        type=int,
+        default=None,
+        help="Global reconciliation deadline in seconds",
+    )
     args = parser.parse_args(argv)
 
     prof = resolve_network_profile(args.network)
+    cfg = load_base_rpc_config(prof)
+    cfg = BaseRpcConfig(
+        primary_url=cfg.primary_url,
+        fallback_urls=cfg.fallback_urls,
+        max_attempts_per_endpoint=max(1, args.rpc_max_retries),
+        timeout_ms=max(1, args.rpc_request_timeout_seconds) * 1000,
+    )
     settlement: SettlementExpectation | None = None
     if args.expected_pay_to and args.expected_amount_usdc:
         settlement = SettlementExpectation(
@@ -1001,6 +1064,8 @@ def main(argv: list[str] | None = None) -> int:
         window=args.window,
         profile=prof,
         settlement_expectation=settlement,
+        config=cfg,
+        max_total_runtime_seconds=args.max_total_runtime_seconds,
     )
     print(format_result(ledger, out / "onchain_settlement_ledger.json", out / "onchain_settlement_ledger.md"))
     return 0 if ledger.safe_to_use_for_payment_verification else 1
