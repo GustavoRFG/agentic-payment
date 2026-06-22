@@ -19,6 +19,15 @@ import {
   type SettlementIntent,
 } from "./settlement-run-binding";
 import { parseJsonText } from "./bom-safe-json";
+import {
+  extractFacilitatorHashFromResponse,
+  extractFacilitatorHashFromPaymentResponseHeader,
+} from "./facilitator-receipt-parse";
+
+export {
+  extractFacilitatorHashFromResponse,
+  extractFacilitatorHashFromPaymentResponseHeader,
+} from "./facilitator-receipt-parse";
 
 export interface SingleSettlementRequest {
   readonly network: string;
@@ -102,26 +111,7 @@ export function assertPaymentRequiredRailMatchesIntent(
 }
 
 export function extractFacilitatorTransactionHash(response: Response): string | null {
-  const paymentHeader =
-    response.headers.get("payment-response") ?? response.headers.get("x-payment-response");
-  if (!paymentHeader) return null;
-  try {
-    const padded = paymentHeader
-      .replace(/-/g, "+")
-      .replace(/_/g, "/")
-      .padEnd(Math.ceil(paymentHeader.length / 4) * 4, "=");
-    const decoded = JSON.parse(Buffer.from(padded, "base64").toString("utf-8")) as Record<
-      string,
-      unknown
-    >;
-    const tx =
-      decoded.transactionHash ??
-      decoded.transaction_hash ??
-      (decoded.transaction as Record<string, unknown> | undefined)?.hash;
-    return typeof tx === "string" ? tx : null;
-  } catch {
-    return null;
-  }
+  return extractFacilitatorHashFromResponse(response);
 }
 
 export async function persistSettlementIntent(

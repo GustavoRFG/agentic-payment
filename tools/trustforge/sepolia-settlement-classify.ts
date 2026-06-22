@@ -39,6 +39,10 @@ export interface SettlementBindingMetrics {
   readonly known_settlements_confirmed_onchain: number;
   readonly phase6_settlements_identified: number;
   readonly unattributed_settlements_found: number;
+  readonly current_attempt_id: string | null;
+  readonly current_attempt_candidates_after_filter: number;
+  readonly current_attempt_settlement_block: number | null;
+  readonly current_attempt_settlement_tx_hash: string | null;
 }
 
 export function classifySepoliaSettlement(input: {
@@ -52,12 +56,20 @@ export function classifySepoliaSettlement(input: {
   readonly invariantsOk?: boolean;
   readonly binding?: SettlementBindingRecord | null;
   readonly bindingMetrics?: SettlementBindingMetrics | null;
+  readonly bindingStatus?: SettlementBindingRecord["settlement_status"] | null;
 }): SepoliaClassificationResult {
-  const onChainConfirmed = Boolean(
-    input.probe.onChainConfirmed ??
-      (input.settlementTxHash && input.safeToUseForPaymentVerification),
+  const bindingConfirmed = input.binding ? bindingConfirmsSettlement(input.binding) : false;
+  const bindingIndependentMatch = Boolean(
+    input.binding?.independent_match?.settlement_tx_hash &&
+      (input.binding.settlement_status === "facilitator_hash_missing" ||
+        input.binding.settlement_status === "confirmed" ||
+        input.binding.settlement_status === "hash_mismatch"),
   );
-  const outcome = classifyPaidProbeOutcome({
+  const onChainConfirmed = Boolean(
+    input.probe.onChainConfirmed ?? (bindingConfirmed && input.safeToUseForPaymentVerification),
+  );
+
+  let outcome = classifyPaidProbeOutcome({
     paymentAttempted: input.probe.paymentAttempted,
     onChainConfirmed,
     paymentBearingHttpRequestCount: input.probe.paymentBearingHttpRequestCount,
@@ -65,19 +77,41 @@ export function classifySepoliaSettlement(input: {
     invariantsOk: input.invariantsOk ?? true,
   });
 
+  if (
+    input.binding?.settlement_status === "facilitator_hash_missing" &&
+    bindingIndependentMatch &&
+    input.probe.paymentAttempted
+  ) {
+    outcome = "SETTLED_ONCHAIN_FACILITATOR_HASH_MISSING";
+  } else if (input.binding?.settlement_status === "ambiguous_match" && input.probe.paymentAttempted) {
+    outcome = "FAIL";
+  } else if (
+    input.binding?.settlement_status === "hash_mismatch" &&
+    bindingIndependentMatch &&
+    input.probe.paymentAttempted
+  ) {
+    outcome = "FAIL";
+  }
+
+  const settlementTxHash =
+    bindingConfirmed || bindingIndependentMatch
+      ? (input.binding?.settlement_tx_hash ?? input.settlementTxHash ?? input.probe.settlementTxHash ?? null)
+      : (input.binding?.settlement_tx_hash ?? null);
   return {
     outcome,
     reconciliationStatus: input.reconciliationStatus ?? null,
     safeToUseForPaymentVerification: input.safeToUseForPaymentVerification ?? false,
     unattributedSettlementsFound: input.unattributedSettlementsFound ?? null,
     balanceIdentityStatus: input.balanceIdentityStatus ?? null,
-    settlementTxHash: input.settlementTxHash ?? input.probe.settlementTxHash ?? null,
+    settlementTxHash,
     detail:
       outcome === "PASS_SETTLED"
         ? "Sepolia settlement proof complete"
-        : outcome === "PASS_NO_SETTLE_CLEAN"
-          ? "No payment attempted — happy path not proven"
-          : `classified ${outcome}`,
+        : outcome === "SETTLED_ONCHAIN_FACILITATOR_HASH_MISSING"
+          ? "Independent current-run on-chain match; facilitator hash missing in preserved artifacts"
+          : outcome === "PASS_NO_SETTLE_CLEAN"
+            ? "No payment attempted — happy path not proven"
+            : `classified ${outcome}`,
     binding: input.binding ?? null,
     bindingMetrics: input.bindingMetrics ?? null,
   };
@@ -125,6 +159,15 @@ export function buildSettlementBindingMetrics(input: {
     known_settlements_confirmed_onchain: bindingConfirmed ? 1 : 0,
     phase6_settlements_identified: identified,
     unattributed_settlements_found: unattributed,
+    current_attempt_id: input.binding?.attempt_id ?? null,
+    current_attempt_candidates_after_filter: input.binding?.current_attempt_candidates_after_filter ?? 0,
+    current_attempt_settlement_block:
+      input.binding?.independent_match?.block_number ??
+      (input.binding?.block_number ? Number.parseInt(input.binding.block_number, 10) : null),
+    current_attempt_settlement_tx_hash:
+      input.binding?.independent_match?.settlement_tx_hash ??
+      input.binding?.settlement_tx_hash ??
+      null,
   };
 }
 
@@ -132,12 +175,14 @@ export function confirmSepoliaSettlementBinding(input: {
   readonly intent: SettlementIntent;
   readonly ledger: Record<string, unknown>;
   readonly facilitatorReportedHash?: string | null;
+  readonly upperBoundUtc: string;
 }): { readonly binding: SettlementBindingRecord; readonly metrics: SettlementBindingMetrics } {
   const settlements = ledgerSettlementsToRows(input.ledger);
   const binding = confirmSettlementBinding({
     intent: input.intent,
     settlements,
     facilitatorReportedHash: input.facilitatorReportedHash,
+    upperBoundUtc: input.upperBoundUtc,
   });
   const metrics = buildSettlementBindingMetrics({ ledger: input.ledger, binding });
   return { binding, metrics };
