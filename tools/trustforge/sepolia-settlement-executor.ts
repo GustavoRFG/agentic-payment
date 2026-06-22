@@ -31,6 +31,8 @@ export interface SepoliaSettlementExecutionResult {
   readonly buyerAddress: string;
   readonly network: typeof TESTNET_NETWORK;
   readonly facilitatorTransactionHash: string | null;
+  readonly facilitatorReceiptPath: string | null;
+  readonly facilitatorReceiptParseStatus: string | null;
   readonly attemptId: string;
   readonly intentPath: string;
 }
@@ -46,6 +48,8 @@ function mapSepoliaResult(result: SingleSettlementExecutionResult): SepoliaSettl
     buyerAddress: result.buyerAddress,
     network: TESTNET_NETWORK,
     facilitatorTransactionHash: result.facilitatorTransactionHash,
+    facilitatorReceiptPath: result.facilitatorReceiptPath,
+    facilitatorReceiptParseStatus: result.facilitatorReceipt.parseStatus,
     attemptId: result.attemptId,
     intentPath: result.intentPath,
   };

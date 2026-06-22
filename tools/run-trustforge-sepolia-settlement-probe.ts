@@ -61,7 +61,12 @@ async function main(): Promise<number> {
     ...result,
     balanceBeforeUsdc,
     authorizationHash,
+    attemptId: result.attemptId,
+    intentPath: result.intentPath,
+    facilitatorReceiptPath: result.facilitatorReceiptPath,
+    facilitatorReceiptParseStatus: result.facilitatorReceiptParseStatus,
     executed_at_utc: new Date().toISOString(),
+    request_completed_at_utc: new Date().toISOString(),
   };
   await writeFile(
     join(runDir, "settlement_probe", "01_execution.json"),

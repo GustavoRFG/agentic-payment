@@ -20,14 +20,15 @@ import {
 } from "./settlement-run-binding";
 import { parseJsonText } from "./bom-safe-json";
 import {
-  extractFacilitatorHashFromResponse,
-  extractFacilitatorHashFromPaymentResponseHeader,
-} from "./facilitator-receipt-parse";
+  extractAndSanitizeFacilitatorReceipt,
+  persistFacilitatorReceiptArtifact,
+  type SanitizedFacilitatorReceipt,
+} from "./facilitator-settlement-receipt";
 
 export {
   extractFacilitatorHashFromResponse,
   extractFacilitatorHashFromPaymentResponseHeader,
-} from "./facilitator-receipt-parse";
+} from "./facilitator-settlement-receipt";
 
 export interface SingleSettlementRequest {
   readonly network: string;
@@ -55,6 +56,7 @@ export interface SingleSettlementExecutionResult {
   readonly ok: boolean;
   readonly status: string;
   readonly httpStatus: number | null;
+  readonly responseStatus: number | null;
   readonly paymentAttempted: boolean;
   readonly paymentBearingHttpRequestCount: number;
   readonly responseBody: string;
@@ -63,6 +65,9 @@ export interface SingleSettlementExecutionResult {
   readonly buyerAddress: string;
   readonly network: string;
   readonly facilitatorTransactionHash: string | null;
+  readonly facilitatorReceipt: SanitizedFacilitatorReceipt;
+  readonly facilitatorReceiptPath: string | null;
+  readonly facilitatorReceiptPersistError: string | null;
   readonly attemptId: string;
   readonly intent: SettlementIntent;
   readonly intentPath: string;
@@ -111,7 +116,7 @@ export function assertPaymentRequiredRailMatchesIntent(
 }
 
 export function extractFacilitatorTransactionHash(response: Response): string | null {
-  return extractFacilitatorHashFromResponse(response);
+  return extractAndSanitizeFacilitatorReceipt(response).transactionHash;
 }
 
 export async function persistSettlementIntent(
@@ -232,12 +237,28 @@ export async function executeSingleX402Settlement(input: {
   const body = await response.text();
   const paymentBearingCount = paymentBearingGuard.getPaymentBearingRequests();
   const ok = response.status >= 200 && response.status < 300;
-  const facilitatorTransactionHash = extractFacilitatorTransactionHash(response);
+  const facilitatorReceipt = extractAndSanitizeFacilitatorReceipt(response, body);
+  const facilitatorTransactionHash = facilitatorReceipt.transactionHash;
+
+  let facilitatorReceiptPath: string | null = null;
+  let facilitatorReceiptPersistError: string | null = null;
+  try {
+    facilitatorReceiptPath = await persistFacilitatorReceiptArtifact({
+      runDir: req.runDir,
+      attemptId,
+      runId,
+      receipt: facilitatorReceipt,
+    });
+  } catch (error) {
+    facilitatorReceiptPersistError =
+      error instanceof Error ? error.message : "FACILITATOR_RECEIPT_PERSIST_FAILED";
+  }
 
   return {
     ok,
     status: ok ? "SETTLEMENT_HTTP_OK" : "SETTLEMENT_HTTP_FAIL",
     httpStatus: response.status,
+    responseStatus: response.status,
     paymentAttempted: paymentBearingCount > 0,
     paymentBearingHttpRequestCount: paymentBearingCount,
     responseBody: body,
@@ -246,6 +267,9 @@ export async function executeSingleX402Settlement(input: {
     buyerAddress,
     network: req.network,
     facilitatorTransactionHash,
+    facilitatorReceipt,
+    facilitatorReceiptPath,
+    facilitatorReceiptPersistError,
     attemptId,
     intent,
     intentPath,
