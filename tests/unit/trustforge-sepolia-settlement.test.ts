@@ -210,6 +210,7 @@ describe("Sepolia settlement proof pipeline", () => {
       ledger,
       facilitatorReportedHash:
         "0xb3329fecc3ec9e5470f21d9c255475c7d8acb2f596aaa7fcf1c18fd579c4e99b",
+      upperBoundUtc: "2026-06-21T05:00:00.000Z",
     });
     expect(binding.settlement_status).toBe("confirmed");
     expect(metrics.total_outflow_settlements_found).toBe(1);
