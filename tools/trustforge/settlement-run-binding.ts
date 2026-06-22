@@ -2,6 +2,8 @@
  * settlement-run-binding — [VERIFY]-clean intent + independent on-chain binding.
  */
 
+import type { SanitizedFacilitatorReceipt } from "./facilitator-settlement-receipt";
+
 export const CLOCK_SKEW_TOLERANCE_MS = 120_000 as const;
 export const ONCHAIN_SETTLEMENT_GRACE_MS = 30 * 60 * 1000 as const;
 
@@ -54,6 +56,8 @@ export type SettlementBindingStatus =
   | "confirmed"
   | "settlement_not_found"
   | "ambiguous_match"
+  | "facilitator_receipt_missing"
+  | "facilitator_receipt_malformed"
   | "facilitator_hash_missing"
   | "hash_mismatch"
   | "facilitator_only";
@@ -73,6 +77,11 @@ export interface SettlementBindingRecord {
   readonly facilitator_hash_cross_check: FacilitatorHashCrossCheck;
   readonly facilitator_reported_hash: string | null;
   readonly reconciler_found_hash: string | null;
+  readonly facilitator_receipt: {
+    readonly source: SanitizedFacilitatorReceipt["source"];
+    readonly parse_status: SanitizedFacilitatorReceipt["parseStatus"];
+    readonly transaction_hash: string | null;
+  } | null;
   readonly independent_match: {
     readonly settlement_tx_hash: string;
     readonly block_number: number | null;
@@ -292,14 +301,82 @@ function buildIndependentMatch(
   };
 }
 
+function resolveFacilitatorHash(input: {
+  readonly facilitatorReceipt?: SanitizedFacilitatorReceipt | null;
+  readonly facilitatorReportedHash?: string | null;
+}): {
+  readonly hash: string | null;
+  readonly receipt: SanitizedFacilitatorReceipt | null;
+  readonly receiptMissing: boolean;
+  readonly receiptMalformed: boolean;
+} {
+  if (input.facilitatorReceipt) {
+    const receipt = input.facilitatorReceipt;
+    if (receipt.parseStatus === "missing") {
+      return { hash: null, receipt, receiptMissing: true, receiptMalformed: false };
+    }
+    if (receipt.parseStatus === "malformed" || receipt.parseStatus === "unsupported") {
+      return { hash: null, receipt, receiptMissing: false, receiptMalformed: true };
+    }
+    return {
+      hash: receipt.transactionHash,
+      receipt,
+      receiptMissing: false,
+      receiptMalformed: false,
+    };
+  }
+  const legacy = normalizeOptionalFacilitatorHash(input.facilitatorReportedHash);
+  if (!legacy && (input.facilitatorReportedHash === null || input.facilitatorReportedHash === undefined)) {
+    return { hash: null, receipt: null, receiptMissing: true, receiptMalformed: false };
+  }
+  if (!legacy) {
+    return { hash: null, receipt: null, receiptMissing: false, receiptMalformed: true };
+  }
+  return {
+    hash: legacy,
+    receipt: {
+      parseStatus: "parsed",
+      source: "none",
+      rawHeaderName: null,
+      transactionHash: legacy as `0x${string}`,
+      network: null,
+      payer: null,
+      payTo: null,
+      asset: null,
+      amountAtomic: null,
+      facilitator: null,
+      settledAtUtc: null,
+      parseErrorClass: null,
+    },
+    receiptMissing: false,
+    receiptMalformed: false,
+  };
+}
+
+function receiptSummary(
+  receipt: SanitizedFacilitatorReceipt | null,
+): SettlementBindingRecord["facilitator_receipt"] {
+  if (!receipt) return null;
+  return {
+    source: receipt.source,
+    parse_status: receipt.parseStatus,
+    transaction_hash: receipt.transactionHash,
+  };
+}
+
 export function confirmSettlementBinding(input: {
   readonly intent: SettlementIntent;
   readonly settlements: readonly OnChainSettlementRow[];
+  readonly facilitatorReceipt?: SanitizedFacilitatorReceipt | null;
   readonly facilitatorReportedHash?: string | null;
   readonly upperBoundUtc: string;
   readonly clockSkewToleranceMs?: number;
 }): SettlementBindingRecord {
-  const facilitator = normalizeOptionalFacilitatorHash(input.facilitatorReportedHash);
+  const facilitatorState = resolveFacilitatorHash({
+    facilitatorReceipt: input.facilitatorReceipt,
+    facilitatorReportedHash: input.facilitatorReportedHash,
+  });
+  const facilitator = facilitatorState.hash;
   const { eligible, rejected } = findEligibleSettlementCandidates({
     intent: input.intent,
     settlements: input.settlements,
@@ -313,6 +390,7 @@ export function confirmSettlementBinding(input: {
     authorization_hash: input.intent.authorization_hash,
     current_attempt_candidates_after_filter: eligible.length,
     rejected_candidates: rejected,
+    facilitator_receipt: receiptSummary(facilitatorState.receipt),
   };
 
   if (eligible.length === 0) {
@@ -355,6 +433,40 @@ export function confirmSettlementBinding(input: {
   const match = eligible[0];
   const reconcilerHash = match.candidate.txHash;
   const independentMatch = buildIndependentMatch(match);
+
+  if (facilitatorState.receiptMissing) {
+    return {
+      ...base,
+      settlement_tx_hash: reconcilerHash,
+      actual_spend_atomic: match.candidate.amountAtomic,
+      settlement_status: "facilitator_receipt_missing",
+      block_number: match.candidate.blockNumber?.toString() ?? null,
+      matched_by: match.matchedBy,
+      facilitator_hash_agrees: null,
+      facilitator_hash_cross_check: "missing",
+      facilitator_reported_hash: null,
+      reconciler_found_hash: reconcilerHash,
+      independent_match: independentMatch,
+      detail: "independent on-chain match found; facilitator receipt missing",
+    };
+  }
+
+  if (facilitatorState.receiptMalformed) {
+    return {
+      ...base,
+      settlement_tx_hash: reconcilerHash,
+      actual_spend_atomic: match.candidate.amountAtomic,
+      settlement_status: "facilitator_receipt_malformed",
+      block_number: match.candidate.blockNumber?.toString() ?? null,
+      matched_by: match.matchedBy,
+      facilitator_hash_agrees: null,
+      facilitator_hash_cross_check: "missing",
+      facilitator_reported_hash: null,
+      reconciler_found_hash: reconcilerHash,
+      independent_match: independentMatch,
+      detail: "independent on-chain match found; facilitator receipt malformed",
+    };
+  }
 
   if (!facilitator) {
     return {

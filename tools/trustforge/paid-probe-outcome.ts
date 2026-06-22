@@ -9,6 +9,10 @@ export type PaidProbeOutcome =
   | "PASS_NO_SETTLE_CLEAN"
   | "FAIL_SETTLEMENT_NOT_FOUND_ON_CHAIN"
   | "SETTLED_ONCHAIN_FACILITATOR_HASH_MISSING"
+  | "SETTLED_ONCHAIN_FACILITATOR_RECEIPT_MISSING"
+  | "SETTLED_ONCHAIN_FACILITATOR_RECEIPT_MALFORMED"
+  | "FAIL_SETTLEMENT_HASH_MISMATCH"
+  | "RECONCILIATION_RPC_TIMEOUT"
   | "FAIL"
   | "BLOCKED_RECONCILIATION_UNAVAILABLE";
 
@@ -27,17 +31,14 @@ export function classifyPaidProbeOutcome(input: PaidProbeOutcomeInput): PaidProb
   }
 
   if (
-    input.paymentAttempted &&
-    !input.onChainConfirmed
-  ) {
-    return "FAIL_SETTLEMENT_NOT_FOUND_ON_CHAIN";
-  }
-
-  if (
     !input.paymentAttempted &&
     input.paymentBearingHttpRequestCount === 0
   ) {
     return "PASS_NO_SETTLE_CLEAN";
+  }
+
+  if (input.paymentAttempted && !input.onChainConfirmed) {
+    return "FAIL_SETTLEMENT_NOT_FOUND_ON_CHAIN";
   }
 
   if (

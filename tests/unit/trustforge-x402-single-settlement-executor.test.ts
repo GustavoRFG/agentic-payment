@@ -20,6 +20,31 @@ import { TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safe
 
 const AUTHORIZED_PAY_TO = "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71";
 const AUTHORIZED_AMOUNT = "1000";
+const SETTLEMENT_TX = "0x9ce1e957b4547ee86559e8b32af4a9a6e7087f8330096fde618abe4ea9ccf9a9";
+
+vi.mock("@x402/fetch", () => ({
+  x402Client: vi.fn(function X402Client(this: { register: ReturnType<typeof vi.fn> }) {
+    this.register = vi.fn();
+  }),
+  wrapFetchWithPayment: (_fetch: typeof fetch) => async () => {
+    const header = Buffer.from(
+      JSON.stringify({
+        success: true,
+        transaction: "0x9ce1e957b4547ee86559e8b32af4a9a6e7087f8330096fde618abe4ea9ccf9a9",
+        network: "eip155:84532",
+        amount: "1000",
+      }),
+    ).toString("base64");
+    return Response.json(
+      { ok: true },
+      { status: 200, headers: { "payment-response": header } },
+    );
+  },
+}));
+
+vi.mock("@x402/evm/exact/client", () => ({
+  registerExactEvmScheme: vi.fn(),
+}));
 
 function build402Accept(overrides: Record<string, unknown> = {}): string {
   const accept = {
@@ -118,6 +143,52 @@ describe("x402-single-settlement-executor", () => {
         fetchImpl: vi.fn(),
       }),
     ).rejects.toThrow(/BLOCKED_CROSS_NETWORK_KEY/);
+  });
+
+  it("captures sanitized facilitator receipt artifact without persisting request headers", async () => {
+    vi.spyOn(networkGuards, "assertSettlementNetworkGuards").mockReturnValue({
+      privateKey: TEST_SIGNING_KEY_A,
+      buyerAddress: TEST_SIGNING_ADDRESS_A,
+      chainId: 84532,
+    });
+    const paymentBearingGuard = createPaymentBearingRequestGuard({ maxPaymentBearingRequests: 1 });
+    paymentBearingGuard.inspectRequest = vi.fn();
+    paymentBearingGuard.getPaymentBearingRequests = vi.fn(() => 1);
+    const dir = await mkdtemp(join(tmpdir(), "tf-receipt-"));
+    try {
+      const result = await executeSingleX402Settlement({
+        request: {
+          network: TESTNET_NETWORK,
+          privateKeyEnvName: SEPOLIA_BUYER_PRIVATE_KEY_ENV,
+          expectedBuyerAddress: TEST_SIGNING_ADDRESS_A,
+          endpoint: "http://localhost:4021/paid/analyze-text",
+          method: "POST",
+          body: { text: "test" },
+          asset: TESTNET_USDC_ADDRESS,
+          payTo: AUTHORIZED_PAY_TO,
+          quotedAmountAtomic: AUTHORIZED_AMOUNT,
+          maxAmountAtomic: "2000",
+          runDir: dir,
+          authorizationHash: "hash",
+          require402BeforePayment: false,
+        },
+        env: { [SEPOLIA_BUYER_PRIVATE_KEY_ENV]: TEST_SIGNING_KEY_A },
+        fetchImpl: vi.fn(),
+        paymentBearingGuard,
+      });
+      expect(result.facilitatorReceipt.parseStatus).toBe("parsed");
+      expect(result.facilitatorTransactionHash).toBe(SETTLEMENT_TX.toLowerCase());
+      expect(result.responseBody).toContain("ok");
+      expect(result.facilitatorReceiptPath).toBeTruthy();
+      const saved = JSON.parse(await readFile(result.facilitatorReceiptPath!, "utf8"));
+      expect(saved.parse_status).toBe("parsed");
+      expect(saved.transaction_hash).toBe(SETTLEMENT_TX.toLowerCase());
+      expect(saved.contains_secret_material).toBe(false);
+      expect(JSON.stringify(saved).toLowerCase()).not.toContain("privatekey");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      vi.restoreAllMocks();
+    }
   });
 });
 

@@ -61,7 +61,9 @@ export function classifySepoliaSettlement(input: {
   const bindingConfirmed = input.binding ? bindingConfirmsSettlement(input.binding) : false;
   const bindingIndependentMatch = Boolean(
     input.binding?.independent_match?.settlement_tx_hash &&
-      (input.binding.settlement_status === "facilitator_hash_missing" ||
+      (input.binding.settlement_status === "facilitator_receipt_missing" ||
+        input.binding.settlement_status === "facilitator_receipt_malformed" ||
+        input.binding.settlement_status === "facilitator_hash_missing" ||
         input.binding.settlement_status === "confirmed" ||
         input.binding.settlement_status === "hash_mismatch"),
   );
@@ -77,19 +79,33 @@ export function classifySepoliaSettlement(input: {
     invariantsOk: input.invariantsOk ?? true,
   });
 
-  if (
+  if (input.reconciliationStatus === "RECONCILIATION_RPC_TIMEOUT") {
+    outcome = "RECONCILIATION_RPC_TIMEOUT";
+  } else if (
+    input.binding?.settlement_status === "facilitator_receipt_missing" &&
+    bindingIndependentMatch &&
+    input.probe.paymentAttempted
+  ) {
+    outcome = "SETTLED_ONCHAIN_FACILITATOR_RECEIPT_MISSING";
+  } else if (
+    input.binding?.settlement_status === "facilitator_receipt_malformed" &&
+    bindingIndependentMatch &&
+    input.probe.paymentAttempted
+  ) {
+    outcome = "SETTLED_ONCHAIN_FACILITATOR_RECEIPT_MALFORMED";
+  } else if (
     input.binding?.settlement_status === "facilitator_hash_missing" &&
     bindingIndependentMatch &&
     input.probe.paymentAttempted
   ) {
     outcome = "SETTLED_ONCHAIN_FACILITATOR_HASH_MISSING";
-  } else if (input.binding?.settlement_status === "ambiguous_match" && input.probe.paymentAttempted) {
-    outcome = "FAIL";
   } else if (
     input.binding?.settlement_status === "hash_mismatch" &&
     bindingIndependentMatch &&
     input.probe.paymentAttempted
   ) {
+    outcome = "FAIL_SETTLEMENT_HASH_MISMATCH";
+  } else if (input.binding?.settlement_status === "ambiguous_match" && input.probe.paymentAttempted) {
     outcome = "FAIL";
   }
 
@@ -107,11 +123,19 @@ export function classifySepoliaSettlement(input: {
     detail:
       outcome === "PASS_SETTLED"
         ? "Sepolia settlement proof complete"
-        : outcome === "SETTLED_ONCHAIN_FACILITATOR_HASH_MISSING"
-          ? "Independent current-run on-chain match; facilitator hash missing in preserved artifacts"
-          : outcome === "PASS_NO_SETTLE_CLEAN"
-            ? "No payment attempted — happy path not proven"
-            : `classified ${outcome}`,
+        : outcome === "SETTLED_ONCHAIN_FACILITATOR_RECEIPT_MISSING"
+          ? "Independent current-run on-chain match; facilitator receipt missing"
+          : outcome === "SETTLED_ONCHAIN_FACILITATOR_RECEIPT_MALFORMED"
+            ? "Independent current-run on-chain match; facilitator receipt malformed"
+            : outcome === "SETTLED_ONCHAIN_FACILITATOR_HASH_MISSING"
+              ? "Independent current-run on-chain match; facilitator hash missing in preserved artifacts"
+              : outcome === "FAIL_SETTLEMENT_HASH_MISMATCH"
+                ? "Facilitator hash differs from independent on-chain Transfer"
+                : outcome === "RECONCILIATION_RPC_TIMEOUT"
+                  ? "Reconciliation exceeded bounded RPC deadline"
+                  : outcome === "PASS_NO_SETTLE_CLEAN"
+                    ? "No payment attempted — happy path not proven"
+                    : `classified ${outcome}`,
     binding: input.binding ?? null,
     bindingMetrics: input.bindingMetrics ?? null,
   };
@@ -174,6 +198,7 @@ export function buildSettlementBindingMetrics(input: {
 export function confirmSepoliaSettlementBinding(input: {
   readonly intent: SettlementIntent;
   readonly ledger: Record<string, unknown>;
+  readonly facilitatorReceipt?: SanitizedFacilitatorReceipt | null;
   readonly facilitatorReportedHash?: string | null;
   readonly upperBoundUtc: string;
 }): { readonly binding: SettlementBindingRecord; readonly metrics: SettlementBindingMetrics } {
@@ -181,6 +206,7 @@ export function confirmSepoliaSettlementBinding(input: {
   const binding = confirmSettlementBinding({
     intent: input.intent,
     settlements,
+    facilitatorReceipt: input.facilitatorReceipt,
     facilitatorReportedHash: input.facilitatorReportedHash,
     upperBoundUtc: input.upperBoundUtc,
   });
@@ -219,7 +245,15 @@ export function parseReconciliationLedger(json: Record<string, unknown>): {
   };
 }
 
-export function buildSepoliaReconcileArgs(selected: DiscoveredSelectedCandidate, balanceBeforeUsdc?: string): string[] {
+export function buildSepoliaReconcileArgs(
+  selected: DiscoveredSelectedCandidate,
+  balanceBeforeUsdc?: string,
+  rpcOptions?: {
+    readonly rpcRequestTimeoutSeconds?: number;
+    readonly rpcMaxRetries?: number;
+    readonly maxTotalRuntimeSeconds?: number;
+  },
+): string[] {
   const args = [
     "--network",
     "sepolia",
@@ -232,6 +266,15 @@ export function buildSepoliaReconcileArgs(selected: DiscoveredSelectedCandidate,
   ];
   if (balanceBeforeUsdc) {
     args.push("--balance-before-usdc", balanceBeforeUsdc);
+  }
+  if (rpcOptions?.rpcRequestTimeoutSeconds !== undefined) {
+    args.push("--rpc-request-timeout-seconds", String(rpcOptions.rpcRequestTimeoutSeconds));
+  }
+  if (rpcOptions?.rpcMaxRetries !== undefined) {
+    args.push("--rpc-max-retries", String(rpcOptions.rpcMaxRetries));
+  }
+  if (rpcOptions?.maxTotalRuntimeSeconds !== undefined) {
+    args.push("--max-total-runtime-seconds", String(rpcOptions.maxTotalRuntimeSeconds));
   }
   return args;
 }

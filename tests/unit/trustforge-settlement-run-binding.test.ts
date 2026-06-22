@@ -130,17 +130,77 @@ describe("settlement-run-binding temporal repair", () => {
     expect(bindingConfirmsSettlement(binding)).toBe(false);
   });
 
-  it("6.5 missing facilitator hash is not agreement", () => {
+  it("6.5 missing facilitator receipt is not agreement", () => {
     const binding = confirmSettlementBinding({
       intent: phase62Intent(),
       settlements: [historicalTransfer, currentTransfer],
-      facilitatorReportedHash: null,
+      facilitatorReceipt: {
+        parseStatus: "missing",
+        source: "none",
+        rawHeaderName: null,
+        transactionHash: null,
+        network: null,
+        payer: null,
+        payTo: null,
+        asset: null,
+        amountAtomic: null,
+        facilitator: null,
+        settledAtUtc: null,
+        parseErrorClass: null,
+      },
       upperBoundUtc: EXECUTION_END,
     });
-    expect(binding.settlement_status).toBe("facilitator_hash_missing");
+    expect(binding.settlement_status).toBe("facilitator_receipt_missing");
     expect(binding.facilitator_hash_cross_check).toBe("missing");
     expect(binding.facilitator_hash_agrees).toBeNull();
     expect(binding.settlement_tx_hash).toBe(NEW_TX.toLowerCase());
+    expect(bindingConfirmsSettlement(binding)).toBe(false);
+  });
+
+  it("6.5b parsed receipt without hash is facilitator_hash_missing", () => {
+    const binding = confirmSettlementBinding({
+      intent: phase62Intent(),
+      settlements: [currentTransfer],
+      facilitatorReceipt: {
+        parseStatus: "parsed",
+        source: "payment-response-header",
+        rawHeaderName: "payment-response",
+        transactionHash: null,
+        network: "eip155:84532",
+        payer: null,
+        payTo: null,
+        asset: null,
+        amountAtomic: null,
+        facilitator: null,
+        settledAtUtc: null,
+        parseErrorClass: "MISSING_TX_HASH_FIELD",
+      },
+      upperBoundUtc: EXECUTION_END,
+    });
+    expect(binding.settlement_status).toBe("facilitator_hash_missing");
+  });
+
+  it("6.5c malformed receipt is not agreement", () => {
+    const binding = confirmSettlementBinding({
+      intent: phase62Intent(),
+      settlements: [currentTransfer],
+      facilitatorReceipt: {
+        parseStatus: "malformed",
+        source: "payment-response-header",
+        rawHeaderName: "payment-response",
+        transactionHash: null,
+        network: null,
+        payer: null,
+        payTo: null,
+        asset: null,
+        amountAtomic: null,
+        facilitator: null,
+        settledAtUtc: null,
+        parseErrorClass: "INVALID_BASE64_JSON",
+      },
+      upperBoundUtc: EXECUTION_END,
+    });
+    expect(binding.settlement_status).toBe("facilitator_receipt_malformed");
     expect(bindingConfirmsSettlement(binding)).toBe(false);
   });
 
@@ -148,7 +208,20 @@ describe("settlement-run-binding temporal repair", () => {
     const binding = confirmSettlementBinding({
       intent: phase62Intent(),
       settlements: [currentTransfer],
-      facilitatorReportedHash: OLD_TX,
+      facilitatorReceipt: {
+        parseStatus: "parsed",
+        source: "payment-response-header",
+        rawHeaderName: "payment-response",
+        transactionHash: OLD_TX.toLowerCase() as `0x${string}`,
+        network: "eip155:84532",
+        payer: null,
+        payTo: null,
+        asset: null,
+        amountAtomic: null,
+        facilitator: null,
+        settledAtUtc: null,
+        parseErrorClass: null,
+      },
       upperBoundUtc: EXECUTION_END,
     });
     expect(binding.settlement_status).toBe("hash_mismatch");
@@ -160,7 +233,20 @@ describe("settlement-run-binding temporal repair", () => {
     const binding = confirmSettlementBinding({
       intent: phase62Intent(),
       settlements: [currentTransfer],
-      facilitatorReportedHash: NEW_TX,
+      facilitatorReceipt: {
+        parseStatus: "parsed",
+        source: "payment-response-header",
+        rawHeaderName: "payment-response",
+        transactionHash: NEW_TX.toLowerCase() as `0x${string}`,
+        network: "eip155:84532",
+        payer: null,
+        payTo: null,
+        asset: null,
+        amountAtomic: null,
+        facilitator: null,
+        settledAtUtc: null,
+        parseErrorClass: null,
+      },
       upperBoundUtc: EXECUTION_END,
     });
     expect(binding.settlement_status).toBe("confirmed");
@@ -181,7 +267,20 @@ describe("settlement-run-binding temporal repair", () => {
     const binding = confirmSettlementBinding({
       intent: phase62Intent(),
       settlements: [historicalTransfer, currentTransfer],
-      facilitatorReportedHash: null,
+      facilitatorReceipt: {
+        parseStatus: "missing",
+        source: "none",
+        rawHeaderName: null,
+        transactionHash: null,
+        network: null,
+        payer: null,
+        payTo: null,
+        asset: null,
+        amountAtomic: null,
+        facilitator: null,
+        settledAtUtc: null,
+        parseErrorClass: null,
+      },
       upperBoundUtc: EXECUTION_END,
     });
     expect(binding.attempt_id).toBe("attempt_8e1a854c-c841-47b9-937c-5549857484a5");
