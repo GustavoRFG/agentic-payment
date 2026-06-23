@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { adaptDiscoveredPrimaryToSelectedCandidate } from "../../tools/trustforge/discovered-target-to-selected-candidate";
+import { adaptDiscoveredPrimaryToSelectedCandidate, adaptDiscoveredPrimaryToThinSettlementCandidate } from "../../tools/trustforge/discovered-target-to-selected-candidate";
 import {
   classifySepoliaSettlement,
   confirmSepoliaSettlementBinding,
@@ -20,6 +20,7 @@ import { validateHumanPaymentAuthorization } from "../../tools/trustforge/valida
 import { evaluateFresh402AgainstAuthorizedQuote } from "../../tools/trustforge/paid-quote-freshness-preflight";
 import {
   MAINNET_NETWORK,
+  MAINNET_USDC_ADDRESS,
   PAYMENT_AMOUNT_ATOMIC,
   TESTNET_NETWORK,
   TESTNET_USDC_ADDRESS,
@@ -72,6 +73,47 @@ describe("Sepolia settlement proof pipeline", () => {
       expect(adapted.candidate.network).toBe(TESTNET_NETWORK);
       expect(adapted.candidate.buyer_wallet).toBe(SEPOLIA_TESTNET_BUYER_WALLET);
     }
+  });
+
+  it("adapts discovered primary to thin candidate without rich allowlist", () => {
+    const adapted = adaptDiscoveredPrimaryToThinSettlementCandidate({
+      selection: {
+        primary: {
+          handshakeStatus: "live_402_ok",
+          resourceUrl: "https://api.zapper.xyz/v2/x402/token-balances",
+          quoteUsdc: "0.001125",
+          quoteAtomic: "1125",
+          selectedPayTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          scoringRationale: ["fresh discovery primary"],
+        },
+        fallbacks: [],
+      },
+    });
+    expect(adapted.ok).toBe(true);
+    if (adapted.ok) {
+      expect(adapted.candidate.endpoint).toBe("https://api.zapper.xyz/v2/x402/token-balances");
+      expect(adapted.candidate.network).toBe(MAINNET_NETWORK);
+    }
+  });
+
+  it("rich adapt still rejects non-allowlisted endpoint", () => {
+    const adapted = adaptDiscoveredPrimaryToSelectedCandidate({
+      selection: {
+        primary: {
+          handshakeStatus: "live_402_ok",
+          resourceUrl: "https://api.zapper.xyz/v2/x402/token-balances",
+          quoteUsdc: "0.001125",
+          quoteAtomic: "1125",
+          selectedPayTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",
+          network: MAINNET_NETWORK,
+          scoringRationale: ["fresh discovery primary"],
+        },
+        fallbacks: [],
+      },
+    });
+    expect(adapted.ok).toBe(false);
   });
 
   it("requires network 84532 on testnet authorization", () => {
@@ -158,12 +200,42 @@ describe("Sepolia settlement proof pipeline", () => {
         httpStatus: 200,
         onChainConfirmed: true,
         settlementTxHash: "0xabc",
+        facilitatorReceiptPresent: true,
+        facilitatorReceiptParseStatus: "parsed",
       },
       reconciliationStatus: "RECONCILIATION_PASS",
       safeToUseForPaymentVerification: true,
       unattributedSettlementsFound: 0,
       balanceIdentityStatus: "pass",
-      settlementTxHash: "0xabc",
+      noNewOutboundTransfer: false,
+      binding: {
+        attempt_id: "attempt_1",
+        run_id: "run_1",
+        authorization_hash: "hash",
+        settlement_tx_hash: "0xabc",
+        actual_spend_atomic: "1000",
+        settlement_status: "confirmed",
+        block_number: "1",
+        matched_by: ["independent"],
+        facilitator_hash_agrees: true,
+        facilitator_hash_cross_check: "agree",
+        facilitator_reported_hash: "0xabc",
+        reconciler_found_hash: "0xabc",
+        facilitator_receipt: {
+          source: "payment-response-header",
+          parse_status: "parsed",
+          transaction_hash: "0xabc",
+        },
+        independent_match: {
+          settlement_tx_hash: "0xabc",
+          block_number: 1,
+          timestamp_utc: "2026-06-21T00:00:00.000Z",
+          actual_spend_atomic: "1000",
+        },
+        current_attempt_candidates_after_filter: 1,
+        rejected_candidates: [],
+        detail: "confirmed",
+      },
     });
     expect(outcome.outcome).toBe("PASS_SETTLED");
   });
@@ -174,7 +246,7 @@ describe("Sepolia settlement proof pipeline", () => {
       safe_to_use_for_payment_verification: true,
       unattributed_settlements_found: 0,
       balance_identity_status: "pass",
-      settlements: [{ tx_hash: "0xdead", matched_run: "Sepolia_settlement_proof" }],
+      settlements: [{ tx_hash: "0xdead", matched_run: "thin_settlement_proof" }],
     });
     expect(parsed.settlementTxHash).toBe("0xdead");
   });

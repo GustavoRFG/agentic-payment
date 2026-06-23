@@ -366,7 +366,8 @@ def test_sepolia_settlement_expectation_marks_proof(monkeypatch):
     assert ledger.reconciliation_status == RECONCILIATION_PASS
     assert ledger.unattributed_settlements_found == 0
     assert any(
-        s.get("matched_run") == "Sepolia_settlement_proof" for s in ledger.settlements
+        s.get("matched_run") in ("thin_settlement_proof", "Sepolia_settlement_proof")
+        for s in ledger.settlements
     )
 
 
