@@ -1,12 +1,13 @@
 /**
- * run-trustforge-sepolia-classify — delegates to network-parameterized x402 classify.
+ * run-trustforge-x402-classify — read-only reconcile + three-outcome classify (Sepolia or mainnet).
  */
 
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assertMainnetBuyerKeyAbsent } from "./trustforge/sepolia-settlement-guards";
+import { readJsonFile } from "./trustforge/bom-safe-json";
+import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
 import { runX402Classify } from "./trustforge/x402-classify-runner";
-import { SEPOLIA_X402_SETTLEMENT_PROFILE } from "./trustforge/x402-settlement-profile";
+import { resolveX402SettlementProfileFromCli } from "./trustforge/x402-settlement-profile";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -17,17 +18,22 @@ function readArg(name: string, fallback?: string): string | undefined {
 }
 
 async function main(): Promise<number> {
-  assertMainnetBuyerKeyAbsent();
   const runArg = process.argv.indexOf("--run-dir");
   if (runArg < 0) {
     console.error(
-      "Usage: tsx tools/run-trustforge-sepolia-classify.ts --run-dir <path> [--reuse-existing-ledger] [--rpc-request-timeout-seconds N] [--rpc-max-retries N] [--max-total-runtime-seconds N]",
+      "Usage: tsx tools/run-trustforge-x402-classify.ts --run-dir <path> [--network mainnet|sepolia] [--reuse-existing-ledger] [--rpc-request-timeout-seconds N] [--rpc-max-retries N] [--max-total-runtime-seconds N]",
     );
     return 1;
   }
+  const runDir = process.argv[runArg + 1];
+  const selected = await readJsonFile<DiscoveredSelectedCandidate>(
+    join(runDir, "selected_candidate.json"),
+  );
+  const profile = resolveX402SettlementProfileFromCli(readArg("--network"), selected.network);
+
   const { exitCode, lines } = await runX402Classify({
-    runDir: process.argv[runArg + 1],
-    profile: SEPOLIA_X402_SETTLEMENT_PROFILE,
+    runDir,
+    profile,
     repoRoot: REPO,
     reuseExistingLedger: process.argv.includes("--reuse-existing-ledger"),
     rpcRequestTimeoutSeconds: Number.parseInt(readArg("--rpc-request-timeout-seconds", "20") ?? "20", 10),
