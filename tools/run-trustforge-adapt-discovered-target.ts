@@ -7,15 +7,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   adaptDiscoveredPrimaryToSelectedCandidate,
+  adaptDiscoveredPrimaryToThinSettlementCandidate,
   type DiscoveredTargetSelectionInput,
 } from "./trustforge/discovered-target-to-selected-candidate";
 
 async function main(): Promise<number> {
   const inputArg = process.argv.indexOf("--target-selection");
   const outputArg = process.argv.indexOf("--output");
+  const thin = process.argv.includes("--thin");
   if (inputArg < 0 || outputArg < 0) {
     console.error(
-      "Usage: tsx tools/run-trustforge-adapt-discovered-target.ts --target-selection <path> --output <path>",
+      "Usage: tsx tools/run-trustforge-adapt-discovered-target.ts --target-selection <path> --output <path> [--thin]",
     );
     return 1;
   }
@@ -23,7 +25,9 @@ async function main(): Promise<number> {
   const inputPath = process.argv[inputArg + 1];
   const outputPath = process.argv[outputArg + 1];
   const parsed = JSON.parse(await readFile(inputPath, "utf8")) as DiscoveredTargetSelectionInput;
-  const adapted = adaptDiscoveredPrimaryToSelectedCandidate(parsed);
+  const adapted = thin
+    ? adaptDiscoveredPrimaryToThinSettlementCandidate(parsed)
+    : adaptDiscoveredPrimaryToSelectedCandidate(parsed);
   if (!adapted.ok) {
     console.error(`ADAPT_REJECTED: ${adapted.reason}`);
     return 1;

@@ -604,7 +604,7 @@ def scan_transfers(
                     to_addr.lower() == settlement_expectation.pay_to.lower()
                     and amount_atomic == exp_atomic
                 ):
-                    matched = "Sepolia_settlement_proof"
+                    matched = "thin_settlement_proof"
             if not matched and direction == "out" and profile.zapper_pay_to:
                 if to_addr.lower() == profile.zapper_pay_to.lower() and amount_atomic == 1125:
                     if ts and (

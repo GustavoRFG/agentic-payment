@@ -88,6 +88,63 @@ function resolveSepoliaLocalPolicy(resourceUrl: string) {
   };
 }
 
+export function adaptDiscoveredPrimaryToThinSettlementCandidate(
+  input: DiscoveredTargetSelectionInput,
+  now: Date = new Date(),
+): DiscoveredTargetAdaptResult {
+  const primary = input.selection.primary;
+  if (!primary) {
+    return { ok: false, reason: "selection.primary is null" };
+  }
+  if (primary.handshakeStatus !== "live_402_ok") {
+    return {
+      ok: false,
+      reason: `selection.primary handshakeStatus must be live_402_ok, got ${primary.handshakeStatus}`,
+    };
+  }
+  if (!primary.quoteUsdc?.trim() || !primary.quoteAtomic?.trim()) {
+    return { ok: false, reason: "selection.primary is missing quoteUsdc or quoteAtomic" };
+  }
+  if (!primary.selectedPayTo?.trim()) {
+    return { ok: false, reason: "selection.primary is missing selectedPayTo" };
+  }
+
+  const sepoliaPolicy = resolveSepoliaLocalPolicy(primary.resourceUrl);
+  const network = primary.network ?? (sepoliaPolicy ? TESTNET_NETWORK : MAINNET_NETWORK);
+  const isSepolia = network === TESTNET_NETWORK || network === "84532";
+  const asset = primary.asset ?? (isSepolia ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS);
+  const buyerWallet = isSepolia ? SEPOLIA_TESTNET_BUYER_WALLET : MAINNET_BUYER_WALLET;
+  const allowlisted = resolveAllowlistedPolicy(primary.resourceUrl);
+  const provider = sepoliaPolicy?.provider ?? allowlisted?.provider ?? "discovered_x402";
+  const serviceId =
+    sepoliaPolicy?.serviceId ??
+    allowlisted?.serviceId ??
+    primary.resourceUrl.replace(/^https?:\/\//, "").replace(/[^\w]+/g, "_").slice(0, 64);
+
+  return {
+    ok: true,
+    candidate: {
+      provider,
+      service_id: serviceId,
+      endpoint: primary.resourceUrl,
+      quote_amount_usdc: primary.quoteUsdc,
+      quote_atomic: primary.quoteAtomic,
+      authorized_pay_to: primary.selectedPayTo,
+      recommended_max_usdc: recommendedAuthorizationMaxUsdc(primary.quoteUsdc),
+      network,
+      asset,
+      buyer_wallet: buyerWallet,
+      target_selection_audit: {
+        selected_resource_url: primary.resourceUrl,
+        handshake_status: primary.handshakeStatus,
+        fallback_resource_urls: input.selection.fallbacks.map((entry) => entry.resourceUrl),
+        scoring_rationale: [...primary.scoringRationale],
+      },
+      selected_at_utc: now.toISOString(),
+    },
+  };
+}
+
 export function adaptDiscoveredPrimaryToSelectedCandidate(
   input: DiscoveredTargetSelectionInput,
   now: Date = new Date(),
