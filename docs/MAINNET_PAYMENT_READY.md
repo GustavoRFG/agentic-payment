@@ -1,92 +1,67 @@
-# Mainnet payment ready — Bazaar-discovered Zapper primary
+# Mainnet payment ready — thin x402 settlement (Phase 62C)
 
-**Status:** `PAID_DISCOVERED_TARGET_READY_HUMAN_GATE`  
+**Status:** `PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE`  
 **Agent did not load `BUYER_PRIVATE_KEY` and did not execute mainnet payment.**
 
-## Authorized target (from live discovery)
+## Readiness gates (Part A)
 
-| Field | Value |
-|---|---|
-| Resource | `https://public.zapper.xyz/x402/transaction-details` |
-| Provider / service | `Zapper` / `zapper_tx_explainer` |
-| Quote | **0.001125 USDC** (1125 atomic) |
-| payTo | `0x43a2a720cd0911690c248075f4a29a5e7716f758` |
-| Discovery run | `D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260620_071417` |
-| Wallet of record | `0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1` |
+| Gate | Status | Notes |
+|---|---|---|
+| A1 tests | PASS | 436+ vitest, 22 pytest |
+| A2 shared executor on mainnet | **PASS** | `executeThinX402Settlement` → `executeSingleX402Settlement` via `trustforge:x402:settle` |
+| A3 receipt capture | PASS | shared core, network-agnostic |
+| A4 mainnet reconciler | PASS | chain 8453, `safe_to_use: yes` with keyed RPC |
+| A5 three-outcome on mainnet | **PASS** | `PASS_SETTLED` / `PASS_NO_SETTLE_CLEAN` / `FAIL` via `classifyThinSettlementOutcome` |
+| A6 fresh discovery | PASS | `run_20260622_070509`, primary `token-balances`, quote 0.001125 USDC |
+| A7 wallet | PARTIAL | config `0x4cf3…d0c1`; key rotation unverified without loading key |
+| A9 env | PARTIAL | keys absent in agent session |
+| A10 tag | PASS | `pre-mainnet-paid` after 62C commits |
 
-## Human workflow (before mainnet)
+## Authorized target (thin adapt — honors discovered endpoint)
 
-1. Adapt discovery → `selected_candidate.json`:
+Use `--thin` on adapt so primary endpoint is taken from discovery (not rich allowlist):
 
 ```powershell
-cd D:\agentic-payments-lab
 node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-adapt-discovered-target.ts `
-  --target-selection "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260620_071417\target_selection.json" `
-  --output "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260620_071417\selected_candidate.json"
+  --target-selection "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260622_070509\target_selection.json" `
+  --output "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260622_070509\selected_candidate.json" `
+  --thin
 ```
 
-2. Emit authorization DRAFT (agent-safe):
+## Human workflow
 
-```powershell
-node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-emit-paid-authorization-draft.ts `
-  --selected-candidate "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260620_071417\selected_candidate.json" `
-  --output "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260620_071417\human_payment_authorization.DRAFT.json"
-```
-
-3. **Human only:** rename to `human_payment_authorization.json`, set `decision: "authorize_one_payment"`, fill `rationale`, commit.
-
-## Single mainnet command (human executes)
-
-Load the **dedicated rotated mainnet key** only in your shell (not in repo files). Confirm wallet rotation decision before loading if still open from prior session.
+### 1. Sepolia regression (mandatory — same code mainnet will run)
 
 ```powershell
 cd D:\agentic-payments-lab
-# Human: set BUYER_PRIVATE_KEY for 0x4cf3...d0c1 in D:\trustforge\.env or session env ONLY
-npm run trustforge:phase6:paid-rich-probe -- --phase5-run "D:\trustforge\artifacts\runs\bazaar-target-discovery\run_20260620_071417"
+# Human: SEPOLIA_BUYER_PRIVATE_KEY + TRUSTFORGE_SEPOLIA_RPC_URL in session only
+npm run trustforge:x402:settle -- --run-dir "<sepolia_run_with_authorization>"
+npm run trustforge:x402:classify -- --run-dir "<sepolia_run_with_authorization>"
 ```
 
-**Exactly one attempt.** No fallback failover. No retry on failure — new human authorization required.
+Require: `PASS_SETTLED`, `facilitator_hash_agrees: true`, `binding_status: confirmed`, `phase6_settlements_identified: 1`, `unattributed: 0`.
 
-Pay-time freshness pre-flight runs automatically before key load. Abort if quote/payTo/challenge drift.
-
-## Pre-payment reconciliation gate (required)
-
-Before loading `BUYER_PRIVATE_KEY`, reconciliation must pass from committed code:
+### 2. Mainnet (after Sepolia PASS_SETTLED)
 
 ```powershell
-cd D:\agentic-payments-lab
-$env:TRUSTFORGE_BASE_RPC_URL = "<human read-only Base RPC — do not commit>"
-npm run trustforge:onchain:reconcile
+# Human: BUYER_PRIVATE_KEY for 0x4cf3…d0c1 + TRUSTFORGE_BASE_RPC_URL
+npm run trustforge:mainnet:settle -- --run-dir "<mainnet_run>"
+npm run trustforge:mainnet:classify -- --run-dir "<mainnet_run>"
 ```
 
-Required output:
+**Exactly one attempt.** No fallback failover. No retry.
 
-- `rpc_status: pass`, `chain_id: 8453`
-- `unattributed_settlements_found: 0`
-- `balance_identity_status: pass`
-- `safe_to_use_for_payment_verification: yes`
+Pre-payment reconcile gate unchanged — see [trustforge-onchain-settlement-ledger.md](./trustforge-onchain-settlement-ledger.md).
 
-If RPC returns 403/429/timeout, stop — that is **not** “no settlement found”. See [TRUSTFORGE_RPC_RECONCILIATION.md](./TRUSTFORGE_RPC_RECONCILIATION.md).
+## Part B residual (operational only)
 
-**Testnet:** TrustForge Phase 6 discovered-target Sepolia settlement not yet executed (`TESTNET_SETTLEMENT_NOT_EXECUTED`).
+- Keyed RPC at pay time
+- Confirmed rotation of `0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1`
+- Human authorization (`human_payment_authorization.json`)
+- Sepolia regression through parameterized runner (Step 5)
 
-## Post-run verification (required)
+## Deferred
 
-Success is **on-chain**, not HTTP status — re-run reconcile after payment:
+Rich-tx-explainer mainnet (`runRichTxExplainerPhase3`) — separate milestone; not first settlement gate.
 
-```powershell
-npm run trustforge:onchain:reconcile
-```
-
-Confirm:
-
-- Exactly **one** new USDC `Transfer` to `0x43a2a720cd0911690c248075f4a29a5e7716f758` for **0.001125 USDC**
-- `unattributed_settlements_found: 0`
-- Balance identity closes
-- Phase 6 outcome `PASS_SETTLED` (not HTTP 200 alone)
-
-## Safety reminders
-
-- Agent never auto-approves authorization (`PENDING_HUMAN` only in DRAFT generator).
-- Primary only — do not pay fallback #2 without separate authorization.
-- If pre-flight or paid call fails, stop; do not retry without new authorization.
+See [trustforge-phase62c-thin-mainnet-runner.md](./trustforge-phase62c-thin-mainnet-runner.md).
