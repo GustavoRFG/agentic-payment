@@ -3,6 +3,32 @@
 **Status:** `PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE`  
 **Agent did not load `BUYER_PRIVATE_KEY` and did not execute mainnet payment.**
 
+## State transition (Phase 62C)
+
+```
+PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE   <-- current; MAINNET IS BLOCKED
+  → Step 5 Sepolia with PASS_SETTLED
+  → PHASE62C_THIN_MAINNET_RUNNER_PROVEN                 <-- only this unblocks mainnet
+```
+
+**Before Step 5, mainnet is blocked.** Mainnet settle/classify must not run until a valid
+Step 5 Sepolia regression records `PHASE62C_THIN_MAINNET_RUNNER_PROVEN`.
+
+After a valid Step 5, the classify output / closure procedure records
+`RESULT: PHASE62C_THIN_MAINNET_RUNNER_PROVEN` **only if all** hold (else token withheld,
+mainnet stays blocked):
+
+- `paid_probe_outcome: PASS_SETTLED`
+- `binding_status: confirmed`
+- `facilitator_hash_agrees: true`
+- `phase6_settlements_identified: 1`
+- `unattributed_settlements_found: 0`
+- balance delta == quote (`actual_spend_atomic == quote_atomic`)
+- thin runner path confirmed: `runX402PaidSettlement → executeThinX402Settlement → executeSingleX402Settlement` (guarded by `tests/unit/trustforge-x402-settlement-call-chain.test.ts`)
+- strict no-mainnet during the regression (no `BUYER_PRIVATE_KEY`, no `X402_USE_MAINNET`)
+
+See [trustforge-phase62c-thin-mainnet-runner.md](./trustforge-phase62c-thin-mainnet-runner.md) for the full transition rule.
+
 ## Readiness gates (Part A)
 
 | Gate | Status | Notes |

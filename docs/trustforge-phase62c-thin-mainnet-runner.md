@@ -51,6 +51,35 @@ Discriminator: `classifyThinSettlementOutcome` in `tools/trustforge/thin-settlem
 - Sepolia: inverse
 - Pre-payment 402 intent match against discovered endpoint/payTo/asset/amount
 
+## Phase 62C state transition
+
+The runner advances through explicit, machine-checkable tokens:
+
+1. `PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE` — code ready; **mainnet is blocked**. The agent has not loaded `BUYER_PRIVATE_KEY` and has not executed any mainnet payment.
+2. **Step 5 (Sepolia reprove)** — the human runs settle + classify on Sepolia (the same code mainnet will run) and obtains `PASS_SETTLED`.
+3. `PHASE62C_THIN_MAINNET_RUNNER_PROVEN` — emitted/recorded **only after** a valid Step 5.
+
+```
+PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE
+  → Step 5 Sepolia with PASS_SETTLED
+  → PHASE62C_THIN_MAINNET_RUNNER_PROVEN
+```
+
+Until `PHASE62C_THIN_MAINNET_RUNNER_PROVEN` is recorded, **mainnet stays blocked**.
+
+### Closure criteria — emitting `RESULT: PHASE62C_THIN_MAINNET_RUNNER_PROVEN`
+
+After a valid Step 5 Sepolia run, the classify output / closure procedure records the token **only if all** of these hold (any missing/failed criterion → token withheld, mainnet remains blocked):
+
+- `paid_probe_outcome: PASS_SETTLED`
+- `binding_status: confirmed`
+- `facilitator_hash_agrees: true`
+- `phase6_settlements_identified: 1`
+- `unattributed_settlements_found: 0`
+- balance delta == quote (`actual_spend_atomic == quote_atomic`)
+- thin runner path confirmed: `runX402PaidSettlement → executeThinX402Settlement → executeSingleX402Settlement` (regression-guarded by `tests/unit/trustforge-x402-settlement-call-chain.test.ts`)
+- strict no-mainnet during the regression (no `BUYER_PRIVATE_KEY`, no `X402_USE_MAINNET`)
+
 ## Out of scope (separate milestone)
 
 Rich-tx-explainer mainnet path (`runRichTxExplainerPhase3`) — product demo; not first settlement gate.
