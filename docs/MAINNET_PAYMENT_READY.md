@@ -1,18 +1,35 @@
 # Mainnet payment ready — thin x402 settlement (Phase 62C)
 
-**Status:** `PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE`  
+**Status:** `PHASE62C_THIN_MAINNET_RUNNER_PROVEN`  
 **Agent did not load `BUYER_PRIVATE_KEY` and did not execute mainnet payment.**
+**This proves the runner; it is NOT an authorization to spend on mainnet.**
 
 ## State transition (Phase 62C)
 
 ```
-PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE   <-- current; MAINNET IS BLOCKED
-  → Step 5 Sepolia with PASS_SETTLED
-  → PHASE62C_THIN_MAINNET_RUNNER_PROVEN                 <-- only this unblocks mainnet
+PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE   [done]
+  → Step 5 Sepolia with PASS_SETTLED                    [PASS]
+  → PHASE62C_THIN_MAINNET_RUNNER_PROVEN                 <-- current (runner proven)
 ```
 
-**Before Step 5, mainnet is blocked.** Mainnet settle/classify must not run until a valid
-Step 5 Sepolia regression records `PHASE62C_THIN_MAINNET_RUNNER_PROVEN`.
+## Step 5 — Sepolia reprove: PASS  →  `RESULT: PHASE62C_THIN_MAINNET_RUNNER_PROVEN`
+
+- run_dir: `D:\trustforge\artifacts\runs\sepolia-settlement-proof\run_20260704_003438`
+- attempt: `attempt_8239432c-8d63-4478-a1d5-d3183e764999`
+- settlement_tx_hash: `0x382487eed4f79a6d4a3e29402ee1ead1ecd3ae4ebe9f757a3c2c71cc625bba93`
+- network_profile: sepolia · paid_probe_outcome: **PASS_SETTLED** · reconciliation: RECONCILIATION_PASS
+- facilitator_receipt_parse_status: parsed · binding_status: **confirmed** · facilitator_hash_agrees: **true**
+- known_settlements_confirmed_onchain: 1 · phase6_settlements_identified: 1 · unattributed_settlements_found: 0
+- balance_identity_status: pass · agent_signed: **no** · strict_no_mainnet: **yes**
+- exactly one payment-bearing request · single-shot, no retry
+- SHA-256 artifact manifest: `docs/phase62c_sepolia_proof_manifest.sha256.json` (no secrets copied)
+
+> The runner is proven identical for mainnet (only the network profile changes). Proving the
+> runner does **not** authorize a mainnet payment — that remains a separate human decision
+> (fresh discovery + a new `human_payment_authorization.json` + key loaded in-session).
+
+**Mainnet remains blocked until a human authorizes it.** No stale endpoint/quote/payTo/authorization
+is reused; each mainnet attempt starts from a fresh discovery.
 
 After a valid Step 5, the classify output / closure procedure records
 `RESULT: PHASE62C_THIN_MAINNET_RUNNER_PROVEN` **only if all** hold (else token withheld,

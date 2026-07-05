@@ -1,6 +1,14 @@
 # TrustForge Phase 62C — Thin mainnet settlement runner
 
-**Status:** code ready; human Sepolia re-prove + mainnet authorization pending.
+**Status:** `PHASE62C_THIN_MAINNET_RUNNER_PROVEN` — runner proven on Sepolia (Step 5 PASS);
+mainnet payment authorization still pending (separate human decision).
+
+**Step 5 Sepolia reprove: PASS.**
+run `run_20260704_003438` · attempt `attempt_8239432c-8d63-4478-a1d5-d3183e764999` ·
+tx `0x382487eed4f79a6d4a3e29402ee1ead1ecd3ae4ebe9f757a3c2c71cc625bba93` ·
+PASS_SETTLED · binding confirmed · facilitator_hash_agrees true · phase6=1 · unattributed=0 ·
+balance pass · agent_signed no · strict_no_mainnet yes. Proving the runner is **not** a mainnet
+payment authorization. See `MAINNET_HUMAN_RUNBOOK.md` and `MAINNET_PAYMENT_READY.md`.
 
 ## Principle
 
@@ -66,6 +74,12 @@ PHASE62C_THIN_RUNNER_READY_FOR_HUMAN_SEPOLIA_REPROVE
 ```
 
 Until `PHASE62C_THIN_MAINNET_RUNNER_PROVEN` is recorded, **mainnet stays blocked**.
+
+> **Now recorded (Step 5 PASS, run `run_20260704_003438`).** This unblocks the runner, not the
+> money: a mainnet attempt still requires a fresh discovery, a new `human_payment_authorization.json`,
+> and `BUYER_PRIVATE_KEY` loaded in the human's session. Mainnet Part B:
+> `run-trustforge-x402-paid-settlement.ts --network mainnet` then
+> `run-trustforge-x402-classify.ts --network mainnet`.
 
 ### Closure criteria — emitting `RESULT: PHASE62C_THIN_MAINNET_RUNNER_PROVEN`
 

@@ -1,0 +1,77 @@
+{
+  "phase": "62C",
+  "result": "PHASE62C_THIN_MAINNET_RUNNER_PROVEN",
+  "run_dir": "D:\\trustforge\\artifacts\\runs\\sepolia-settlement-proof\\run_20260704_003438",
+  "attempt_id": "attempt_8239432c-8d63-4478-a1d5-d3183e764999",
+  "settlement_tx_hash": "0x382487eed4f79a6d4a3e29402ee1ead1ecd3ae4ebe9f757a3c2c71cc625bba93",
+  "network_profile": "sepolia",
+  "note": "SHA-256 of the final Sepolia proof-run artifacts. Hashes only; no artifact contents (incl. human_payment_authorization.json) are copied into the repo. No secrets.",
+  "hash_algorithm": "sha256",
+  "file_count": 16,
+  "artifacts": {
+    "00_pay_time_freshness_preflight.json": {
+      "sha256": "e741256b64fdf39129a2b5c9ed4f4bce2bcbcf3c5be4b0f3fcb4adf991382bd6",
+      "bytes": 3794
+    },
+    "00_sepolia_preflight.json": {
+      "sha256": "cf5aab5f1d4560764d5a30472057a22ffc4beca05a632002b6d00802ee318b43",
+      "bytes": 4348
+    },
+    "facilitator_receipt_attempt_8239432c-8d63-4478-a1d5-d3183e764999.json": {
+      "sha256": "f470c81a4749748780cac2aba2977a2d6f61ccc42382959636f651f1228dc367",
+      "bytes": 687
+    },
+    "human_payment_authorization.DRAFT.json": {
+      "sha256": "e2bec69c484f1d3e77b10d285c5d778bdcd946a192778700070f13723f9405bd",
+      "bytes": 949
+    },
+    "human_payment_authorization.json": {
+      "sha256": "a637684ae0fbe212684b29399d00034257e1783a16c34d3e51aebbfcc9a91f20",
+      "bytes": 1769
+    },
+    "RESULT.txt": {
+      "sha256": "148f38c616ccb85f1b7801c11a722fc228af1f37e4ca569906f34c6cefeec67e",
+      "bytes": 771
+    },
+    "selected_candidate.json": {
+      "sha256": "763f3de8b0434444331652c4bbac60fbf9e4e6c136941fdd7583c9f9ff2a2ab9",
+      "bytes": 831
+    },
+    "sepolia_classification.json": {
+      "sha256": "407b4d45a01329bae3892a3177cedf0755213eeea1ef8874c3e3436369a663b2",
+      "bytes": 2292
+    },
+    "sepolia_reconciliation/onchain_settlement_ledger.json": {
+      "sha256": "7b5ad16c40ad2f7864060eec53229a7dfd414c01785359f8874282c2357633c6",
+      "bytes": 1951
+    },
+    "sepolia_reconciliation/onchain_settlement_ledger.md": {
+      "sha256": "6e391dae46a0d8d6da0f742af682e3ea3fb99cfe872cf641eeeb0cfbf21f69dc",
+      "bytes": 1011
+    },
+    "sepolia_reconciliation/RESULT.txt": {
+      "sha256": "a43545b1f866ea0d7e11d54da1cfd44dec70d63bc03085b8d9202b8652e175f8",
+      "bytes": 1375
+    },
+    "settlement_binding_attempt_8239432c-8d63-4478-a1d5-d3183e764999.json": {
+      "sha256": "3784625160c238502300b503042ca3c940312a2fa89783a5973921f8d810557d",
+      "bytes": 1395
+    },
+    "settlement_intent_attempt_8239432c-8d63-4478-a1d5-d3183e764999.json": {
+      "sha256": "08f537632439062ee5955aa80f871b30dbccee31409822843aa03067a5ccc580",
+      "bytes": 503
+    },
+    "settlement_probe/01_execution.json": {
+      "sha256": "1812d2375c7571b2ddf9b5e587e51b8440e85826fd5dc3030b60671edcaacd28",
+      "bytes": 1607
+    },
+    "settlement_probe/RESULT.txt": {
+      "sha256": "93bd87d4981e5442235675e6b4c56c53d6e2e23950dc01e533c455412bb7cdd8",
+      "bytes": 766
+    },
+    "target_selection.json": {
+      "sha256": "368b51aca397a17413d0cf641325aa4e985997561b1de20047979d49dd2f8366",
+      "bytes": 718
+    }
+  }
+}
