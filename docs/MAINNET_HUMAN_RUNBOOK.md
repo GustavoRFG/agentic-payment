@@ -35,34 +35,59 @@ node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-adapt-disco
 Confirm `selected_candidate.json` shape: `network: eip155:8453`, a fresh `endpoint`, `quote_atomic`,
 `authorized_pay_to`, `asset == 0x8335…2913`. **Discovery is unpaid; the paid probe is later and human-gated.**
 
-## 2. Preflight (read-only balances/quote) — no payment yet
+## 2. Keyless preflight (read-only, no key, no payment)
+
+This is the real mainnet preflight. It resolves the mainnet **profile** already proven on Sepolia
+(`runX402SettlementPreflight`) — it is not a second, disconnected mainnet path. It never loads a key,
+never authorizes, never signs, and never sends a payment-bearing request
+(`payment_bearing_http_request_count: 0`, `strict_no_payment: yes`, `wallet_loaded: no`).
 
 ```powershell
-# BUYER_PRIVATE_KEY + TRUSTFORGE_BASE_RPC_URL in session (human)
-node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-sepolia-preflight.ts `
-  --run-dir "<mainnet_run>"   # (mainnet preflight equivalent; confirms wallet==0x4cf3… and USDC balance)
+cd D:\agentic-payments-lab
+node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-preflight.ts `
+  --run-dir "<mainnet_run>" --network mainnet
+# optional: --rpc-request-timeout-seconds 20   (explicit timeout; no silent RPC fallback)
 ```
 
-## 3. HUMAN GATES — the agent STOPS here. Do these yourself, deliberately:
+**Expected on success:** `preflight_status: PASS`, `network_profile: mainnet`, `chain_id_observed: 8453`,
+`asset_candidate == 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, `authorized_pay_to` non-empty,
+`quote_atomic: 1125` (`0.001125 USDC`), `fresh_402_go: yes`, `BUYER_PRIVATE_KEY_present: no`,
+`SEPOLIA_BUYER_PRIVATE_KEY_present: no`. Any mismatch is fail-closed with a distinct `BLOCKED_*` state
+(`BLOCKED_WRONG_CHAIN`, `BLOCKED_WRONG_ASSET`, `BLOCKED_402_PAY_TO_MISMATCH`, `BLOCKED_402_AMOUNT_MISMATCH`,
+`BLOCKED_402_ENDPOINT_MISMATCH`, `BLOCKED_QUOTE_EXCEEDS_CAP`, `BLOCKED_STALE_CANDIDATE`,
+`BLOCKED_RUN_ALREADY_CONSUMED`, `BLOCKED_RPC_TIMEOUT`, `BLOCKED_OPPOSITE_NETWORK_KEY`) and no payment header.
 
-1. **Load key** — `BUYER_PRIVATE_KEY` for `0x4cf3…d0c1` in-session only. Confirm the address the
-   key derives matches the expected wallet (the preflight/settle asserts this; `BLOCKED_WRONG_WALLET`).
-2. **Create authorization** — write `<mainnet_run>/human_payment_authorization.json` with
-   `decision: authorize_one_payment`, `max_usdc` ≥ the fresh quote. One payment. No retry, no failover.
-3. **Settle (exactly one attempt):**
-   ```powershell
-   node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-paid-settlement.ts `
-     --run-dir "<mainnet_run>" --network mainnet
-   ```
-4. **Classify:**
-   ```powershell
-   node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-classify.ts `
-     --run-dir "<mainnet_run>" --network mainnet
-   ```
-   Require: `PASS_SETTLED`, `binding_status: confirmed`, `facilitator_hash_agrees: true`,
-   `phase6_settlements_identified: 1`, `unattributed_settlements_found: 0`, balance delta == quote.
+## 3. HUMAN GATES — the agent STOPS before all of these. Do them yourself, deliberately.
+
+**3a. Human wallet verification (optional, no signature).** Explicitly opt in to reading the key only to
+derive and compare the address — this mode creates no x402 client, does not sign, sends no
+payment-bearing request, and returns `BLOCKED_WRONG_WALLET` before any paid action if it does not match:
+
+```powershell
+# BUYER_PRIVATE_KEY in session; SEPOLIA_BUYER_PRIVATE_KEY must be absent
+node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-preflight.ts `
+  --run-dir "<mainnet_run>" --network mainnet --verify-wallet-env
+# expect buyer_derived == 0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1 ; else BLOCKED_WRONG_WALLET
+```
+
+**3b. Human authorization.** Write `<mainnet_run>/human_payment_authorization.json` with
+`decision: authorize_one_payment`, `max_usdc` ≥ the fresh quote. One payment. No retry, no failover.
+
+**3c. Single-shot settle (exactly one attempt):**
+```powershell
+node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-paid-settlement.ts `
+  --run-dir "<mainnet_run>" --network mainnet
+```
+
+**3d. Classify:**
+```powershell
+node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-classify.ts `
+  --run-dir "<mainnet_run>" --network mainnet
+```
+Require: `PASS_SETTLED`, `binding_status: confirmed`, `facilitator_hash_agrees: true`,
+`phase6_settlements_identified: 1`, `unattributed_settlements_found: 0`, balance delta == quote.
 
 **Exactly one payment-bearing request. Single-shot. No fallback failover. No retry.**
 
-The agent will not run §3. Loading the key, creating the authorization, and executing the mainnet
-settle are your decisions alone.
+The agent will not run §3. Wallet verification (3a), the authorization (3b), and executing the mainnet
+settle (3c) are your decisions alone.
