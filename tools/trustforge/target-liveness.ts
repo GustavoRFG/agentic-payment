@@ -443,6 +443,8 @@ export async function probeTargetLiveness(
   const timeoutMs = options.timeoutMs ?? 15_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Unref so the deadline timer can never hold the loop open into teardown (libuv async.c assert).
+  (timer as { unref?: () => void }).unref?.();
 
   const headers = new Headers({ accept: "application/json" });
   const bodyAllowed = ["POST", "PUT", "PATCH"].includes(candidate.method);

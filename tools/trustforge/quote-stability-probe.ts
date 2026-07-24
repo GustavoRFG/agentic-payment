@@ -8,6 +8,7 @@
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import { startAbortDeadline } from "./abort-deadline";
 
 /** Keep aligned with paid-method-honored-probe / thin settlement (executor untouched). */
 const SETTLEMENT_PAID_HTTP_METHOD = "POST" as const;
@@ -190,14 +191,13 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
 }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const deadline = startAbortDeadline(timeoutMs);
   const headers = new Headers({
     accept: "application/json",
     "content-type": "application/json",
   });
   if (containsX402PaymentHeader(headers)) {
-    clearTimeout(timer);
+    deadline.clear();
     throw new Error("quote stability probe unexpectedly contains a payment header");
   }
 
@@ -207,7 +207,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
       headers,
       body: JSON.stringify(options.body ?? {}),
       redirect: "manual",
-      signal: controller.signal,
+      signal: deadline.signal,
     });
     const bodyText = await response.text();
     let body: unknown = null;
@@ -242,7 +242,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
       detail: message,
     };
   } finally {
-    clearTimeout(timer);
+    deadline.clear();
   }
 }
 

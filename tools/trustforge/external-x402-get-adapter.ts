@@ -358,6 +358,8 @@ export async function inspectExternalX402GetHandshake(
   const observedAtUtc = (options.now ?? (() => new Date()))().toISOString();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Unref so the deadline timer can never hold the loop open into teardown (libuv async.c assert).
+  (timer as { unref?: () => void }).unref?.();
 
   let response: Response;
   try {

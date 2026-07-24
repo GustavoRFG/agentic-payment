@@ -202,6 +202,8 @@ async function observeService(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deps.timeoutMs);
+  // Unref so the deadline timer can never hold the loop open into teardown (libuv async.c assert).
+  (timer as { unref?: () => void }).unref?.();
   const start = Date.now();
   try {
     const response = await deps.fetchImpl(service.endpoint_url, {

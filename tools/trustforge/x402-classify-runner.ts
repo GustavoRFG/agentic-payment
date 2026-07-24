@@ -14,6 +14,10 @@ import {
   parseReconciliationLedger,
 } from "./x402-settlement-classify";
 import { runBoundedPythonReconcile } from "./bounded-reconcile-spawn";
+import {
+  isReconciliationUnavailableStatus,
+  materializeReconcileLedger,
+} from "./reconciliation-availability";
 import type { FacilitatorReceiptArtifact } from "./facilitator-settlement-receipt";
 import { validateLedgerIdentity } from "./ledger-reuse-validation";
 import { assertProfileEnvBeforeSettlement, type X402SettlementProfile } from "./x402-settlement-profile";
@@ -123,28 +127,17 @@ export async function runX402Classify(options: X402ClassifyOptions): Promise<{
       pythonArgs: args,
       maxTotalRuntimeSeconds,
     });
-    if (result.timedOut) {
-      reconcileTimedOut = true;
-      await writeFile(
-        ledgerPath,
-        `${JSON.stringify(
-          {
-            schema_name: "trustforge_onchain_settlement_ledger",
-            schema_version: "0.2.0",
-            reconciliation_status: "RECONCILIATION_RPC_TIMEOUT",
-            safe_to_use_for_payment_verification: false,
-            balance_identity_status: "not_run",
-            error_class: "RECONCILIATION_RPC_TIMEOUT",
-            reconciliation_detail: "TypeScript child process deadline exceeded",
-            settlements: [],
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
-    } else if (!result.ok && !existsSync(ledgerPath)) {
-      throw new Error(result.stderr || "reconciliation failed");
+    // An unavailable reconciler ALWAYS becomes a structured, fail-closed ledger
+    // naming the real cause — never a raw thrown stack trace, which is not a
+    // settlement verdict.
+    const materialized = materializeReconcileLedger({
+      result,
+      ledgerExists: existsSync(ledgerPath),
+      maxTotalRuntimeSeconds,
+    });
+    if (materialized.kind !== "use_existing") {
+      reconcileTimedOut = materialized.kind === "timeout";
+      await writeFile(ledgerPath, `${JSON.stringify(materialized.ledger, null, 2)}\n`, "utf8");
     }
   } else {
     console.log(`Reusing existing ledger: ${ledgerPath}`);
@@ -203,7 +196,8 @@ export async function runX402Classify(options: X402ClassifyOptions): Promise<{
   const rpcUnavailable =
     parsed.rpcUnavailable ||
     reconcileTimedOut ||
-    parsed.reconciliationStatus === "RECONCILIATION_RPC_TIMEOUT";
+    parsed.reconciliationStatus === "RECONCILIATION_RPC_TIMEOUT" ||
+    isReconciliationUnavailableStatus(parsed.reconciliationStatus);
 
   const noNewOutboundTransfer = inferNoNewOutboundTransfer({
     parsed,
@@ -266,6 +260,7 @@ export async function runX402Classify(options: X402ClassifyOptions): Promise<{
     `paid_probe_outcome: ${classification.outcome}`,
     `settlement_tx_hash: ${classification.settlementTxHash ?? "null"}`,
     `reconciliation_status: ${classification.reconciliationStatus ?? "null"}`,
+    `reconciliation_detail: ${typeof ledger.reconciliation_detail === "string" ? ledger.reconciliation_detail : "null"}`,
     `facilitator_receipt_parse_status: ${receiptArtifact?.parse_status ?? "not_found"}`,
     `binding_status: ${binding?.settlement_status ?? "not_run"}`,
     `facilitator_hash_agrees: ${binding?.facilitator_hash_agrees ?? "null"}`,

@@ -106,6 +106,8 @@ export async function inspectRichTxExplainerUnpaidHandshake(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 30_000);
+  // Unref so the deadline timer can never hold the loop open into teardown (libuv async.c assert).
+  (timer as { unref?: () => void }).unref?.();
   let response: Response;
   try {
     response = await fetchImpl(url, {

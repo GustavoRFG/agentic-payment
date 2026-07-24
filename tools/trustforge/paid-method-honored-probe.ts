@@ -10,6 +10,7 @@
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { extractMaxAmountRequiredAtomic } from "./quote-stability-probe";
+import { startAbortDeadline } from "./abort-deadline";
 
 /** Statuses that mean the settle HTTP method/route is not honored by the seller. */
 export const PAID_METHOD_NOT_HONORED_HTTP_STATUSES = new Set([404, 405, 501]);
@@ -56,15 +57,14 @@ export async function probePaidMethodHonored(
   const timeoutMs = options.timeoutMs ?? 15_000;
   const endpoint = options.endpoint;
   const method = SETTLEMENT_PAID_HTTP_METHOD;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const deadline = startAbortDeadline(timeoutMs);
 
   const headers = new Headers({
     accept: "application/json",
     "content-type": "application/json",
   });
   if (containsX402PaymentHeader(headers)) {
-    clearTimeout(timer);
+    deadline.clear();
     throw new Error("paid method probe unexpectedly contains a payment header");
   }
 
@@ -74,7 +74,7 @@ export async function probePaidMethodHonored(
       headers,
       body: JSON.stringify(options.body ?? {}),
       redirect: "manual",
-      signal: controller.signal,
+      signal: deadline.signal,
     });
     const httpStatus = response.status;
     const bodyText = await response.text();
@@ -129,6 +129,6 @@ export async function probePaidMethodHonored(
       paymentAttempted: false,
     };
   } finally {
-    clearTimeout(timer);
+    deadline.clear();
   }
 }
