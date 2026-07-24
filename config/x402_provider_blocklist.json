@@ -1,0 +1,13 @@
+{
+  "schema_name": "trustforge_x402_provider_blocklist",
+  "schema_version": "0.1.0",
+  "note": "Domains listed here are excluded from x402 discovery/adapt before ranking. Removal is a human decision, never automatic: delete the entry by hand after reviewing fresh evidence. Never mutate this file from code.",
+  "entries": [
+    {
+      "domain": "api.onesource.io",
+      "reason": "PAID_REQUEST_405_AFTER_KEYLESS_402_OK",
+      "evidence_runs": ["run_20260723_153238", "run_20260724_005838"],
+      "added_at": "2026-07-24T00:00:00Z"
+    }
+  ]
+}

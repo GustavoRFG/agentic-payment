@@ -28,6 +28,13 @@ import {
   type QuoteStabilityEvidence,
   type QuoteStabilityResult,
 } from "./quote-stability-probe";
+import {
+  blocklistSkipReason,
+  loadProviderBlocklist,
+  partitionByBlocklist,
+  type ProviderBlocklist,
+  type ProviderBlocklistEntry,
+} from "./provider-blocklist";
 
 const AUTHORIZATION_HEADROOM_USDC = "0.001";
 const AUTHORIZATION_MAX_CEILING_USDC = "0.01";
@@ -90,13 +97,16 @@ export interface DiscoveredTargetLiveAdaptOptions extends DiscoveredTargetAdaptO
   readonly now?: Date;
   /** Skip the settle-method keyless probe (unit tests / offline mapping only). */
   readonly skipPaidMethodProbe?: boolean;
+  /** Override the evidence-backed provider blocklist (defaults to the versioned config). */
+  readonly providerBlocklist?: ProviderBlocklist;
 }
 
 export interface DiscoveredTargetAdaptRejection {
   readonly resourceUrl: string;
   readonly reason: string;
   readonly evidence?: {
-    readonly quote_stability: QuoteStabilityEvidence;
+    readonly quote_stability?: QuoteStabilityEvidence;
+    readonly blocklist?: ProviderBlocklistEntry;
   };
 }
 
@@ -375,8 +385,8 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     };
   }
 
-  const ranked = rankedAdaptCandidates(input, options);
-  if (ranked.length === 0) {
+  const rankedRaw = rankedAdaptCandidates(input, options);
+  if (rankedRaw.length === 0) {
     return {
       ok: false,
       reason: explicitResourceUrl
@@ -389,6 +399,32 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
   }
 
   const rejectedCandidates: DiscoveredTargetAdaptRejection[] = [];
+
+  // Drop blocklisted provider domains before ranking is acted upon: they are
+  // never probed and never reach a selected candidate. Each drop is recorded as
+  // SKIPPED_BLOCKLISTED evidence. Removal from the blocklist is a human decision.
+  const blocklist = options.providerBlocklist ?? loadProviderBlocklist();
+  const { allowed: ranked, skipped } = partitionByBlocklist(
+    rankedRaw,
+    blocklist,
+    (candidate) => candidate.resourceUrl,
+  );
+  for (const skip of skipped) {
+    rejectedCandidates.push({
+      resourceUrl: skip.item.resourceUrl,
+      reason: blocklistSkipReason(skip.entry),
+      evidence: { blocklist: skip.entry },
+    });
+  }
+  if (ranked.length === 0) {
+    return {
+      ok: false,
+      reason: `no adaptable candidate remained after provider blocklist exclusion (${skipped.length} skipped)`,
+      paidMethodProbe: null,
+      quoteStability: null,
+      rejectedCandidates,
+    };
+  }
   let lastProbe: PaidMethodHonoredProbeResult | null = null;
   let lastStability: QuoteStabilityResult | null = null;
 
