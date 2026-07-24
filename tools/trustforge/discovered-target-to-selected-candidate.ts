@@ -22,6 +22,12 @@ import {
   REJECTED_PAID_METHOD_NOT_HONORED,
   type PaidMethodHonoredProbeResult,
 } from "./paid-method-honored-probe";
+import {
+  probeQuoteStability,
+  REJECTED_QUOTE_UNSTABLE,
+  type QuoteStabilityEvidence,
+  type QuoteStabilityResult,
+} from "./quote-stability-probe";
 
 const AUTHORIZATION_HEADROOM_USDC = "0.001";
 const AUTHORIZATION_MAX_CEILING_USDC = "0.01";
@@ -65,6 +71,9 @@ export interface DiscoveredSelectedCandidate {
   readonly buyer_wallet: string;
   readonly target_selection_audit: TargetSelectionAuditMetadata;
   readonly selected_at_utc: string;
+  readonly adapt_evidence?: {
+    readonly quote_stability: QuoteStabilityEvidence;
+  };
 }
 
 export type DiscoveredTargetAdaptResult =
@@ -83,24 +92,28 @@ export interface DiscoveredTargetLiveAdaptOptions extends DiscoveredTargetAdaptO
   readonly skipPaidMethodProbe?: boolean;
 }
 
+export interface DiscoveredTargetAdaptRejection {
+  readonly resourceUrl: string;
+  readonly reason: string;
+  readonly evidence?: {
+    readonly quote_stability: QuoteStabilityEvidence;
+  };
+}
+
 export type DiscoveredTargetLiveAdaptResult =
   | {
       readonly ok: true;
       readonly candidate: DiscoveredSelectedCandidate;
       readonly paidMethodProbe: PaidMethodHonoredProbeResult | null;
-      readonly rejectedCandidates: readonly {
-        readonly resourceUrl: string;
-        readonly reason: string;
-      }[];
+      readonly quoteStability: QuoteStabilityResult | null;
+      readonly rejectedCandidates: readonly DiscoveredTargetAdaptRejection[];
     }
   | {
       readonly ok: false;
       readonly reason: string;
       readonly paidMethodProbe: PaidMethodHonoredProbeResult | null;
-      readonly rejectedCandidates: readonly {
-        readonly resourceUrl: string;
-        readonly reason: string;
-      }[];
+      readonly quoteStability: QuoteStabilityResult | null;
+      readonly rejectedCandidates: readonly DiscoveredTargetAdaptRejection[];
     };
 
 interface ResolvedAdaptSelection {
@@ -327,7 +340,8 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
 
 /**
  * Adapt after a live 402 handshake: keyless settle-method probe (POST, no payment),
- * then fall through to the next fallback on REJECTED_PAID_METHOD_NOT_HONORED.
+ * then a second 402 for quote stability. REJECTED_PAID_METHOD_NOT_HONORED /
+ * REJECTED_QUOTE_UNSTABLE fall through to the next fallback.
  */
 export async function adaptDiscoveredTargetWithPaidMethodProbe(
   input: DiscoveredTargetSelectionInput,
@@ -347,6 +361,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
         ok: false,
         reason: resolved.reason,
         paidMethodProbe: null,
+        quoteStability: null,
         rejectedCandidates: [],
       };
     }
@@ -355,6 +370,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       ok: false,
       reason: "selection.primary is null",
       paidMethodProbe: null,
+      quoteStability: null,
       rejectedCandidates: [],
     };
   }
@@ -367,12 +383,14 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
         ? `resource_url not found in live target_selection candidates: ${explicitResourceUrl}`
         : "selection.primary is null",
       paidMethodProbe: null,
+      quoteStability: null,
       rejectedCandidates: [],
     };
   }
 
-  const rejectedCandidates: { resourceUrl: string; reason: string }[] = [];
+  const rejectedCandidates: DiscoveredTargetAdaptRejection[] = [];
   let lastProbe: PaidMethodHonoredProbeResult | null = null;
+  let lastStability: QuoteStabilityResult | null = null;
 
   for (let index = 0; index < ranked.length; index += 1) {
     const entry = ranked[index]!;
@@ -388,12 +406,14 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
         ok: true,
         candidate: adapted.candidate,
         paidMethodProbe: null,
+        quoteStability: null,
         rejectedCandidates,
       };
     }
 
     const probe = await probePaidMethodHonored({
       endpoint: adapted.candidate.endpoint,
+      expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,
     });
     lastProbe = probe;
@@ -405,10 +425,35 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       continue;
     }
 
+    const stability = await probeQuoteStability({
+      endpoint: adapted.candidate.endpoint,
+      firstMaxAmountRequiredAtomic: probe.maxAmountRequiredAtomic,
+      expectedNetwork: adapted.candidate.network,
+      fetchImpl: options.fetchImpl,
+    });
+    lastStability = stability;
+    if (!stability.stable) {
+      const reason =
+        stability.reason ??
+        `${REJECTED_QUOTE_UNSTABLE}: quote unstable for ${adapted.candidate.endpoint}`;
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason,
+        evidence: { quote_stability: stability.evidence },
+      });
+      continue;
+    }
+
     return {
       ok: true,
-      candidate: adapted.candidate,
+      candidate: {
+        ...adapted.candidate,
+        adapt_evidence: {
+          quote_stability: stability.evidence,
+        },
+      },
       paidMethodProbe: probe,
+      quoteStability: stability,
       rejectedCandidates,
     };
   }
@@ -416,13 +461,18 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
   const methodRejection = rejectedCandidates.find((entry) =>
     entry.reason.includes(REJECTED_PAID_METHOD_NOT_HONORED),
   );
+  const quoteRejection = rejectedCandidates.find((entry) =>
+    entry.reason.includes(REJECTED_QUOTE_UNSTABLE),
+  );
   return {
     ok: false,
     reason:
+      quoteRejection?.reason ??
       methodRejection?.reason ??
       rejectedCandidates[rejectedCandidates.length - 1]?.reason ??
-      "no adaptable candidate remained after paid-method probe",
+      "no adaptable candidate remained after paid-method and quote-stability probes",
     paidMethodProbe: lastProbe,
+    quoteStability: lastStability,
     rejectedCandidates,
   };
 }

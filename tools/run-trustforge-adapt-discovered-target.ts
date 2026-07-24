@@ -2,8 +2,9 @@
  * run-trustforge-adapt-discovered-target — map target_selection.json primary to selected_candidate.json.
  *
  * After a live_402_ok handshake selection, runs a keyless settle-method probe (POST,
- * no payment header). 404/405/501 → REJECTED_PAID_METHOD_NOT_HONORED and the next
- * fallback is tried. Does not touch the settlement executor.
+ * no payment header), then a second 402 for quote stability. 404/405/501 →
+ * REJECTED_PAID_METHOD_NOT_HONORED; divergent/zero maxAmountRequired →
+ * REJECTED_QUOTE_UNSTABLE. Falls through to the next fallback. Executor untouched.
  */
 
 import { readFile, writeFile } from "node:fs/promises";
@@ -55,6 +56,12 @@ async function main(): Promise<number> {
   if (adapted.paidMethodProbe) {
     console.log(
       `paid_method_probe: HTTP ${adapted.paidMethodProbe.httpStatus ?? "null"} ${adapted.paidMethodProbe.method}`,
+    );
+  }
+  if (adapted.quoteStability) {
+    const q = adapted.quoteStability.evidence;
+    console.log(
+      `quote_stability: first=${q.first_max_amount_required_atomic ?? "null"} second=${q.second_max_amount_required_atomic ?? "null"}`,
     );
   }
   for (const rejected of adapted.rejectedCandidates) {

@@ -10,11 +10,30 @@ import {
   REJECTED_PAID_METHOD_NOT_HONORED,
   SETTLEMENT_PAID_HTTP_METHOD,
 } from "../../tools/trustforge/paid-method-honored-probe";
+import { REJECTED_QUOTE_UNSTABLE } from "../../tools/trustforge/quote-stability-probe";
 import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
+
+function paymentRequiredBody(amount: string, payTo = "0x2222222222222222222222222222222222222222"): string {
+  return JSON.stringify({
+    x402Version: 2,
+    accepts: [
+      {
+        scheme: "exact",
+        network: MAINNET_NETWORK,
+        asset: MAINNET_USDC_ADDRESS,
+        maxAmountRequired: amount,
+        payTo,
+        maxTimeoutSeconds: 300,
+      },
+    ],
+    nonce: "probe-nonce",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  });
+}
 
 describe("discovered target adapter", () => {
   it("maps a live_402_ok primary to selected_candidate with audit metadata", () => {
@@ -177,17 +196,11 @@ describe("discovered target adapter", () => {
       const url = String(input);
       const method = (init?.method ?? "GET").toUpperCase();
       expect(containsX402PaymentHeader(init?.headers)).toBe(false);
-      if (url === getOnlyEndpoint && method === "GET") {
-        return new Response(JSON.stringify({ accepts: [] }), {
-          status: 402,
-          headers: { "content-type": "application/json" },
-        });
-      }
       if (url === getOnlyEndpoint && method === "POST") {
         return new Response("Method Not Allowed", { status: 405 });
       }
       if (url === postOkEndpoint && method === "POST") {
-        return new Response(JSON.stringify({ accepts: [] }), {
+        return new Response(paymentRequiredBody("1125"), {
           status: 402,
           headers: { "content-type": "application/json" },
         });
@@ -206,16 +219,101 @@ describe("discovered target adapter", () => {
     expect(result.candidate.endpoint).toBe(postOkEndpoint);
     expect(result.paidMethodProbe?.method).toBe(SETTLEMENT_PAID_HTTP_METHOD);
     expect(result.paidMethodProbe?.httpStatus).toBe(402);
+    expect(result.candidate.adapt_evidence?.quote_stability).toEqual({
+      first_max_amount_required_atomic: "1125",
+      second_max_amount_required_atomic: "1125",
+    });
     expect(result.rejectedCandidates).toEqual([
       {
         resourceUrl: getOnlyEndpoint,
         reason: `${REJECTED_PAID_METHOD_NOT_HONORED}: settle POST ${getOnlyEndpoint} returned HTTP 405`,
       },
     ]);
-    expect(fetchImpl).toHaveBeenCalled();
     const probedMethods = fetchImpl.mock.calls.map(
       ([, init]) => (init as RequestInit | undefined)?.method ?? "GET",
     );
     expect(probedMethods.every((method) => method === "POST")).toBe(true);
+    // method probe + second 402 for the accepted fallback
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url) === postOkEndpoint)).toHaveLength(2);
+  });
+
+  it("rejects alternating maxAmountRequired quotes with REJECTED_QUOTE_UNSTABLE and falls back", async () => {
+    const unstableEndpoint = "https://unstable-quote.example/x402";
+    const stableEndpoint = "https://stable-quote.example/x402";
+    const selection = {
+      selection: {
+        primary: {
+          method: "POST" as const,
+          handshakeStatus: "live_402_ok",
+          resourceUrl: unstableEndpoint,
+          quoteUsdc: "0.001",
+          quoteAtomic: "1000",
+          selectedPayTo: "0x1111111111111111111111111111111111111111",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          scoringRationale: ["unstable_primary"],
+        },
+        fallbacks: [
+          {
+            method: "POST" as const,
+            handshakeStatus: "live_402_ok",
+            resourceUrl: stableEndpoint,
+            quoteUsdc: "0.001125",
+            quoteAtomic: "1125",
+            selectedPayTo: "0x2222222222222222222222222222222222222222",
+            network: MAINNET_NETWORK,
+            asset: MAINNET_USDC_ADDRESS,
+            scoringRationale: ["stable_fallback"],
+          },
+        ],
+      },
+    };
+
+    const unstableQuotes = ["1000", "2500"];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      expect((init?.method ?? "GET").toUpperCase()).toBe("POST");
+      expect(containsX402PaymentHeader(init?.headers)).toBe(false);
+      if (url === unstableEndpoint) {
+        const amount = unstableQuotes.shift() ?? "9999";
+        return new Response(paymentRequiredBody(amount, "0x1111111111111111111111111111111111111111"), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === stableEndpoint) {
+        return new Response(paymentRequiredBody("1125"), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await adaptDiscoveredTargetWithPaidMethodProbe(selection, {
+      thin: true,
+      fetchImpl,
+      now: new Date("2026-06-20T00:00:00.000Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.endpoint).toBe(stableEndpoint);
+    expect(result.candidate.adapt_evidence?.quote_stability).toEqual({
+      first_max_amount_required_atomic: "1125",
+      second_max_amount_required_atomic: "1125",
+    });
+    expect(result.rejectedCandidates).toEqual([
+      {
+        resourceUrl: unstableEndpoint,
+        reason: `${REJECTED_QUOTE_UNSTABLE}: first=1000 second=2500`,
+        evidence: {
+          quote_stability: {
+            first_max_amount_required_atomic: "1000",
+            second_max_amount_required_atomic: "2500",
+          },
+        },
+      },
+    ]);
   });
 });
