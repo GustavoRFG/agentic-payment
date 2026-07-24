@@ -131,6 +131,36 @@ describe("paid quote freshness pre-flight", () => {
     expect(result.reasons.some((reason) => reason.includes("wrong network"))).toBe(true);
   });
 
+  it("returns no-go on live 402 endpoint mismatch", () => {
+    const result = evaluateFresh402AgainstAuthorizedQuote(
+      liveOutcome({ resourceUrl: "https://fresh.example/x402" }),
+      { ...authorized, endpoint: "https://candidate.example/x402" },
+      new Date("2026-06-20T00:00:00.000Z"),
+    );
+    expect(result.go).toBe(false);
+    expect(result.reasons).toContain(
+      "endpoint mismatch fresh=https://fresh.example/x402 authorized=https://candidate.example/x402",
+    );
+  });
+
+  it("builds a generic probe candidate for non-allowlisted discovered endpoints", () => {
+    const candidate = buildProbeCandidateForAuthorizedQuote({
+      ...authorized,
+      endpoint: "https://valid-provider.example/x402/tx-details",
+      method: "GET",
+      network: "eip155:8453",
+      asset: MAINNET_USDC_ADDRESS,
+    });
+    expect(candidate.resourceUrl).toBe("https://valid-provider.example/x402/tx-details");
+    expect(candidate.method).toBe("GET");
+    expect(candidate.accepts[0]).toMatchObject({
+      network: "eip155:8453",
+      asset: MAINNET_USDC_ADDRESS,
+      amountAtomic: "1125",
+      payTo: authorized.pay_to,
+    });
+  });
+
   it("classifies a recorded Zapper fixture as go through the probe classifier", () => {
     const fixture = JSON.parse(
       readFileSync(

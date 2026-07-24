@@ -18,6 +18,7 @@ import {
 
 export interface AuthorizedPaymentQuote {
   readonly endpoint: string;
+  readonly method?: TargetCandidate["method"];
   readonly quote_amount_usdc: string;
   readonly quote_atomic: string;
   readonly authorized_max_usdc: string;
@@ -47,20 +48,27 @@ function policyForEndpoint(endpoint: string) {
   return null;
 }
 
+function genericCandidateId(endpoint: string): string {
+  return endpoint
+    .replace(/^https?:\/\//, "")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64) || "discovered_x402";
+}
+
 export function buildProbeCandidateForAuthorizedQuote(
   quote: AuthorizedPaymentQuote,
-): TargetCandidate | null {
+): TargetCandidate {
   const policy = policyForEndpoint(quote.endpoint);
-  if (!policy) return null;
 
   const expectedNetwork = quote.network ?? MAINNET_NETWORK;
   const expectedAsset = quote.asset ?? MAINNET_USDC_ADDRESS;
-  const isZapper = policy.policyId === ZAPPER_TX_EXPLAINER_POLICY.policyId;
+  const isZapper = policy?.policyId === ZAPPER_TX_EXPLAINER_POLICY.policyId;
   const isSepoliaLocal = quote.endpoint.includes("/paid/analyze-text");
   return {
-    candidateId: policy.serviceId,
+    candidateId: policy?.serviceId ?? genericCandidateId(quote.endpoint),
     resourceUrl: quote.endpoint,
-    method: policy.method,
+    method: policy?.method ?? quote.method ?? "GET",
     x402Version: 2,
     freshness: {
       lastUpdated: new Date().toISOString(),
@@ -74,7 +82,7 @@ export function buildProbeCandidateForAuthorizedQuote(
                 type: "http",
                 method: "POST",
                 bodyType: "json",
-                body: policy.buildRequestBody(
+                body: policy!.buildRequestBody(
                   "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
                   1,
                 ),
@@ -115,6 +123,10 @@ export function evaluateFresh402AgainstAuthorizedQuote(
   now: Date = new Date(),
 ): PaidQuoteFreshnessPreflightResult {
   const reasons: string[] = [];
+
+  if (outcome.resourceUrl && outcome.resourceUrl !== quote.endpoint) {
+    reasons.push(`endpoint mismatch fresh=${outcome.resourceUrl} authorized=${quote.endpoint}`);
+  }
 
   if (outcome.status !== "live_402_ok") {
     reasons.push(`fresh handshake status ${outcome.status}`);
@@ -190,13 +202,6 @@ export async function runPaidQuoteFreshnessPreflight(input: {
   readonly now?: Date;
 }): Promise<PaidQuoteFreshnessPreflightResult> {
   const candidate = buildProbeCandidateForAuthorizedQuote(input.authorized);
-  if (!candidate) {
-    return {
-      go: false,
-      reasons: [`endpoint not allowlisted for freshness probe: ${input.authorized.endpoint}`],
-      outcome: null,
-    };
-  }
 
   const maxAtomic = parseUsdcDecimalToAtomic(input.authorized.authorized_max_usdc).toString();
 

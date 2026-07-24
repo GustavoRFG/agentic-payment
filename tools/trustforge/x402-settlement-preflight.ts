@@ -33,7 +33,6 @@ import {
   type AuthorizedPaymentQuote,
   type PaidQuoteFreshnessPreflightResult,
 } from "./paid-quote-freshness-preflight";
-import { ZAPPER_TX_EXPLAINER_POLICY } from "./rich-tx-explainer-policy";
 import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
 
 export type X402PreflightBlocker =
@@ -365,15 +364,23 @@ export async function runX402SettlementPreflight(
   }
   const targetSelectionPath = join(options.runDir, "target_selection.json");
   if (existsSync(targetSelectionPath)) {
-    const selection = readJsonFileSync<{ selection?: { primary?: { resourceUrl?: string } } }>(
+    const selection = readJsonFileSync<{
+      selection?: {
+        primary?: { resourceUrl?: string } | null;
+        fallbacks?: Array<{ resourceUrl?: string }>;
+      };
+    }>(
       targetSelectionPath,
     );
-    const primaryUrl = selection.selection?.primary?.resourceUrl;
-    if (primaryUrl && primaryUrl !== candidate.endpoint) {
+    const candidateUrls = [
+      selection.selection?.primary?.resourceUrl,
+      ...(selection.selection?.fallbacks ?? []).map((entry) => entry.resourceUrl),
+    ].filter((value): value is string => Boolean(value));
+    if (candidateUrls.length > 0 && !candidateUrls.includes(candidate.endpoint)) {
       return block(
         baseResult,
         "BLOCKED_STALE_CANDIDATE",
-        `candidate endpoint ${candidate.endpoint} does not match run target_selection ${primaryUrl}`,
+        `candidate endpoint ${candidate.endpoint} is not in run target_selection candidates`,
       );
     }
   }
@@ -419,13 +426,6 @@ export async function runX402SettlementPreflight(
   }
   if (!candidate.authorized_pay_to?.trim()) {
     return block(withConsumed, "BLOCKED_STALE_CANDIDATE", "candidate authorized_pay_to is empty");
-  }
-  if (profile.id === "mainnet" && candidate.endpoint !== ZAPPER_TX_EXPLAINER_POLICY.endpointUrl) {
-    return block(
-      withConsumed,
-      "BLOCKED_402_ENDPOINT_MISMATCH",
-      `mainnet candidate endpoint ${candidate.endpoint} != ${ZAPPER_TX_EXPLAINER_POLICY.endpointUrl}`,
-    );
   }
   const quoteAtomic = candidate.quote_atomic?.trim() ?? "";
   if (!/^\d+$/.test(quoteAtomic)) {
@@ -475,6 +475,7 @@ export async function runX402SettlementPreflight(
   // (7) Unsigned 402 re-handshake — network/asset/payTo/amount + freshness match candidate.
   const authorizedQuote: AuthorizedPaymentQuote = {
     endpoint: candidate.endpoint,
+    method: candidate.method,
     quote_amount_usdc: candidate.quote_amount_usdc,
     quote_atomic: candidate.quote_atomic,
     authorized_max_usdc: candidate.recommended_max_usdc,

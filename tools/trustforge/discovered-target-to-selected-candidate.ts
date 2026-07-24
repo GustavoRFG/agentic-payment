@@ -16,11 +16,20 @@ import {
   TESTNET_USDC_ADDRESS,
 } from "../../shared/payment-safety";
 import type { TargetSelectionAuditMetadata } from "./validate-human-payment-authorization";
+import type { TargetCandidate } from "./target-candidates";
+import {
+  probePaidMethodHonored,
+  REJECTED_PAID_METHOD_NOT_HONORED,
+  type PaidMethodHonoredProbeResult,
+} from "./paid-method-honored-probe";
 
 const AUTHORIZATION_HEADROOM_USDC = "0.001";
 const AUTHORIZATION_MAX_CEILING_USDC = "0.01";
 
 export interface DiscoveredTargetSelectionPrimary {
+  readonly rank?: number;
+  readonly candidateId?: string;
+  readonly method?: TargetCandidate["method"];
   readonly handshakeStatus: string;
   readonly resourceUrl: string;
   readonly quoteUsdc: string;
@@ -31,10 +40,14 @@ export interface DiscoveredTargetSelectionPrimary {
   readonly scoringRationale: readonly string[];
 }
 
+export type DiscoveredTargetSelectionFallback = Partial<DiscoveredTargetSelectionPrimary> & {
+  readonly resourceUrl: string;
+};
+
 export interface DiscoveredTargetSelectionInput {
   readonly selection: {
     readonly primary: DiscoveredTargetSelectionPrimary | null;
-    readonly fallbacks: readonly { readonly resourceUrl: string }[];
+    readonly fallbacks: readonly DiscoveredTargetSelectionFallback[];
   };
 }
 
@@ -42,6 +55,7 @@ export interface DiscoveredSelectedCandidate {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  readonly method?: TargetCandidate["method"];
   readonly quote_amount_usdc: string;
   readonly quote_atomic: string;
   readonly authorized_pay_to: string;
@@ -57,11 +71,116 @@ export type DiscoveredTargetAdaptResult =
   | { readonly ok: true; readonly candidate: DiscoveredSelectedCandidate }
   | { readonly ok: false; readonly reason: string };
 
+export interface DiscoveredTargetAdaptOptions {
+  readonly resourceUrl?: string;
+}
+
+export interface DiscoveredTargetLiveAdaptOptions extends DiscoveredTargetAdaptOptions {
+  readonly thin?: boolean;
+  readonly fetchImpl?: typeof fetch;
+  readonly now?: Date;
+  /** Skip the settle-method keyless probe (unit tests / offline mapping only). */
+  readonly skipPaidMethodProbe?: boolean;
+}
+
+export type DiscoveredTargetLiveAdaptResult =
+  | {
+      readonly ok: true;
+      readonly candidate: DiscoveredSelectedCandidate;
+      readonly paidMethodProbe: PaidMethodHonoredProbeResult | null;
+      readonly rejectedCandidates: readonly {
+        readonly resourceUrl: string;
+        readonly reason: string;
+      }[];
+    }
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      readonly paidMethodProbe: PaidMethodHonoredProbeResult | null;
+      readonly rejectedCandidates: readonly {
+        readonly resourceUrl: string;
+        readonly reason: string;
+      }[];
+    };
+
+interface ResolvedAdaptSelection {
+  readonly primary: DiscoveredTargetSelectionPrimary;
+  readonly fallbacks: readonly DiscoveredTargetSelectionFallback[];
+}
+
+function rankedAdaptCandidates(
+  input: DiscoveredTargetSelectionInput,
+  options: DiscoveredTargetAdaptOptions = {},
+): DiscoveredTargetSelectionFallback[] {
+  const ranked: DiscoveredTargetSelectionFallback[] = [
+    ...(input.selection.primary ? [input.selection.primary] : []),
+    ...input.selection.fallbacks,
+  ];
+  const explicitResourceUrl = options.resourceUrl?.trim();
+  if (!explicitResourceUrl) return ranked;
+  const index = ranked.findIndex((entry) => entry.resourceUrl === explicitResourceUrl);
+  if (index < 0) return [];
+  return [...ranked.slice(index), ...ranked.slice(0, index)];
+}
+
+function selectionForCandidate(
+  candidate: DiscoveredTargetSelectionFallback,
+  remaining: readonly DiscoveredTargetSelectionFallback[],
+): DiscoveredTargetSelectionInput {
+  return {
+    selection: {
+      primary: candidate as DiscoveredTargetSelectionPrimary,
+      fallbacks: remaining,
+    },
+  };
+}
+
 function resolveAllowlistedPolicy(resourceUrl: string) {
   for (const policy of Object.values(ALLOWLISTED_RICH_TX_EXPLAINER_POLICIES)) {
     if (policy.endpointUrl === resourceUrl) return policy;
   }
   return null;
+}
+
+function resolveAdaptSelection(
+  input: DiscoveredTargetSelectionInput,
+  options: DiscoveredTargetAdaptOptions = {},
+): { readonly ok: true; readonly selection: ResolvedAdaptSelection } | { readonly ok: false; readonly reason: string } {
+  const explicitResourceUrl = options.resourceUrl?.trim();
+  const ranked: DiscoveredTargetSelectionFallback[] = [
+    ...(input.selection.primary ? [input.selection.primary] : []),
+    ...input.selection.fallbacks,
+  ];
+
+  if (!explicitResourceUrl) {
+    const primary = input.selection.primary;
+    if (!primary) {
+      return { ok: false, reason: "selection.primary is null" };
+    }
+    return {
+      ok: true,
+      selection: {
+        primary,
+        fallbacks: input.selection.fallbacks,
+      },
+    };
+  }
+
+  const index = ranked.findIndex((entry) => entry.resourceUrl === explicitResourceUrl);
+  if (index < 0) {
+    return {
+      ok: false,
+      reason: `resource_url not found in live target_selection candidates: ${explicitResourceUrl}`,
+    };
+  }
+
+  return {
+    ok: true,
+    selection: {
+      primary: ranked[index] as DiscoveredTargetSelectionPrimary,
+      fallbacks: ranked.filter((_, entryIndex) => entryIndex !== index),
+    },
+  };
 }
 
 export function recommendedAuthorizationMaxUsdc(quoteUsdc: string): string {
@@ -91,11 +210,11 @@ function resolveSepoliaLocalPolicy(resourceUrl: string) {
 export function adaptDiscoveredPrimaryToThinSettlementCandidate(
   input: DiscoveredTargetSelectionInput,
   now: Date = new Date(),
+  options: DiscoveredTargetAdaptOptions = {},
 ): DiscoveredTargetAdaptResult {
-  const primary = input.selection.primary;
-  if (!primary) {
-    return { ok: false, reason: "selection.primary is null" };
-  }
+  const resolved = resolveAdaptSelection(input, options);
+  if (!resolved.ok) return resolved;
+  const { primary, fallbacks } = resolved.selection;
   if (primary.handshakeStatus !== "live_402_ok") {
     return {
       ok: false,
@@ -127,6 +246,7 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
       provider,
       service_id: serviceId,
       endpoint: primary.resourceUrl,
+      ...(primary.method ? { method: primary.method } : {}),
       quote_amount_usdc: primary.quoteUsdc,
       quote_atomic: primary.quoteAtomic,
       authorized_pay_to: primary.selectedPayTo,
@@ -137,8 +257,8 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
       target_selection_audit: {
         selected_resource_url: primary.resourceUrl,
         handshake_status: primary.handshakeStatus,
-        fallback_resource_urls: input.selection.fallbacks.map((entry) => entry.resourceUrl),
-        scoring_rationale: [...primary.scoringRationale],
+        fallback_resource_urls: fallbacks.map((entry) => entry.resourceUrl),
+        scoring_rationale: [...(primary.scoringRationale ?? [])],
       },
       selected_at_utc: now.toISOString(),
     },
@@ -148,11 +268,11 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
 export function adaptDiscoveredPrimaryToSelectedCandidate(
   input: DiscoveredTargetSelectionInput,
   now: Date = new Date(),
+  options: DiscoveredTargetAdaptOptions = {},
 ): DiscoveredTargetAdaptResult {
-  const primary = input.selection.primary;
-  if (!primary) {
-    return { ok: false, reason: "selection.primary is null" };
-  }
+  const resolved = resolveAdaptSelection(input, options);
+  if (!resolved.ok) return resolved;
+  const { primary, fallbacks } = resolved.selection;
   if (primary.handshakeStatus !== "live_402_ok") {
     return {
       ok: false,
@@ -186,6 +306,7 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
       provider: policy.provider,
       service_id: policy.serviceId,
       endpoint: primary.resourceUrl,
+      ...(primary.method ? { method: primary.method } : {}),
       quote_amount_usdc: primary.quoteUsdc,
       quote_atomic: primary.quoteAtomic,
       authorized_pay_to: primary.selectedPayTo,
@@ -196,10 +317,112 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
       target_selection_audit: {
         selected_resource_url: primary.resourceUrl,
         handshake_status: primary.handshakeStatus,
-        fallback_resource_urls: input.selection.fallbacks.map((entry) => entry.resourceUrl),
-        scoring_rationale: [...primary.scoringRationale],
+        fallback_resource_urls: fallbacks.map((entry) => entry.resourceUrl),
+        scoring_rationale: [...(primary.scoringRationale ?? [])],
       },
       selected_at_utc: now.toISOString(),
     },
+  };
+}
+
+/**
+ * Adapt after a live 402 handshake: keyless settle-method probe (POST, no payment),
+ * then fall through to the next fallback on REJECTED_PAID_METHOD_NOT_HONORED.
+ */
+export async function adaptDiscoveredTargetWithPaidMethodProbe(
+  input: DiscoveredTargetSelectionInput,
+  options: DiscoveredTargetLiveAdaptOptions = {},
+): Promise<DiscoveredTargetLiveAdaptResult> {
+  const now = options.now ?? new Date();
+  const thin = options.thin ?? false;
+  const adaptOne = thin
+    ? adaptDiscoveredPrimaryToThinSettlementCandidate
+    : adaptDiscoveredPrimaryToSelectedCandidate;
+
+  const explicitResourceUrl = options.resourceUrl?.trim();
+  if (explicitResourceUrl) {
+    const resolved = resolveAdaptSelection(input, { resourceUrl: explicitResourceUrl });
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        reason: resolved.reason,
+        paidMethodProbe: null,
+        rejectedCandidates: [],
+      };
+    }
+  } else if (!input.selection.primary) {
+    return {
+      ok: false,
+      reason: "selection.primary is null",
+      paidMethodProbe: null,
+      rejectedCandidates: [],
+    };
+  }
+
+  const ranked = rankedAdaptCandidates(input, options);
+  if (ranked.length === 0) {
+    return {
+      ok: false,
+      reason: explicitResourceUrl
+        ? `resource_url not found in live target_selection candidates: ${explicitResourceUrl}`
+        : "selection.primary is null",
+      paidMethodProbe: null,
+      rejectedCandidates: [],
+    };
+  }
+
+  const rejectedCandidates: { resourceUrl: string; reason: string }[] = [];
+  let lastProbe: PaidMethodHonoredProbeResult | null = null;
+
+  for (let index = 0; index < ranked.length; index += 1) {
+    const entry = ranked[index]!;
+    const remaining = ranked.filter((_, entryIndex) => entryIndex !== index);
+    const adapted = adaptOne(selectionForCandidate(entry, remaining), now);
+    if (!adapted.ok) {
+      rejectedCandidates.push({ resourceUrl: entry.resourceUrl, reason: adapted.reason });
+      continue;
+    }
+
+    if (options.skipPaidMethodProbe) {
+      return {
+        ok: true,
+        candidate: adapted.candidate,
+        paidMethodProbe: null,
+        rejectedCandidates,
+      };
+    }
+
+    const probe = await probePaidMethodHonored({
+      endpoint: adapted.candidate.endpoint,
+      fetchImpl: options.fetchImpl,
+    });
+    lastProbe = probe;
+    if (!probe.honored) {
+      const reason =
+        probe.reason ??
+        `${REJECTED_PAID_METHOD_NOT_HONORED}: settle method not honored for ${adapted.candidate.endpoint}`;
+      rejectedCandidates.push({ resourceUrl: entry.resourceUrl, reason });
+      continue;
+    }
+
+    return {
+      ok: true,
+      candidate: adapted.candidate,
+      paidMethodProbe: probe,
+      rejectedCandidates,
+    };
+  }
+
+  const methodRejection = rejectedCandidates.find((entry) =>
+    entry.reason.includes(REJECTED_PAID_METHOD_NOT_HONORED),
+  );
+  return {
+    ok: false,
+    reason:
+      methodRejection?.reason ??
+      rejectedCandidates[rejectedCandidates.length - 1]?.reason ??
+      "no adaptable candidate remained after paid-method probe",
+    paidMethodProbe: lastProbe,
+    rejectedCandidates,
   };
 }

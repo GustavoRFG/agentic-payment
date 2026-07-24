@@ -1,10 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   adaptDiscoveredPrimaryToSelectedCandidate,
+  adaptDiscoveredPrimaryToThinSettlementCandidate,
+  adaptDiscoveredTargetWithPaidMethodProbe,
   recommendedAuthorizationMaxUsdc,
 } from "../../tools/trustforge/discovered-target-to-selected-candidate";
+import {
+  REJECTED_PAID_METHOD_NOT_HONORED,
+  SETTLEMENT_PAID_HTTP_METHOD,
+} from "../../tools/trustforge/paid-method-honored-probe";
 import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
+import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
 
@@ -72,5 +80,142 @@ describe("discovered target adapter", () => {
   it("caps recommended max usdc at the centavo-scale ceiling", () => {
     expect(recommendedAuthorizationMaxUsdc("0.001125")).toBe("0.002125");
     expect(recommendedAuthorizationMaxUsdc("0.009")).toBe("0.01");
+  });
+
+  it("only pins Zapper when an explicit resource_url selector is passed", () => {
+    const autonomousEndpoint = "https://autonomous.example/x402/tx-details";
+    const selection = {
+      selection: {
+        primary: {
+          method: "GET" as const,
+          handshakeStatus: "live_402_ok",
+          resourceUrl: autonomousEndpoint,
+          quoteUsdc: "0.001",
+          quoteAtomic: "1000",
+          selectedPayTo: "0x1111111111111111111111111111111111111111",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          scoringRationale: ["price_atomic=1000"],
+        },
+        fallbacks: [
+          {
+            method: "POST" as const,
+            handshakeStatus: "live_402_ok",
+            resourceUrl: endpoint,
+            quoteUsdc: "0.001125",
+            quoteAtomic: "1125",
+            selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+            network: MAINNET_NETWORK,
+            asset: MAINNET_USDC_ADDRESS,
+            scoringRationale: ["price_atomic=1125"],
+          },
+        ],
+      },
+    };
+
+    const autonomous = adaptDiscoveredPrimaryToThinSettlementCandidate(
+      selection,
+      new Date("2026-06-20T00:00:00.000Z"),
+    );
+    expect(autonomous.ok).toBe(true);
+    if (!autonomous.ok) return;
+    expect(autonomous.candidate.endpoint).toBe(autonomousEndpoint);
+    expect(autonomous.candidate.provider).toBe("discovered_x402");
+
+    const pinned = adaptDiscoveredPrimaryToThinSettlementCandidate(
+      selection,
+      new Date("2026-06-20T00:00:00.000Z"),
+      { resourceUrl: endpoint },
+    );
+    expect(pinned.ok).toBe(true);
+    if (!pinned.ok) return;
+    expect(pinned.candidate).toMatchObject({
+      provider: "Zapper",
+      service_id: "zapper_tx_explainer",
+      endpoint,
+      method: "POST",
+      target_selection_audit: {
+        selected_resource_url: endpoint,
+        fallback_resource_urls: [autonomousEndpoint],
+      },
+    });
+  });
+
+  it("rejects GET-402 sellers that return 405 on settle POST and falls to the next fallback", async () => {
+    const getOnlyEndpoint = "https://get-only.example/x402/quote";
+    const postOkEndpoint = "https://post-ok.example/x402/settle";
+    const selection = {
+      selection: {
+        primary: {
+          method: "GET" as const,
+          handshakeStatus: "live_402_ok",
+          resourceUrl: getOnlyEndpoint,
+          quoteUsdc: "0.001",
+          quoteAtomic: "1000",
+          selectedPayTo: "0x1111111111111111111111111111111111111111",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          scoringRationale: ["handshake_get_402"],
+        },
+        fallbacks: [
+          {
+            method: "POST" as const,
+            handshakeStatus: "live_402_ok",
+            resourceUrl: postOkEndpoint,
+            quoteUsdc: "0.001125",
+            quoteAtomic: "1125",
+            selectedPayTo: "0x2222222222222222222222222222222222222222",
+            network: MAINNET_NETWORK,
+            asset: MAINNET_USDC_ADDRESS,
+            scoringRationale: ["handshake_post_402"],
+          },
+        ],
+      },
+    };
+
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      expect(containsX402PaymentHeader(init?.headers)).toBe(false);
+      if (url === getOnlyEndpoint && method === "GET") {
+        return new Response(JSON.stringify({ accepts: [] }), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === getOnlyEndpoint && method === "POST") {
+        return new Response("Method Not Allowed", { status: 405 });
+      }
+      if (url === postOkEndpoint && method === "POST") {
+        return new Response(JSON.stringify({ accepts: [] }), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await adaptDiscoveredTargetWithPaidMethodProbe(selection, {
+      thin: true,
+      fetchImpl,
+      now: new Date("2026-06-20T00:00:00.000Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.endpoint).toBe(postOkEndpoint);
+    expect(result.paidMethodProbe?.method).toBe(SETTLEMENT_PAID_HTTP_METHOD);
+    expect(result.paidMethodProbe?.httpStatus).toBe(402);
+    expect(result.rejectedCandidates).toEqual([
+      {
+        resourceUrl: getOnlyEndpoint,
+        reason: `${REJECTED_PAID_METHOD_NOT_HONORED}: settle POST ${getOnlyEndpoint} returned HTTP 405`,
+      },
+    ]);
+    expect(fetchImpl).toHaveBeenCalled();
+    const probedMethods = fetchImpl.mock.calls.map(
+      ([, init]) => (init as RequestInit | undefined)?.method ?? "GET",
+    );
+    expect(probedMethods.every((method) => method === "POST")).toBe(true);
   });
 });

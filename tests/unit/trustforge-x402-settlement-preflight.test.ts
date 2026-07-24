@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MAINNET_USDC_ADDRESS, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { MAINNET_BUYER_WALLET, SEPOLIA_TESTNET_BUYER_WALLET } from "../../tools/trustforge/network-config";
@@ -75,6 +75,23 @@ function writeCandidate(runDir: string, candidate: unknown): void {
   writeFileSync(join(runDir, "selected_candidate.json"), `${JSON.stringify(candidate, null, 2)}\n`, "utf8");
 }
 
+function writeTargetSelection(runDir: string, primaryUrl: string, fallbackUrls: readonly string[] = []): void {
+  writeFileSync(
+    join(runDir, "target_selection.json"),
+    `${JSON.stringify(
+      {
+        selection: {
+          primary: { resourceUrl: primaryUrl },
+          fallbacks: fallbackUrls.map((resourceUrl) => ({ resourceUrl })),
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
 function readerReturning(chainId: number): ChainStateReader {
   return async () => ({
     chainId,
@@ -129,6 +146,79 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
     expect(result.fresh_402_go).toBe(true);
     expect(result.buyer_private_key_present).toBe(false);
     expect(result.sepolia_buyer_private_key_present).toBe(false);
+    expectNoPayment(result);
+  });
+
+  it("mainnet preflight accepts a valid non-Zapper selected_candidate endpoint", async () => {
+    const runDir = makeRunDir();
+    const endpoint = "https://valid-provider.example/x402/tx-details";
+    writeCandidate(
+      runDir,
+      mainnetCandidate({
+        provider: "discovered_x402",
+        service_id: "valid_provider_example_x402_tx_details",
+        endpoint,
+        method: "GET",
+        target_selection_audit: {
+          selected_resource_url: endpoint,
+          handshake_status: "live_402_ok",
+          fallback_resource_urls: [],
+          scoring_rationale: ["price_atomic=1125"],
+        },
+      }),
+    );
+    const fetchImpl = vi.fn(async (input, init) => {
+      expect(String(input)).toBe(endpoint);
+      expect(init?.method).toBe("GET");
+      return new Response(
+        JSON.stringify({
+          x402Version: 2,
+          accepts: [
+            {
+              scheme: "exact",
+              network: "eip155:8453",
+              asset: MAINNET_USDC_ADDRESS,
+              amount: "1125",
+              payTo: MAINNET_PAY_TO,
+              maxTimeoutSeconds: 300,
+            },
+          ],
+          nonce: "fresh-nonce",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+        { status: 402, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await runX402SettlementPreflight({
+      runDir,
+      network: "mainnet",
+      env: {},
+      now: NOW,
+      chainStateReader: readerReturning(8453),
+      fetchImpl,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.endpoint).toBe(endpoint);
+    expect(result.fresh_402_go).toBe(true);
+    expectNoPayment(result);
+  });
+
+  it("selected_candidate may come from target_selection fallback after explicit adapt selector", async () => {
+    const runDir = makeRunDir();
+    const autonomousEndpoint = "https://autonomous.example/x402/tx-details";
+    writeTargetSelection(runDir, autonomousEndpoint, [ZAPPER_TX_EXPLAINER_POLICY.endpointUrl]);
+    writeCandidate(runDir, mainnetCandidate());
+    const result = await runX402SettlementPreflight({
+      runDir,
+      network: "mainnet",
+      env: {},
+      now: NOW,
+      chainStateReader: readerReturning(8453),
+      freshness: freshGo,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.candidate_belongs_to_run).toBe(true);
     expectNoPayment(result);
   });
 
@@ -210,16 +300,29 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
     expectNoPayment(result);
   });
 
-  it("altered endpoint blocks with BLOCKED_402_ENDPOINT_MISMATCH", async () => {
+  it("fresh 402 endpoint mismatch blocks with BLOCKED_402_ENDPOINT_MISMATCH", async () => {
     const runDir = makeRunDir();
-    writeCandidate(runDir, mainnetCandidate({ endpoint: "https://evil.example/x402/transaction-details" }));
+    const endpoint = "https://candidate.example/x402/transaction-details";
+    writeCandidate(
+      runDir,
+      mainnetCandidate({
+        provider: "discovered_x402",
+        service_id: "candidate_example_x402_transaction_details",
+        endpoint,
+        method: "GET",
+      }),
+    );
     const result = await runX402SettlementPreflight({
       runDir,
       network: "mainnet",
       env: {},
       now: NOW,
       chainStateReader: readerReturning(8453),
-      freshness: freshGo,
+      freshness: async (quote) => ({
+        go: false,
+        reasons: [`endpoint mismatch fresh=https://fresh.example/x402 authorized=${quote.endpoint}`],
+        outcome: null,
+      }),
     });
     expect(result.blocker).toBe("BLOCKED_402_ENDPOINT_MISMATCH");
     expectNoPayment(result);
