@@ -20,9 +20,10 @@ async function main(): Promise<number> {
   const outputArg = process.argv.indexOf("--output");
   const resourceUrlArg = process.argv.indexOf("--resource-url");
   const thin = process.argv.includes("--thin");
+  const pinWithFallback = process.argv.includes("--pin-with-fallback");
   if (inputArg < 0 || outputArg < 0) {
     console.error(
-      "Usage: tsx tools/run-trustforge-adapt-discovered-target.ts --target-selection <path> --output <path> [--thin] [--resource-url <url>]",
+      "Usage: tsx tools/run-trustforge-adapt-discovered-target.ts --target-selection <path> --output <path> [--thin] [--resource-url <url>] [--pin-with-fallback]",
     );
     return 1;
   }
@@ -39,6 +40,7 @@ async function main(): Promise<number> {
   const adapted = await adaptDiscoveredTargetWithPaidMethodProbe(parsed, {
     thin,
     resourceUrl,
+    pinWithFallback,
   });
   if (!adapted.ok) {
     console.error(`ADAPT_REJECTED: ${adapted.reason}`);

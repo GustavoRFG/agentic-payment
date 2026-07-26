@@ -18,8 +18,11 @@ import {
 import type { TargetSelectionAuditMetadata } from "./validate-human-payment-authorization";
 import type { TargetCandidate } from "./target-candidates";
 import {
+  isMethodSupportedByThinRunner,
   probePaidMethodHonored,
+  REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
   REJECTED_PAID_METHOD_NOT_HONORED,
+  SETTLEMENT_PAID_HTTP_METHOD,
   type PaidMethodHonoredProbeResult,
 } from "./paid-method-honored-probe";
 import {
@@ -99,6 +102,17 @@ export interface DiscoveredTargetLiveAdaptOptions extends DiscoveredTargetAdaptO
   readonly skipPaidMethodProbe?: boolean;
   /** Override the evidence-backed provider blocklist (defaults to the versioned config). */
   readonly providerBlocklist?: ProviderBlocklist;
+  /**
+   * When a pin (`resourceUrl`) is excluded, fall through to the ranking in the same
+   * execution instead of failing. Without it, a pin is honored strictly: the pin
+   * alone is tried and an exclusion is terminal.
+   */
+  readonly pinWithFallback?: boolean;
+}
+
+export interface MethodMismatchEvidence {
+  readonly catalog_method: string;
+  readonly thin_runner_method: string;
 }
 
 export interface DiscoveredTargetAdaptRejection {
@@ -107,7 +121,80 @@ export interface DiscoveredTargetAdaptRejection {
   readonly evidence?: {
     readonly quote_stability?: QuoteStabilityEvidence;
     readonly blocklist?: ProviderBlocklistEntry;
+    readonly method?: MethodMismatchEvidence;
   };
+}
+
+/** Honest reason a pinned candidate cannot be selected — matched against the fresh selection, not the catalog. */
+export const PIN_EXCLUDED_NOT_IN_FRESH_DISCOVERY = "EXCLUDED_NOT_IN_FRESH_DISCOVERY";
+export const PIN_EXCLUDED_HANDSHAKE_MALFORMED = "EXCLUDED_HANDSHAKE_MALFORMED";
+
+function handshakeIsWellFormed(candidate: DiscoveredTargetSelectionFallback): boolean {
+  return (
+    candidate.handshakeStatus === "live_402_ok" &&
+    Boolean(candidate.quoteUsdc?.trim()) &&
+    Boolean(candidate.quoteAtomic?.trim()) &&
+    Boolean(candidate.selectedPayTo?.trim())
+  );
+}
+
+export type PinResolution =
+  | { readonly ok: true; readonly candidate: DiscoveredTargetSelectionFallback }
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      readonly evidence?: DiscoveredTargetAdaptRejection["evidence"];
+    };
+
+/**
+ * Resolve a pin (resource_url) against the fresh discovery selection with a reason
+ * that names the real cause: not present in fresh discovery, blocklisted, catalog
+ * method unsupported by the thin runner, or a malformed handshake.
+ */
+export function resolvePinnedCandidate(
+  freshDiscovery: readonly DiscoveredTargetSelectionFallback[],
+  pinUrl: string,
+  blocklist: ProviderBlocklist,
+): PinResolution {
+  const candidate = freshDiscovery.find((entry) => entry.resourceUrl === pinUrl);
+  if (!candidate) {
+    return {
+      ok: false,
+      reason: `${PIN_EXCLUDED_NOT_IN_FRESH_DISCOVERY}: ${pinUrl} not among the fresh target_selection candidates`,
+    };
+  }
+  const blocklistEntry = blocklist.entries.find((entry) => {
+    const domain = entry.domain.toLowerCase();
+    try {
+      const host = new URL(candidate.resourceUrl).hostname.toLowerCase();
+      return host === domain || host.endsWith(`.${domain}`);
+    } catch {
+      return false;
+    }
+  });
+  if (blocklistEntry) {
+    return {
+      ok: false,
+      reason: blocklistSkipReason(blocklistEntry),
+      evidence: { blocklist: blocklistEntry },
+    };
+  }
+  if (!isMethodSupportedByThinRunner(candidate.method)) {
+    return {
+      ok: false,
+      reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method ${candidate.method} != ${SETTLEMENT_PAID_HTTP_METHOD}`,
+      evidence: {
+        method: { catalog_method: String(candidate.method), thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD },
+      },
+    };
+  }
+  if (!handshakeIsWellFormed(candidate)) {
+    return {
+      ok: false,
+      reason: `${PIN_EXCLUDED_HANDSHAKE_MALFORMED}: ${pinUrl} handshakeStatus=${candidate.handshakeStatus}`,
+    };
+  }
+  return { ok: true, candidate };
 }
 
 export type DiscoveredTargetLiveAdaptResult =
@@ -363,19 +450,9 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     ? adaptDiscoveredPrimaryToThinSettlementCandidate
     : adaptDiscoveredPrimaryToSelectedCandidate;
 
-  const explicitResourceUrl = options.resourceUrl?.trim();
-  if (explicitResourceUrl) {
-    const resolved = resolveAdaptSelection(input, { resourceUrl: explicitResourceUrl });
-    if (!resolved.ok) {
-      return {
-        ok: false,
-        reason: resolved.reason,
-        paidMethodProbe: null,
-        quoteStability: null,
-        rejectedCandidates: [],
-      };
-    }
-  } else if (!input.selection.primary) {
+  const pin = options.resourceUrl?.trim();
+  const freshDiscovery = rankedAdaptCandidates(input, {});
+  if (freshDiscovery.length === 0) {
     return {
       ok: false,
       reason: "selection.primary is null",
@@ -385,27 +462,41 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     };
   }
 
-  const rankedRaw = rankedAdaptCandidates(input, options);
-  if (rankedRaw.length === 0) {
-    return {
-      ok: false,
-      reason: explicitResourceUrl
-        ? `resource_url not found in live target_selection candidates: ${explicitResourceUrl}`
-        : "selection.primary is null",
-      paidMethodProbe: null,
-      quoteStability: null,
-      rejectedCandidates: [],
-    };
+  const rejectedCandidates: DiscoveredTargetAdaptRejection[] = [];
+  const blocklist = options.providerBlocklist ?? loadProviderBlocklist();
+
+  // A pin (resource_url) is matched against the fresh selection, not the catalog.
+  // Without --pin-with-fallback the pin is strict: its exclusion is terminal and
+  // names the real cause (not-in-fresh-discovery / blocklisted / method-unsupported /
+  // handshake-malformed). With fallback, an excluded pin drops to the ranking.
+  let ordered: DiscoveredTargetSelectionFallback[];
+  if (pin) {
+    const resolution = resolvePinnedCandidate(freshDiscovery, pin, blocklist);
+    if (resolution.ok) {
+      ordered = options.pinWithFallback
+        ? [resolution.candidate, ...freshDiscovery.filter((entry) => entry.resourceUrl !== pin)]
+        : [resolution.candidate];
+    } else {
+      rejectedCandidates.push({ resourceUrl: pin, reason: resolution.reason, evidence: resolution.evidence });
+      if (!options.pinWithFallback) {
+        return {
+          ok: false,
+          reason: resolution.reason,
+          paidMethodProbe: null,
+          quoteStability: null,
+          rejectedCandidates,
+        };
+      }
+      ordered = freshDiscovery.filter((entry) => entry.resourceUrl !== pin);
+    }
+  } else {
+    ordered = freshDiscovery;
   }
 
-  const rejectedCandidates: DiscoveredTargetAdaptRejection[] = [];
-
-  // Drop blocklisted provider domains before ranking is acted upon: they are
-  // never probed and never reach a selected candidate. Each drop is recorded as
-  // SKIPPED_BLOCKLISTED evidence. Removal from the blocklist is a human decision.
-  const blocklist = options.providerBlocklist ?? loadProviderBlocklist();
-  const { allowed: ranked, skipped } = partitionByBlocklist(
-    rankedRaw,
+  // Drop blocklisted provider domains before ranking is acted upon: never probed,
+  // never selected. Each recorded as SKIPPED_BLOCKLISTED. Removal is a human decision.
+  const { allowed: afterBlocklist, skipped } = partitionByBlocklist(
+    ordered,
     blocklist,
     (candidate) => candidate.resourceUrl,
   );
@@ -416,10 +507,34 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       evidence: { blocklist: skip.entry },
     });
   }
+
+  // Method-awareness (root of the observed 405s): the thin runner POSTs
+  // unconditionally, so reject any candidate whose catalog method != POST up front
+  // instead of wasting a keyless settle-method probe on it.
+  const ranked: DiscoveredTargetSelectionFallback[] = [];
+  for (const candidate of afterBlocklist) {
+    if (!isMethodSupportedByThinRunner(candidate.method)) {
+      rejectedCandidates.push({
+        resourceUrl: candidate.resourceUrl,
+        reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method ${candidate.method} != ${SETTLEMENT_PAID_HTTP_METHOD}`,
+        evidence: {
+          method: {
+            catalog_method: String(candidate.method),
+            thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD,
+          },
+        },
+      });
+      continue;
+    }
+    ranked.push(candidate);
+  }
+
   if (ranked.length === 0) {
     return {
       ok: false,
-      reason: `no adaptable candidate remained after provider blocklist exclusion (${skipped.length} skipped)`,
+      reason:
+        rejectedCandidates[rejectedCandidates.length - 1]?.reason ??
+        "no adaptable candidate remained after blocklist and method-awareness exclusion",
       paidMethodProbe: null,
       quoteStability: null,
       rejectedCandidates,

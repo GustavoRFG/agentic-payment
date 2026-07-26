@@ -19,6 +19,12 @@ export interface ProviderBlocklistEntry {
   readonly reason: string;
   readonly evidence_runs: readonly string[];
   readonly added_at: string;
+  /**
+   * Optional note when the original evidence has been reinterpreted (e.g. a 405
+   * traced to our own POST-to-GET mismatch rather than a seller defect). The entry
+   * is kept until the root cause is addressed; removal remains a human decision.
+   */
+  readonly reinterpretation?: string;
 }
 
 export interface ProviderBlocklist {

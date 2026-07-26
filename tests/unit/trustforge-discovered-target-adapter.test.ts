@@ -7,6 +7,7 @@ import {
   recommendedAuthorizationMaxUsdc,
 } from "../../tools/trustforge/discovered-target-to-selected-candidate";
 import {
+  REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
   REJECTED_PAID_METHOD_NOT_HONORED,
   SETTLEMENT_PAID_HTTP_METHOD,
 } from "../../tools/trustforge/paid-method-honored-probe";
@@ -160,7 +161,7 @@ describe("discovered target adapter", () => {
     });
   });
 
-  it("rejects GET-402 sellers that return 405 on settle POST and falls to the next fallback", async () => {
+  it("rejects a GET catalog-method candidate before probing (method-unsupported) and falls to the POST fallback", async () => {
     const getOnlyEndpoint = "https://get-only.example/x402/quote";
     const postOkEndpoint = "https://post-ok.example/x402/settle";
     const selection = {
@@ -223,17 +224,23 @@ describe("discovered target adapter", () => {
       first_max_amount_required_atomic: "1125",
       second_max_amount_required_atomic: "1125",
     });
+    // The GET candidate is excluded up front by catalog method — never probed.
     expect(result.rejectedCandidates).toEqual([
       {
         resourceUrl: getOnlyEndpoint,
-        reason: `${REJECTED_PAID_METHOD_NOT_HONORED}: settle POST ${getOnlyEndpoint} returned HTTP 405`,
+        reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method GET != ${SETTLEMENT_PAID_HTTP_METHOD}`,
+        evidence: {
+          method: { catalog_method: "GET", thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD },
+        },
       },
     ]);
+    const contactedGetOnly = fetchImpl.mock.calls.some(([url]) => String(url) === getOnlyEndpoint);
+    expect(contactedGetOnly).toBe(false);
     const probedMethods = fetchImpl.mock.calls.map(
       ([, init]) => (init as RequestInit | undefined)?.method ?? "GET",
     );
     expect(probedMethods.every((method) => method === "POST")).toBe(true);
-    // method probe + second 402 for the accepted fallback
+    // method probe + second 402 for the accepted fallback only
     expect(fetchImpl.mock.calls.filter(([url]) => String(url) === postOkEndpoint)).toHaveLength(2);
   });
 

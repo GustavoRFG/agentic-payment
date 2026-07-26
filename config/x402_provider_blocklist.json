@@ -7,7 +7,8 @@
       "domain": "api.onesource.io",
       "reason": "PAID_REQUEST_405_AFTER_KEYLESS_402_OK",
       "evidence_runs": ["run_20260723_153238", "run_20260724_005838"],
-      "added_at": "2026-07-24T00:00:00Z"
+      "added_at": "2026-07-24T00:00:00Z",
+      "reinterpretation": "2026-07-25: the 405 was our own POST-to-GET mismatch (the thin runner POSTs unconditionally while this candidate's catalog method is GET), not a seller defect. Kept as a blocklist entry until a method-aware executor (spec A.2) ships; once settle honors the catalog method, re-evaluate with fresh evidence. Removal remains a human decision."
     }
   ]
 }

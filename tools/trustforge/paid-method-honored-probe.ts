@@ -17,11 +17,24 @@ export const PAID_METHOD_NOT_HONORED_HTTP_STATUSES = new Set([404, 405, 501]);
 
 export const REJECTED_PAID_METHOD_NOT_HONORED = "REJECTED_PAID_METHOD_NOT_HONORED";
 
+/** Catalog method the thin runner cannot settle: it POSTs unconditionally (executor untouched). */
+export const REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER = "REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER";
+
 /**
  * Method the thin/x402 settlement path actually sends (executor left untouched).
  * Kept here as a constant so adapt can stay aligned without importing the executor.
  */
 export const SETTLEMENT_PAID_HTTP_METHOD = "POST" as const;
+
+/**
+ * Whether the thin runner can settle a candidate declaring `method`. It sends POST
+ * unconditionally, so a catalog method other than POST would settle to the wrong verb
+ * (the root of the observed 405s). An absent/unknown method is treated as supported —
+ * the keyless settle-method probe still gates it at request time.
+ */
+export function isMethodSupportedByThinRunner(method: string | null | undefined): boolean {
+  return !method || method.toUpperCase() === SETTLEMENT_PAID_HTTP_METHOD;
+}
 
 export interface PaidMethodHonoredProbeResult {
   readonly honored: boolean;

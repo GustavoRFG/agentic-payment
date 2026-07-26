@@ -138,18 +138,19 @@ describe("adapt excludes blocklisted domains before ranking", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.candidate.endpoint).toBe(cleanEndpoint);
-    expect(result.rejectedCandidates).toContainEqual({
-      resourceUrl: blocklistedEndpoint,
-      reason: `${SKIPPED_BLOCKLISTED}: api.onesource.io (PAID_REQUEST_405_AFTER_KEYLESS_402_OK)`,
-      evidence: {
-        blocklist: {
-          domain: "api.onesource.io",
-          reason: "PAID_REQUEST_405_AFTER_KEYLESS_402_OK",
-          evidence_runs: ["run_20260723_153238", "run_20260724_005838"],
-          added_at: "2026-07-24T00:00:00Z",
-        },
-      },
+    const onesourceRejection = result.rejectedCandidates.find(
+      (r) => r.resourceUrl === blocklistedEndpoint,
+    );
+    expect(onesourceRejection?.reason).toBe(
+      `${SKIPPED_BLOCKLISTED}: api.onesource.io (PAID_REQUEST_405_AFTER_KEYLESS_402_OK)`,
+    );
+    expect(onesourceRejection?.evidence?.blocklist).toMatchObject({
+      domain: "api.onesource.io",
+      reason: "PAID_REQUEST_405_AFTER_KEYLESS_402_OK",
+      evidence_runs: ["run_20260723_153238", "run_20260724_005838"],
     });
+    // A.3: the reinterpretation note ships with the entry.
+    expect(onesourceRejection?.evidence?.blocklist?.reinterpretation).toContain("POST-to-GET");
     const contactedOnesource = fetchImpl.mock.calls.some(([url]) =>
       String(url).startsWith("https://api.onesource.io"),
     );
@@ -175,7 +176,8 @@ describe("adapt excludes blocklisted domains before ranking", () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("provider blocklist");
+    // Honest per-cause reason (the last real exclusion), not a generic phrase.
+    expect(result.reason).toContain(SKIPPED_BLOCKLISTED);
     expect(result.rejectedCandidates).toHaveLength(2);
     expect(result.rejectedCandidates.every((r) => r.reason.startsWith(SKIPPED_BLOCKLISTED))).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
