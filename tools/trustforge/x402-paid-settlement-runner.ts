@@ -14,8 +14,11 @@ import { hashAuthorizationContent, parseJsonText, readJsonFile } from "./bom-saf
 export async function runX402PaidSettlement(input: {
   readonly runDir: string;
   readonly profile: X402SettlementProfile;
+  /** Injection seam for tests; defaults to the real (untouched) thin executor. */
+  readonly executeImpl?: typeof executeThinX402Settlement;
 }): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
   const { runDir, profile } = input;
+  const executeThin = input.executeImpl ?? executeThinX402Settlement;
   const authPath = join(runDir, "human_payment_authorization.json");
   const selectedPath = join(runDir, "selected_candidate.json");
   if (!existsSync(authPath)) {
@@ -40,13 +43,43 @@ export async function runX402PaidSettlement(input: {
     balanceBeforeUsdc = preflight.balances?.usdcBalance ?? balanceBeforeUsdc;
   }
 
-  const result = await executeThinX402Settlement({
-    profile,
-    runDir,
-    auth,
-    selected,
-    authorizationHash,
-  });
+  let result: Awaited<ReturnType<typeof executeThinX402Settlement>>;
+  try {
+    result = await executeThin({
+      profile,
+      runDir,
+      auth,
+      selected,
+      authorizationHash,
+    });
+  } catch (error) {
+    // The executor fails closed by throwing structured BLOCKED_* blockers (e.g.
+    // BLOCKED_PAY_TIME_FRESHNESS). The runner — not the executor — captures those
+    // and emits a structured RESULT, same pattern as classify, instead of letting
+    // a raw stack trace escape. Non-BLOCKED errors are genuinely unexpected: re-throw.
+    const message = error instanceof Error ? error.message : String(error);
+    const match = /^(BLOCKED_[A-Z0-9_]+)\s*:?\s*(.*)$/s.exec(message);
+    if (!match) throw error;
+    const blocker = match[1]!;
+    const detail = match[2]?.trim() || "no detail";
+    const lines = [
+      "RESULT",
+      `x402_settlement_execution_status: ${blocker}`,
+      `network_profile: ${profile.id}`,
+      `run_dir: ${runDir}`,
+      `endpoint: ${selected.endpoint}`,
+      "payment_attempted: no",
+      "payment_bearing_http_request_count: 0",
+      `blocked_reason: ${blocker}`,
+      `blocked_detail: ${detail}`,
+      `authorization_hash: ${authorizationHash}`,
+      "single_shot: yes",
+      "NEXT",
+      "Resolve the blocker (re-quote / re-authorize with a fresh pay-time window); do not retry payment without new authorization.",
+    ];
+    await writeFile(join(runDir, "settlement_probe", "RESULT.txt"), `${lines.join("\n")}\n`, "utf8");
+    return { exitCode: 1, lines };
+  }
 
   const record = {
     ...result,
