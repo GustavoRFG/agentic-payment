@@ -15,6 +15,7 @@ import urllib.error
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "trustforge"))
 
+import onchain_settlement_reconciliation as osr  # noqa: E402
 from onchain_settlement_reconciliation import (  # noqa: E402
     BASE_CHAIN_ID,
     BUYER_WALLET,
@@ -544,3 +545,83 @@ def test_ledger_persisted_when_all_rpcs_fail(monkeypatch, tmp_path):
     )
     assert (tmp_path / "onchain_settlement_ledger.json").exists()
     assert ledger.safe_to_use_for_payment_verification is False
+
+
+# --- Reconciler crash-guard: no path exits without a ledger --------------------
+
+
+def test_call_sends_custom_user_agent(monkeypatch):
+    seen = {}
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        seen["ua"] = req.get_header("User-agent")
+        return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(123)})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    JsonRpcClient("https://mainnet.base.org", max_attempts=1).block_number()
+    # A custom UA (not the default python-urllib) — the public RPC 403s the default.
+    assert seen["ua"] and "python-urllib" not in seen["ua"].lower()
+    assert "trustforge" in seen["ua"].lower()
+
+
+def test_classify_rpc_error_maps_4xx_to_forbidden():
+    for code in (400, 401, 403, 404, 451):
+        assert classify_rpc_error(urllib.error.HTTPError("u", code, "", {}, None)) == (
+            RECONCILIATION_RPC_FORBIDDEN
+        )
+    # 429 stays a distinct rate-limit; 5xx stays a generic outage.
+    assert classify_rpc_error(urllib.error.HTTPError("u", 429, "", {}, None)) == (
+        RECONCILIATION_RPC_RATE_LIMITED
+    )
+    assert classify_rpc_error(urllib.error.HTTPError("u", 500, "", {}, None)) == (
+        RECONCILIATION_RPC_UNAVAILABLE
+    )
+
+
+def test_settle_at_window_derivation_failure_persists_structured_ledger(monkeypatch, tmp_path):
+    settle_iso = datetime.fromtimestamp(1_700_004_000, tz=timezone.utc).isoformat()
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        method = json.loads(req.data.decode("utf-8"))["method"]
+        if method == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if method == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(5000)})
+        if method == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        if method == "eth_getBlockByNumber":
+            # The RPC rejects the binary-search calls (the D.1 unprotected region).
+            raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+        raise AssertionError(method)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    # Must NOT raise — the widened guard turns the crash into a structured ledger.
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://mainnet.base.org", fallback_urls=[], max_attempts_per_endpoint=1
+        ),
+        window=2000,
+        settlement_expectation=SettlementExpectation(
+            pay_to="0x" + "1" * 40, amount_usdc="0.001", settled_at_utc=settle_iso
+        ),
+        output_dir=tmp_path,
+    )
+    assert ledger.reconciliation_status == RECONCILIATION_RPC_FORBIDDEN
+    assert ledger.safe_to_use_for_payment_verification is False
+    assert ledger.settle_at_utc == settle_iso  # entered the settle_at branch
+    assert ledger.error_detail_full
+    assert (tmp_path / "onchain_settlement_ledger.json").exists()
+
+
+def test_main_catch_all_persists_ledger_if_run_reconciliation_raises(monkeypatch, tmp_path):
+    def boom(**kwargs):  # noqa: ARG001
+        raise RuntimeError("unexpected explosion before any ledger")
+
+    monkeypatch.setattr(osr, "run_reconciliation", boom)
+    code = osr.main(["--output-dir", str(tmp_path), "--network", "mainnet"])
+    assert code == 1
+    ledger_path = tmp_path / "onchain_settlement_ledger.json"
+    assert ledger_path.exists()
+    data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert data["safe_to_use_for_payment_verification"] is False
+    assert "unexpected explosion" in (data.get("reconciliation_detail") or "")

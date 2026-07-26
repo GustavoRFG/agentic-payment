@@ -251,10 +251,12 @@ def redact_rpc_url(url: str) -> str:
 
 def classify_rpc_error(exc: Exception) -> str:
     if isinstance(exc, urllib.error.HTTPError):
-        if exc.code == 403:
-            return RECONCILIATION_RPC_FORBIDDEN
         if exc.code == 429:
             return RECONCILIATION_RPC_RATE_LIMITED
+        # Any other 4xx from the RPC (403 UA rejection being the confirmed case) is a
+        # structured "the RPC refused us", not a generic outage.
+        if 400 <= exc.code < 500:
+            return RECONCILIATION_RPC_FORBIDDEN
         return RECONCILIATION_RPC_UNAVAILABLE
     if isinstance(exc, socket.timeout):
         return RECONCILIATION_RPC_UNAVAILABLE
@@ -858,30 +860,34 @@ def run_reconciliation(
         timeout_sec=max(1, cfg.timeout_ms // 1000),
         max_attempts=cfg.max_attempts_per_endpoint,
     )
-    latest_head = client.block_number()
-    settled_at = settlement_expectation.settled_at_utc if settlement_expectation else None
-    if settled_at:
-        result.settle_at_utc = settled_at
-        try:
-            target_epoch = int(
-                datetime.fromisoformat(settled_at.replace("Z", "+00:00")).timestamp()
-            )
-            settle_block = client.find_block_at_or_before_epoch(target_epoch, latest_head)
-            from_block = max(0, settle_block - SETTLE_WINDOW_LOOKBACK_BLOCKS)
-            to_block = min(latest_head, settle_block + SETTLE_WINDOW_LOOKAHEAD_BLOCKS)
-            result.block_window_source = "settle_at"
-        except (ValueError, OverflowError):
-            # Unparseable settle_at: fall back to the broad sweep rather than crash.
+    # The RPC-touching window derivation (block_number + settle_at binary search)
+    # lives INSIDE the try so any failure here — a 403/429/timeout from the RPC
+    # during the binary search — becomes a structured, persisted ledger instead of
+    # an unhandled crash. This is the D.1 gap that broke the D.2 no-crash contract.
+    try:
+        latest_head = client.block_number()
+        settled_at = settlement_expectation.settled_at_utc if settlement_expectation else None
+        if settled_at:
+            result.settle_at_utc = settled_at
+            try:
+                target_epoch = int(
+                    datetime.fromisoformat(settled_at.replace("Z", "+00:00")).timestamp()
+                )
+                settle_block = client.find_block_at_or_before_epoch(target_epoch, latest_head)
+                from_block = max(0, settle_block - SETTLE_WINDOW_LOOKBACK_BLOCKS)
+                to_block = min(latest_head, settle_block + SETTLE_WINDOW_LOOKAHEAD_BLOCKS)
+                result.block_window_source = "settle_at"
+            except (ValueError, OverflowError):
+                # Unparseable settle_at: fall back to the broad sweep rather than crash.
+                from_block = resolve_from_block(client, prof, to_block=latest_head)
+                to_block = latest_head
+                result.block_window_source = "broad_sweep_settle_at_unparseable"
+        else:
             from_block = resolve_from_block(client, prof, to_block=latest_head)
             to_block = latest_head
-            result.block_window_source = "broad_sweep_settle_at_unparseable"
-    else:
-        from_block = resolve_from_block(client, prof, to_block=latest_head)
-        to_block = latest_head
-    result.scanned_from_block = from_block
-    result.scanned_to_block = to_block
+        result.scanned_from_block = from_block
+        result.scanned_to_block = to_block
 
-    try:
         outflows, windows_scanned = scan_transfers(
             client,
             from_block,
@@ -1158,14 +1164,27 @@ def main(argv: list[str] | None = None) -> int:
         subdir = "onchain-reconciliation-sepolia" if prof.network_id == "sepolia" else "onchain-reconciliation"
         out = Path(r"D:\trustforge\artifacts\runs") / subdir / f"run_{stamp}"
 
-    ledger = run_reconciliation(
-        output_dir=out,
-        window=args.window,
-        profile=prof,
-        settlement_expectation=settlement,
-        config=cfg,
-        max_total_runtime_seconds=args.max_total_runtime_seconds,
-    )
+    # Catch-all backstop: no reconciliation path may exit without a ledger. Even if
+    # run_reconciliation raises for a reason it did not handle internally (a region
+    # not yet wrapped, an error before the client exists), persist a structured,
+    # fail-closed ledger with the real cause before returning.
+    try:
+        ledger = run_reconciliation(
+            output_dir=out,
+            window=args.window,
+            profile=prof,
+            settlement_expectation=settlement,
+            config=cfg,
+            max_total_runtime_seconds=args.max_total_runtime_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        ledger = ReconciliationResult(wallet=prof.wallet, usdc_contract=prof.usdc_contract, chain=prof.chain)
+        _apply_rpc_failure(
+            ledger, [], classify_rpc_error(exc), f"reconciliation crashed before writing a ledger: {exc}"
+        )
+        ledger.error_detail_full = _capture_error_detail(exc)
+        _persist_ledger(ledger, out)
+
     print(format_result(ledger, out / "onchain_settlement_ledger.json", out / "onchain_settlement_ledger.md"))
     return 0 if ledger.safe_to_use_for_payment_verification else 1
 
