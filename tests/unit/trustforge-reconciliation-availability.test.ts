@@ -51,15 +51,20 @@ describe("reconciliation availability — structured ledgers", () => {
   });
 
   it("builds a fail-closed subprocess-failed ledger naming the real cause", () => {
+    const fullStderr =
+      "Traceback (most recent call last):\n  File x, line 1\nurllib.error.HTTPError: HTTP Error 403: Forbidden";
     const ledger = buildReconciliationSubprocessFailedLedger(
-      result({ exitCode: 1, signal: null, stderr: "Traceback (most recent call last):\nValueError: boom" }),
+      result({ exitCode: 1, signal: null, stderr: fullStderr }),
     );
     expect(ledger.reconciliation_status).toBe(RECONCILIATION_SUBPROCESS_FAILED);
     expect(ledger.safe_to_use_for_payment_verification).toBe(false);
     expect(ledger.error_class).toBe(RECONCILIATION_SUBPROCESS_FAILED);
     expect(ledger.reconciliation_detail).toContain("exit_code=1");
-    // The first non-empty stderr line is surfaced as the real cause.
+    // The first non-empty stderr line is the summary...
     expect(ledger.reconciliation_detail).toContain("Traceback");
+    // ...but the COMPLETE stderr is persisted so the real cause is recoverable.
+    expect(ledger.stderr_full).toBe(fullStderr);
+    expect(ledger.stderr_full).toContain("HTTP Error 403: Forbidden");
   });
 });
 

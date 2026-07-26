@@ -39,6 +39,8 @@ export interface UnavailableReconciliationLedger {
   readonly error_class: string;
   readonly reconciliation_detail: string;
   readonly settlements: readonly never[];
+  /** Complete subprocess stderr when the reconciler died without a ledger (not just the first line). */
+  readonly stderr_full?: string;
 }
 
 export function buildUnavailableReconciliationLedger(input: {
@@ -87,10 +89,15 @@ export function describeReconcileSubprocessFailure(result: BoundedReconcileResul
 export function buildReconciliationSubprocessFailedLedger(
   result: BoundedReconcileResult,
 ): UnavailableReconciliationLedger {
-  return buildUnavailableReconciliationLedger({
-    status: RECONCILIATION_SUBPROCESS_FAILED,
-    detail: describeReconcileSubprocessFailure(result),
-  });
+  return {
+    ...buildUnavailableReconciliationLedger({
+      status: RECONCILIATION_SUBPROCESS_FAILED,
+      detail: describeReconcileSubprocessFailure(result),
+    }),
+    // Persist the COMPLETE stderr, not just the first line, so the real cause is
+    // recoverable from the ledger when the reconciler dies before writing its own.
+    stderr_full: result.stderr ?? "",
+  };
 }
 
 export type ReconcileMaterialization =

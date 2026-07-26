@@ -21,7 +21,7 @@ async function main(): Promise<number> {
   const runArg = process.argv.indexOf("--run-dir");
   if (runArg < 0) {
     console.error(
-      "Usage: tsx tools/run-trustforge-x402-classify.ts --run-dir <path> [--network mainnet|sepolia] [--reuse-existing-ledger] [--rpc-request-timeout-seconds N] [--rpc-max-retries N] [--max-total-runtime-seconds N]",
+      "Usage: tsx tools/run-trustforge-x402-classify.ts --run-dir <path> [--network mainnet|sepolia] [--reuse-existing-ledger] [--fresh-reconcile] [--rpc-request-timeout-seconds N] [--rpc-max-retries N] [--max-total-runtime-seconds N]",
     );
     return 1;
   }
@@ -36,6 +36,7 @@ async function main(): Promise<number> {
     profile,
     repoRoot: REPO,
     reuseExistingLedger: process.argv.includes("--reuse-existing-ledger"),
+    freshReconcile: process.argv.includes("--fresh-reconcile"),
     rpcRequestTimeoutSeconds: Number.parseInt(readArg("--rpc-request-timeout-seconds", "20") ?? "20", 10),
     rpcMaxRetries: Number.parseInt(readArg("--rpc-max-retries", "2") ?? "2", 10),
     maxTotalRuntimeSeconds: Number.parseInt(readArg("--max-total-runtime-seconds", "180") ?? "180", 10),

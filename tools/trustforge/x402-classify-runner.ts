@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
 import {
@@ -33,6 +33,35 @@ export interface X402ClassifyOptions {
   readonly rpcRequestTimeoutSeconds?: number;
   readonly rpcMaxRetries?: number;
   readonly maxTotalRuntimeSeconds?: number;
+  /**
+   * Archive an existing unavailability ledger (safe_to_use_for_payment_verification:
+   * false) and re-reconcile, instead of silently reusing a blocked verdict.
+   */
+  readonly freshReconcile?: boolean;
+}
+
+/**
+ * If a ledger exists and its verdict is an unavailability one
+ * (safe_to_use_for_payment_verification === false), rename it aside with a
+ * timestamped `.stale_blocked_<stamp>` suffix (never deleted) so a fresh
+ * reconciliation can run. A safe ledger is left untouched. Returns the archived
+ * path, or null when nothing was archived.
+ */
+export async function archiveStaleBlockedLedger(
+  ledgerPath: string,
+  stamp: string,
+): Promise<string | null> {
+  if (!existsSync(ledgerPath)) return null;
+  let existing: { safe_to_use_for_payment_verification?: boolean };
+  try {
+    existing = await readJsonFile<{ safe_to_use_for_payment_verification?: boolean }>(ledgerPath);
+  } catch {
+    return null;
+  }
+  if (existing.safe_to_use_for_payment_verification !== false) return null;
+  const archivedPath = `${ledgerPath}.stale_blocked_${stamp}`;
+  await rename(ledgerPath, archivedPath);
+  return archivedPath;
 }
 
 async function findSettlementIntent(runDir: string): Promise<SettlementIntent | null> {
@@ -83,6 +112,7 @@ export async function runX402Classify(options: X402ClassifyOptions): Promise<{
     rpcRequestTimeoutSeconds = 20,
     rpcMaxRetries = 2,
     maxTotalRuntimeSeconds = 180,
+    freshReconcile = false,
   } = options;
 
   const selected = await readJsonFile<DiscoveredSelectedCandidate>(
@@ -111,7 +141,15 @@ export async function runX402Classify(options: X402ClassifyOptions): Promise<{
   const ledgerPath = join(reconcileDir, "onchain_settlement_ledger.json");
   let reconcileTimedOut = false;
 
-  if (!reuseExistingLedger || !existsSync(ledgerPath)) {
+  // --fresh-reconcile: never silently reuse an unavailability verdict. Archive a
+  // blocked ledger aside (timestamped, never deleted) and re-reconcile.
+  if (freshReconcile) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const archived = await archiveStaleBlockedLedger(ledgerPath, stamp);
+    if (archived) console.log(`archived_stale_blocked_ledger: ${archived}`);
+  }
+
+  if (!reuseExistingLedger || freshReconcile || !existsSync(ledgerPath)) {
     const args = [
       "tools/run-onchain-settlement-reconciliation.py",
       ...buildX402ReconcileArgs(profile, selected, execution.balanceBeforeUsdc, {
