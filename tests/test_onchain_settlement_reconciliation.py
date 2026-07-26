@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -27,6 +28,8 @@ from onchain_settlement_reconciliation import (  # noqa: E402
     RECONCILIATION_UNATTRIBUTED_SETTLEMENTS,
     SEPOLIA_CHAIN_ID,
     SEPOLIA_PROFILE,
+    SETTLE_WINDOW_LOOKAHEAD_BLOCKS,
+    SETTLE_WINDOW_LOOKBACK_BLOCKS,
     SettlementExpectation,
     BaseRpcConfig,
     JsonRpcClient,
@@ -391,4 +394,153 @@ def test_global_deadline_returns_rpc_timeout(monkeypatch):
         RECONCILIATION_RPC_TIMEOUT,
         RECONCILIATION_INVALID_RESPONSE,
     }
+    assert ledger.safe_to_use_for_payment_verification is False
+
+
+# --- D.1: settle_at-derived block window ---------------------------------------
+
+
+def test_find_block_at_or_before_epoch_binary_search(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        if payload["method"] == "eth_getBlockByNumber":
+            block = int(payload["params"][0], 16)
+            # timestamp == 2 * block_number → deterministic inverse for the search
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": {"timestamp": hex(block * 2)}})
+        raise AssertionError(payload["method"])
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = JsonRpcClient("https://mainnet.base.org", max_attempts=1)
+    assert client.find_block_at_or_before_epoch(2 * 1234, 10_000) == 1234
+    assert client.find_block_at_or_before_epoch(2 * 1234 + 1, 10_000) == 1234  # floor
+    assert client.find_block_at_or_before_epoch(0, 10_000) == 0
+
+
+def test_settle_at_derives_tight_block_window(monkeypatch):
+    latest = 5000
+    settle_block = 2000
+    epoch_base = 1_700_000_000
+
+    def epoch_of(block: int) -> int:
+        return epoch_base + block * 2
+
+    settle_iso = datetime.fromtimestamp(epoch_of(settle_block), tz=timezone.utc).isoformat()
+
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        method = payload["method"]
+        if method == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if method == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(latest)})
+        if method == "eth_getBlockByNumber":
+            block = int(payload["params"][0], 16)
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": {"timestamp": hex(epoch_of(block))}})
+        if method == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        if method == "eth_call":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(51472)})
+        raise AssertionError(method)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://mainnet.base.org", fallback_urls=[], max_attempts_per_endpoint=1
+        ),
+        window=2000,
+        settlement_expectation=SettlementExpectation(
+            pay_to="0x" + "1" * 40, amount_usdc="0.001", settled_at_utc=settle_iso
+        ),
+    )
+    assert ledger.block_window_source == "settle_at"
+    assert ledger.settle_at_utc == settle_iso
+    assert ledger.scanned_from_block == settle_block - SETTLE_WINDOW_LOOKBACK_BLOCKS
+    assert ledger.scanned_to_block == settle_block + SETTLE_WINDOW_LOOKAHEAD_BLOCKS
+    # Tight window, not a genesis-to-head sweep.
+    assert ledger.scanned_to_block - ledger.scanned_from_block <= (
+        SETTLE_WINDOW_LOOKBACK_BLOCKS + SETTLE_WINDOW_LOOKAHEAD_BLOCKS
+    )
+    assert ledger.windows_scanned >= 1
+
+
+def test_broad_sweep_when_no_settle_at(monkeypatch):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        method = payload["method"]
+        if method == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if method == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(5000)})
+        if method == "eth_getTransactionByHash":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": {"blockNumber": hex(1000)}})
+        if method == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        if method == "eth_call":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(51472)})
+        raise AssertionError(method)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://mainnet.base.org", fallback_urls=[], max_attempts_per_endpoint=1
+        ),
+        window=5000,
+    )
+    assert ledger.block_window_source == "broad_sweep"
+    assert ledger.settle_at_utc is None
+
+
+# --- D.2: partial ledger persistence + full stderr -----------------------------
+
+
+def test_partial_ledger_persisted_on_scan_exception(monkeypatch, tmp_path):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        payload = json.loads(req.data.decode("utf-8"))
+        method = payload["method"]
+        if method == "eth_chainId":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(BASE_CHAIN_ID)})
+        if method == "eth_blockNumber":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": hex(5000)})
+        if method == "eth_getTransactionByHash":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": {"blockNumber": hex(1000)}})
+        if method == "eth_getLogs":
+            return _rpc_response({"jsonrpc": "2.0", "id": 1, "result": []})
+        if method == "eth_call":
+            # Fails AFTER the outflow/inflow sweep completed → partial verdict.
+            raise urllib.error.HTTPError(req.full_url, 500, "err", {}, None)
+        raise AssertionError(method)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://mainnet.base.org", fallback_urls=[], max_attempts_per_endpoint=1
+        ),
+        window=5000,
+        output_dir=tmp_path,
+    )
+    assert ledger.partial_ledger is True
+    assert ledger.windows_scanned > 0
+    # Full stderr is captured (real traceback normally; a safe summary if formatting
+    # the exception itself would throw). Either way it names the failure.
+    assert ledger.error_detail_full is not None and "500" in ledger.error_detail_full
+    assert ledger.safe_to_use_for_payment_verification is False
+    ledger_path = tmp_path / "onchain_settlement_ledger.json"
+    assert ledger_path.exists()
+    data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert data["partial_ledger"] is True
+    assert data["error_detail_full"]
+
+
+def test_ledger_persisted_when_all_rpcs_fail(monkeypatch, tmp_path):
+    def fake_urlopen(req, timeout=30):  # noqa: ARG001
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ledger = run_reconciliation(
+        config=BaseRpcConfig(
+            primary_url="https://bad.example/rpc", fallback_urls=[], max_attempts_per_endpoint=1
+        ),
+        output_dir=tmp_path,
+    )
+    assert (tmp_path / "onchain_settlement_ledger.json").exists()
     assert ledger.safe_to_use_for_payment_verification is False

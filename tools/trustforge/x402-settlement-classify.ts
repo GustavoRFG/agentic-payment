@@ -193,6 +193,8 @@ export function buildX402ReconcileArgs(
     readonly rpcRequestTimeoutSeconds?: number;
     readonly rpcMaxRetries?: number;
     readonly maxTotalRuntimeSeconds?: number;
+    /** Settlement timestamp (ISO8601 UTC): derives a tight block window vs a broad sweep. */
+    readonly settledAtUtc?: string;
   },
 ): string[] {
   const args = [
@@ -207,6 +209,9 @@ export function buildX402ReconcileArgs(
   ];
   if (balanceBeforeUsdc) {
     args.push("--balance-before-usdc", balanceBeforeUsdc);
+  }
+  if (rpcOptions?.settledAtUtc) {
+    args.push("--settle-at", rpcOptions.settledAtUtc);
   }
   if (rpcOptions?.rpcRequestTimeoutSeconds !== undefined) {
     args.push("--rpc-request-timeout-seconds", String(rpcOptions.rpcRequestTimeoutSeconds));

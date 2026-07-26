@@ -14,6 +14,7 @@ import os
 import socket
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,6 +49,10 @@ MAX_ATTEMPTS_PER_ENDPOINT = 1
 RPC_TIMEOUT_SEC = 30
 DEFAULT_WINDOW = 2000
 PROBE_WINDOW = 50
+# When a settle_at timestamp is known, scan a tight block window around it instead
+# of the broad sweep from genesis-ish to head (Base ~2s blocks).
+SETTLE_WINDOW_LOOKBACK_BLOCKS = 300  # ~10 min of clock-skew tolerance before settle_at
+SETTLE_WINDOW_LOOKAHEAD_BLOCKS = 1800  # ~60 min after settle_at for the settlement to confirm
 
 RECONCILIATION_PASS = "RECONCILIATION_PASS"
 RECONCILIATION_NO_NEW_SETTLEMENT = "RECONCILIATION_NO_NEW_SETTLEMENT"
@@ -149,6 +154,7 @@ class SettlementExpectation:
     amount_usdc: str
     amount_atomic: str | None = None
     balance_before_usdc: str | None = None
+    settled_at_utc: str | None = None
 
 
 @dataclass
@@ -226,8 +232,12 @@ class ReconciliationResult:
     reconciliation_detail: str = ""
     reconciliation_status: str = RECONCILIATION_RPC_UNAVAILABLE
     error_class: str | None = None
+    error_detail_full: str | None = None
     safe_to_use_for_payment_verification: bool = False
     status: str = "BLOCKED"
+    block_window_source: str = "broad_sweep"
+    settle_at_utc: str | None = None
+    partial_ledger: bool = False
 
 
 def redact_rpc_url(url: str) -> str:
@@ -406,6 +416,39 @@ class JsonRpcClient:
         if not ts:
             return None
         return datetime.fromtimestamp(hex_to_int(ts), tz=timezone.utc).isoformat()
+
+    def get_block_epoch(self, block_number: int) -> int | None:
+        if block_number in self._block_cache:
+            ts = self._block_cache[block_number].get("timestamp")
+        else:
+            block = self.call("eth_getBlockByNumber", [hex(block_number), False])
+            if not block:
+                return None
+            self._block_cache[block_number] = block
+            ts = block.get("timestamp")
+        return hex_to_int(ts) if ts else None
+
+    def find_block_at_or_before_epoch(self, target_epoch: int, latest_block: int) -> int:
+        """Binary-search the highest block whose timestamp is <= target_epoch.
+
+        Bounded to O(log latest_block) eth_getBlockByNumber calls (block dicts are
+        cached), so deriving a settle_at window is cheap versus a genesis-to-head sweep.
+        """
+        lo, hi = 0, max(0, latest_block)
+        answer = 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            epoch = self.get_block_epoch(mid)
+            if epoch is None:
+                # Missing block data: shrink toward the low half rather than loop.
+                hi = mid - 1
+                continue
+            if epoch <= target_epoch:
+                answer = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return answer
 
     def receipt_status(self, tx_hash: str) -> str:
         key = tx_hash.lower()
@@ -735,6 +778,36 @@ def _apply_rpc_failure(
     return result
 
 
+def _capture_error_detail(exc: BaseException) -> str:
+    """Full traceback text, but never let capturing the error raise — some exception
+    types (e.g. urllib HTTPError) can make traceback formatting itself throw, which
+    would re-open the very 'exit_code=1 with no ledger' hole this is meant to close."""
+    try:
+        return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    except Exception:  # noqa: BLE001
+        try:
+            return f"{type(exc).__name__}: {exc}"
+        except Exception:  # noqa: BLE001
+            return type(exc).__name__
+
+
+def _persist_ledger(result: "ReconciliationResult", output_dir: Path | None) -> None:
+    """Write the ledger JSON/MD/RESULT. Called on every path — success, deadline,
+    or failure — so an unavailable/partial reconciliation still leaves a structured
+    verdict on disk (a completed 0/0/0 sweep is a valuable verdict) instead of an
+    exit_code=1 with no ledger."""
+    if not output_dir:
+        return
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "onchain_settlement_ledger.json"
+    md_path = output_dir / "onchain_settlement_ledger.md"
+    json_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+    md_path.write_text(build_markdown(result), encoding="utf-8")
+    (output_dir / "RESULT.txt").write_text(
+        format_result(result, json_path, md_path), encoding="utf-8"
+    )
+
+
 def run_reconciliation(
     *,
     output_dir: Path | None = None,
@@ -763,12 +836,14 @@ def run_reconciliation(
 
     if not selected or not health:
         top_error = discarded[-1].error_class if discarded else RECONCILIATION_RPC_UNAVAILABLE
-        return _apply_rpc_failure(
+        _apply_rpc_failure(
             result,
             discarded,
             top_error,
             "no RPC passed eth_chainId/eth_blockNumber/eth_getLogs health preflight",
         )
+        _persist_ledger(result, output_dir)
+        return result
 
     result.selected_rpc = selected
     result.selected_rpc_redacted = redact_rpc_url(selected)
@@ -783,8 +858,26 @@ def run_reconciliation(
         timeout_sec=max(1, cfg.timeout_ms // 1000),
         max_attempts=cfg.max_attempts_per_endpoint,
     )
-    to_block = client.block_number()
-    from_block = resolve_from_block(client, prof, to_block=to_block)
+    latest_head = client.block_number()
+    settled_at = settlement_expectation.settled_at_utc if settlement_expectation else None
+    if settled_at:
+        result.settle_at_utc = settled_at
+        try:
+            target_epoch = int(
+                datetime.fromisoformat(settled_at.replace("Z", "+00:00")).timestamp()
+            )
+            settle_block = client.find_block_at_or_before_epoch(target_epoch, latest_head)
+            from_block = max(0, settle_block - SETTLE_WINDOW_LOOKBACK_BLOCKS)
+            to_block = min(latest_head, settle_block + SETTLE_WINDOW_LOOKAHEAD_BLOCKS)
+            result.block_window_source = "settle_at"
+        except (ValueError, OverflowError):
+            # Unparseable settle_at: fall back to the broad sweep rather than crash.
+            from_block = resolve_from_block(client, prof, to_block=latest_head)
+            to_block = latest_head
+            result.block_window_source = "broad_sweep_settle_at_unparseable"
+    else:
+        from_block = resolve_from_block(client, prof, to_block=latest_head)
+        to_block = latest_head
     result.scanned_from_block = from_block
     result.scanned_to_block = to_block
 
@@ -816,20 +909,27 @@ def run_reconciliation(
         balance_atomic, balance_usdc = client.balance_of_usdc(prof.wallet)
         _ = balance_atomic
     except RpcDeadlineExceeded as exc:
-        return _apply_rpc_failure(
-            result,
-            discarded,
-            RECONCILIATION_RPC_TIMEOUT,
-            str(exc),
-        )
+        _apply_rpc_failure(result, discarded, RECONCILIATION_RPC_TIMEOUT, str(exc))
+        result.error_detail_full = _capture_error_detail(exc)
+        # The sweep was under way when the deadline hit — whatever windows completed
+        # are recorded; persist the partial ledger rather than exiting without one.
+        result.partial_ledger = True
+        _persist_ledger(result, output_dir)
+        return result
     except Exception as exc:  # noqa: BLE001
         error_class = classify_rpc_error(exc)
-        return _apply_rpc_failure(
+        _apply_rpc_failure(
             result,
             discarded,
             error_class,
             f"event scan failed after RPC health passed: {str(exc)[:200]}",
         )
+        # Capture the full stderr/traceback (not just the 200-char summary), and
+        # persist a partial ledger when the sweep had already made progress.
+        result.error_detail_full = _capture_error_detail(exc)
+        result.partial_ledger = result.windows_scanned > 0
+        _persist_ledger(result, output_dir)
+        return result
 
     result.current_balance_usdc = balance_usdc
     observed_target = prof.observed_balance_usdc
@@ -940,14 +1040,7 @@ def run_reconciliation(
         and result.unattributed_settlements_found == 0
     )
 
-    if output_dir:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        json_path = output_dir / "onchain_settlement_ledger.json"
-        md_path = output_dir / "onchain_settlement_ledger.md"
-        json_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
-        md_path.write_text(build_markdown(result), encoding="utf-8")
-        (output_dir / "RESULT.txt").write_text(format_result(result, json_path, md_path), encoding="utf-8")
-
+    _persist_ledger(result, output_dir)
     return result
 
 
@@ -1017,6 +1110,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-amount-atomic", default=None, help="Expected settlement atomic amount")
     parser.add_argument("--balance-before-usdc", default=None, help="Wallet USDC balance before settlement")
     parser.add_argument(
+        "--settle-at",
+        default=None,
+        help="Settlement timestamp (ISO8601 UTC). Derives a tight block window instead of a broad sweep.",
+    )
+    parser.add_argument(
         "--rpc-request-timeout-seconds",
         type=int,
         default=RPC_TIMEOUT_SEC,
@@ -1051,6 +1149,7 @@ def main(argv: list[str] | None = None) -> int:
             amount_usdc=args.expected_amount_usdc,
             amount_atomic=args.expected_amount_atomic,
             balance_before_usdc=args.balance_before_usdc,
+            settled_at_utc=args.settle_at,
         )
 
     out = args.output_dir

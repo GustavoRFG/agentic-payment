@@ -118,6 +118,7 @@ export async function runX402Classify(options: X402ClassifyOptions): Promise<{
         rpcRequestTimeoutSeconds,
         rpcMaxRetries,
         maxTotalRuntimeSeconds,
+        settledAtUtc: execution.request_completed_at_utc ?? execution.executed_at_utc,
       }),
       "--output-dir",
       reconcileDir,
