@@ -27,6 +27,8 @@ import {
 } from "./paid-method-honored-probe";
 import {
   probeQuoteStability,
+  REJECTED_INCOMPLETE_402_CHALLENGE,
+  REJECTED_QUOTE_SOURCE_DISAGREEMENT,
   REJECTED_QUOTE_UNSTABLE,
   type QuoteStabilityEvidence,
   type QuoteStabilityResult,
@@ -83,7 +85,16 @@ export interface DiscoveredSelectedCandidate {
   readonly selected_at_utc: string;
   readonly adapt_evidence?: {
     readonly quote_stability: QuoteStabilityEvidence;
+    /** Proof the persisted quote_atomic is bound to the live 402 the probe read. */
+    readonly quote_binding?: QuoteBindingEvidence;
   };
+}
+
+export interface QuoteBindingEvidence {
+  readonly bound_atomic: string;
+  readonly catalog_atomic: string;
+  readonly nonce: string;
+  readonly expires_at: string;
 }
 
 export type DiscoveredTargetAdaptResult =
@@ -122,6 +133,8 @@ export interface DiscoveredTargetAdaptRejection {
     readonly quote_stability?: QuoteStabilityEvidence;
     readonly blocklist?: ProviderBlocklistEntry;
     readonly method?: MethodMismatchEvidence;
+    readonly quote_source?: { readonly bound_atomic: string | null; readonly catalog_atomic: string };
+    readonly challenge?: { readonly nonce_present: boolean; readonly expires_at_present: boolean };
   };
 }
 
@@ -595,12 +608,51 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       continue;
     }
 
+    // Challenge completeness: a 402 missing nonce or expiresAt is not an acceptable
+    // challenge — do not materialize a candidate on it.
+    const { atomic: boundAtomic, nonce, expiresAt } = stability.bound;
+    if (!nonce || !expiresAt) {
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason: `${REJECTED_INCOMPLETE_402_CHALLENGE}: nonce=${nonce ? "present" : "missing"} expiresAt=${expiresAt ? "present" : "missing"} for ${adapted.candidate.endpoint}`,
+        evidence: {
+          quote_stability: stability.evidence,
+          challenge: { nonce_present: Boolean(nonce), expires_at_present: Boolean(expiresAt) },
+        },
+      });
+      continue;
+    }
+
+    // Quote binding: the persisted quote_atomic MUST come from the same live 402 the
+    // stability probe read — never catalog/census/cache. If the live 402 and the
+    // catalog quote disagree, reject instead of materializing a mis-bound candidate.
+    const catalogAtomic = adapted.candidate.quote_atomic;
+    if (boundAtomic === null || boundAtomic !== catalogAtomic) {
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason: `${REJECTED_QUOTE_SOURCE_DISAGREEMENT}: live_402=${boundAtomic ?? "null"} catalog=${catalogAtomic} for ${adapted.candidate.endpoint}`,
+        evidence: {
+          quote_stability: stability.evidence,
+          quote_source: { bound_atomic: boundAtomic, catalog_atomic: catalogAtomic },
+        },
+      });
+      continue;
+    }
+
     return {
       ok: true,
       candidate: {
         ...adapted.candidate,
+        // Bound to the live 402 (equals catalog here, since they must agree).
+        quote_atomic: boundAtomic,
         adapt_evidence: {
           quote_stability: stability.evidence,
+          quote_binding: {
+            bound_atomic: boundAtomic,
+            catalog_atomic: catalogAtomic,
+            nonce,
+            expires_at: expiresAt,
+          },
         },
       },
       paidMethodProbe: probe,

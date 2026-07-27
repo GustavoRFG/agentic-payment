@@ -29,6 +29,8 @@ function paymentRequiredBody(amount: string, payTo = "0x222222222222222222222222
         maxTimeoutSeconds: 300,
       },
     ],
+    nonce: "probe-nonce",
+    expiresAt: "2099-01-01T00:00:00.000Z",
   });
 }
 

@@ -14,16 +14,33 @@ import { startAbortDeadline } from "./abort-deadline";
 const SETTLEMENT_PAID_HTTP_METHOD = "POST" as const;
 
 export const REJECTED_QUOTE_UNSTABLE = "REJECTED_QUOTE_UNSTABLE";
+/** The live 402 the stability probe read disagrees with the catalog/census quote. */
+export const REJECTED_QUOTE_SOURCE_DISAGREEMENT = "REJECTED_QUOTE_SOURCE_DISAGREEMENT";
+/** The 402 challenge is missing nonce and/or expiresAt. */
+export const REJECTED_INCOMPLETE_402_CHALLENGE = "REJECTED_INCOMPLETE_402_CHALLENGE";
 
 export interface QuoteStabilityEvidence {
   readonly first_max_amount_required_atomic: string | null;
   readonly second_max_amount_required_atomic: string | null;
 }
 
+/**
+ * The quote read from a single live 402 response: the atomic amount bound to that
+ * exact challenge, plus the challenge's nonce/expiresAt. Adapt binds the persisted
+ * quote_atomic to this — never to catalog/census/cache.
+ */
+export interface BoundQuote {
+  readonly atomic: string | null;
+  readonly nonce: string | null;
+  readonly expiresAt: string | null;
+}
+
 export interface QuoteStabilityResult {
   readonly stable: boolean;
   readonly reason: string | null;
   readonly evidence: QuoteStabilityEvidence;
+  /** The quote bound to the stability probe's live 402 (its second, freshest read). */
+  readonly bound: BoundQuote;
   readonly httpStatus: number | null;
   readonly walletUsed: false;
   readonly paymentAttempted: false;
@@ -36,12 +53,18 @@ interface AcceptEntry {
   amount?: string;
   maxAmountRequired?: string;
   payTo?: string;
+  nonce?: unknown;
+  expiresAt?: unknown;
   extra?: Record<string, unknown>;
 }
 
 interface PaymentEnvelope {
   accepts?: AcceptEntry[];
+  nonce?: unknown;
+  expiresAt?: unknown;
 }
+
+const EMPTY_BOUND_QUOTE: BoundQuote = { atomic: null, nonce: null, expiresAt: null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -110,6 +133,27 @@ function isUsdc(entry: AcceptEntry, expectedNetwork: string): boolean {
   );
 }
 
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+/** Cheapest USDC accept on the expected network, with its parsed atomic amount. */
+function selectCheapestUsdcAccept(
+  envelope: PaymentEnvelope,
+  expectedNetwork: string,
+): { readonly entry: AcceptEntry; readonly atomic: string } | null {
+  let best: { entry: AcceptEntry; atomic: string; amount: bigint } | null = null;
+  for (const entry of envelope.accepts ?? []) {
+    if (entry.network !== expectedNetwork) continue;
+    if (!isUsdc(entry, expectedNetwork)) continue;
+    const atomic = parseAtomic(entry.maxAmountRequired ?? entry.amount);
+    if (atomic === null) continue;
+    const amount = BigInt(atomic);
+    if (!best || amount < best.amount) best = { entry, atomic, amount };
+  }
+  return best ? { entry: best.entry, atomic: best.atomic } : null;
+}
+
 /**
  * Prefer maxAmountRequired; fall back to amount. Selects the cheapest USDC accept
  * on the expected network when multiple are present.
@@ -121,17 +165,33 @@ export function extractMaxAmountRequiredAtomic(
   const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
   const envelope = envelopeFromHeaders(response.headers) ?? envelopeFromBody(response.body);
   if (!envelope?.accepts?.length) return null;
+  return selectCheapestUsdcAccept(envelope, expectedNetwork)?.atomic ?? null;
+}
 
-  let best: { atomic: string; amount: bigint } | null = null;
-  for (const entry of envelope.accepts) {
-    if (entry.network !== expectedNetwork) continue;
-    if (!isUsdc(entry, expectedNetwork)) continue;
-    const atomic = parseAtomic(entry.maxAmountRequired ?? entry.amount);
-    if (atomic === null) continue;
-    const amount = BigInt(atomic);
-    if (!best || amount < best.amount) best = { atomic, amount };
-  }
-  return best?.atomic ?? null;
+/**
+ * Extract the full bound quote from a single 402 response: the atomic amount and
+ * the challenge's nonce/expiresAt, all from the SAME chosen accept (nonce/expiresAt
+ * fall back to the accept's extra, then the envelope top level). This is the object
+ * adapt binds the persisted quote to.
+ */
+export function extractBoundQuote(
+  response: { readonly headers: Record<string, string>; readonly body: unknown },
+  options: { readonly expectedNetwork?: string } = {},
+): BoundQuote {
+  const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
+  const envelope = envelopeFromHeaders(response.headers) ?? envelopeFromBody(response.body);
+  if (!envelope?.accepts?.length) return EMPTY_BOUND_QUOTE;
+  const best = selectCheapestUsdcAccept(envelope, expectedNetwork);
+  if (!best) return EMPTY_BOUND_QUOTE;
+  const extra = best.entry.extra ?? {};
+  return {
+    atomic: best.atomic,
+    nonce: nonEmptyString(best.entry.nonce) ?? nonEmptyString(extra.nonce) ?? nonEmptyString(envelope.nonce),
+    expiresAt:
+      nonEmptyString(best.entry.expiresAt) ??
+      nonEmptyString(extra.expiresAt) ??
+      nonEmptyString(envelope.expiresAt),
+  };
 }
 
 export function evaluateQuoteStability(
@@ -150,6 +210,7 @@ export function evaluateQuoteStability(
       stable: false,
       reason: `${REJECTED_QUOTE_UNSTABLE}: first=${first ?? "null"} second=${second ?? "null"}`,
       evidence,
+      bound: EMPTY_BOUND_QUOTE,
       httpStatus: null,
       walletUsed: false,
       paymentAttempted: false,
@@ -162,6 +223,7 @@ export function evaluateQuoteStability(
       stable: false,
       reason: `${REJECTED_QUOTE_UNSTABLE}: first=${first} second=${second}`,
       evidence,
+      bound: EMPTY_BOUND_QUOTE,
       httpStatus: null,
       walletUsed: false,
       paymentAttempted: false,
@@ -172,6 +234,7 @@ export function evaluateQuoteStability(
     stable: true,
     reason: null,
     evidence,
+    bound: EMPTY_BOUND_QUOTE,
     httpStatus: null,
     walletUsed: false,
     paymentAttempted: false,
@@ -187,6 +250,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
 }): Promise<{
   readonly httpStatus: number | null;
   readonly maxAmountRequiredAtomic: string | null;
+  readonly bound: BoundQuote;
   readonly detail: string | null;
 }> {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -223,15 +287,18 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
       return {
         httpStatus: response.status,
         maxAmountRequiredAtomic: null,
+        bound: EMPTY_BOUND_QUOTE,
         detail: `expected HTTP 402, got ${response.status}`,
       };
     }
+    const bound = extractBoundQuote(
+      { headers: headerMap, body },
+      { expectedNetwork: options.expectedNetwork },
+    );
     return {
       httpStatus: response.status,
-      maxAmountRequiredAtomic: extractMaxAmountRequiredAtomic(
-        { headers: headerMap, body },
-        { expectedNetwork: options.expectedNetwork },
-      ),
+      maxAmountRequiredAtomic: bound.atomic,
+      bound,
       detail: null,
     };
   } catch (error) {
@@ -239,6 +306,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
     return {
       httpStatus: null,
       maxAmountRequiredAtomic: null,
+      bound: EMPTY_BOUND_QUOTE,
       detail: message,
     };
   } finally {
@@ -268,6 +336,7 @@ export async function probeQuoteStability(options: {
   if (!evaluated.stable) {
     return {
       ...evaluated,
+      bound: second.bound,
       httpStatus: second.httpStatus,
       reason:
         evaluated.reason ??
@@ -278,6 +347,7 @@ export async function probeQuoteStability(options: {
   }
   return {
     ...evaluated,
+    bound: second.bound,
     httpStatus: second.httpStatus,
   };
 }
