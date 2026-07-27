@@ -1,7 +1,8 @@
 {
   "schema_name": "trustforge_x402_provider_blocklist",
   "schema_version": "0.1.0",
-  "note": "Domains listed here are excluded from x402 discovery/adapt before ranking. Removal is a human decision, never automatic: delete the entry by hand after reviewing fresh evidence. Never mutate this file from code.",
+  "note": "Domains in entries[] are excluded from x402 discovery/adapt before ranking. Removal is a human decision, never automatic: delete the entry by hand after reviewing fresh evidence. Never mutate this file from code.",
+  "watch_note": "watch[] is NOT a blocklist: watched domains are never excluded from discovery/adapt. The blocklist is strictly evidence-based — a domain is blocked only on its OWN failing runs. Peers that merely share an apparent operator with a blocked domain (guilt-by-association, no run of their own) are recorded here for attention only. A watched domain graduates to entries[] only when it earns its own evidence run — a human decision.",
   "entries": [
     {
       "domain": "api.onesource.io",
@@ -9,6 +10,29 @@
       "evidence_runs": ["run_20260723_153238", "run_20260724_005838"],
       "added_at": "2026-07-24T00:00:00Z",
       "reinterpretation": "2026-07-25: the 405 was our own POST-to-GET mismatch (the thin runner POSTs unconditionally while this candidate's catalog method is GET), not a seller defect. Kept as a blocklist entry until a method-aware executor (spec A.2) ships; once settle honors the catalog method, re-evaluate with fresh evidence. Removal remains a human decision."
+    },
+    {
+      "domain": "stableenrich.dev",
+      "reason": "PAY_TIME_402_EVAPORATION_AFTER_CONSISTENT_KEYLESS_402",
+      "evidence_runs": ["run_20260724_044303", "run_20260726_130507"],
+      "added_at": "2026-07-27T00:00:00Z",
+      "note": "Two BLOCKED_PAY_TIME_FRESHNESS on distinct days: after a consistent keyless 402 handshake, the paid-time settle saw a fresh no_402 (the 402 quote evaporated at settle time)."
+    }
+  ],
+  "watch": [
+    {
+      "domain": "stableupload.dev",
+      "reason": "WATCH_SAME_OPERATOR_AS_BLOCKED_PEER",
+      "related_to": "stableenrich.dev",
+      "added_at": "2026-07-27T00:00:00Z",
+      "note": "Same apparent operator as stableenrich.dev, but no failing run of its own yet. Watched, not blocked — evidence-strict policy. Promote to entries[] only on its own evidence run (human decision)."
+    },
+    {
+      "domain": "stablestudio.dev",
+      "reason": "WATCH_SAME_OPERATOR_AS_BLOCKED_PEER",
+      "related_to": "stableenrich.dev",
+      "added_at": "2026-07-27T00:00:00Z",
+      "note": "Same apparent operator as stableenrich.dev, but no failing run of its own yet. Watched, not blocked — evidence-strict policy. Promote to entries[] only on its own evidence run (human decision)."
     }
   ]
 }

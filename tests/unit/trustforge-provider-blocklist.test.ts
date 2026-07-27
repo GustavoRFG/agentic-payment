@@ -7,8 +7,10 @@ import {
   SKIPPED_BLOCKLISTED,
   blocklistEntryFor,
   isDomainBlocklisted,
+  isDomainWatched,
   loadProviderBlocklist,
   partitionByBlocklist,
+  watchEntryFor,
   type ProviderBlocklist,
 } from "../../tools/trustforge/provider-blocklist";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
@@ -43,6 +45,55 @@ describe("provider blocklist config", () => {
   it("documents that removal is a human decision", () => {
     const blocklist = loadProviderBlocklist();
     expect(blocklist.note?.toLowerCase()).toContain("human");
+  });
+
+  it("ships stableenrich.dev as an evidence-backed entry (two runs, distinct days)", () => {
+    const blocklist = loadProviderBlocklist();
+    const entry = blocklist.entries.find((c) => c.domain === "stableenrich.dev");
+    expect(entry).toBeDefined();
+    expect(entry?.reason).toBe("PAY_TIME_402_EVAPORATION_AFTER_CONSISTENT_KEYLESS_402");
+    expect(entry?.evidence_runs).toEqual(["run_20260724_044303", "run_20260726_130507"]);
+  });
+});
+
+describe("evidence-strict policy: siblings are watched, not blocked", () => {
+  const blocklist = loadProviderBlocklist();
+
+  it("blocks stableenrich.dev (its own evidence) — excluded from discovery/adapt", () => {
+    expect(isDomainBlocklisted("https://stableenrich.dev/x402", blocklist)).toBe(true);
+    expect(isDomainWatched("https://stableenrich.dev/x402", blocklist)).toBe(false);
+  });
+
+  it("watches but does NOT block the same-operator siblings without their own run", () => {
+    for (const sibling of ["https://stableupload.dev/x402", "https://stablestudio.dev/x402"]) {
+      // Never excluded: absent from the blocklist predicates entirely.
+      expect(isDomainBlocklisted(sibling, blocklist)).toBe(false);
+      expect(blocklistEntryFor(sibling, blocklist)).toBeNull();
+      // Present on the watch list, correlated to the blocked peer.
+      expect(isDomainWatched(sibling, blocklist)).toBe(true);
+      const watch = watchEntryFor(sibling, blocklist);
+      expect(watch?.related_to).toBe("stableenrich.dev");
+      expect(watch?.reason).toBe("WATCH_SAME_OPERATOR_AS_BLOCKED_PEER");
+    }
+  });
+
+  it("keeps a watched-domain candidate in the allowed set (reaches selection)", () => {
+    const items = [
+      { resourceUrl: "https://stableupload.dev/x402" },
+      { resourceUrl: "https://stableenrich.dev/x402" },
+      { resourceUrl: "https://clean.example/x402" },
+    ];
+    const { allowed, skipped } = partitionByBlocklist(items, blocklist, (i) => i.resourceUrl);
+    expect(allowed.map((i) => i.resourceUrl)).toEqual([
+      "https://stableupload.dev/x402", // watched but NOT excluded
+      "https://clean.example/x402",
+    ]);
+    expect(skipped.map((s) => s.item.resourceUrl)).toEqual(["https://stableenrich.dev/x402"]);
+  });
+
+  it("documents the watch policy (not a blocklist)", () => {
+    expect(blocklist.watch_note?.toLowerCase()).toContain("not a blocklist");
+    expect(blocklist.watch_note?.toLowerCase()).toContain("human");
   });
 });
 
