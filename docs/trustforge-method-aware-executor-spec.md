@@ -1,8 +1,12 @@
-# SPEC (proposal — not implemented): method-aware thin settlement executor
+# SPEC: method-aware thin settlement executor
 
-Status: **proposal for human review.** No executor code is changed by this document.
-The short-term guard (A.1) already rejects non-POST catalog candidates before they
-are probed; this spec is the durable fix that would let them settle.
+Status: **core implemented off-executor + tested; wiring awaits human review.**
+The pure request-shaping logic (verb selection, GET query placement, safe-verb
+gating) now lives in `tools/trustforge/thin-settlement-request-plan.ts` with unit
+tests — no key, wallet, network, or payment. The remaining step is money-moving and
+kept behind human review: wiring the planner into the executor and widening the
+adapt gate. The payment executor (`x402-thin-settlement-executor.ts`) is unchanged.
+The short-term guard (A.1) still rejects non-POST catalog candidates before probing.
 
 ## Problem
 
@@ -44,12 +48,40 @@ would open **63/82** additional candidates.
 - It widens the settleable surface 4× (19 → 82), so the blast radius of a bug grows
   with it.
 
-## Rollout, once approved
+## What is implemented (off-executor, this commit)
 
-1. Implement the executor change behind the existing keyless method probe.
-2. Re-probe the 63 newly-eligible candidates keyless (no payment) to confirm the
-   catalog method matches a live 402 on that verb.
-3. Re-evaluate the `api.onesource.io` blocklist entry with fresh evidence; if the
-   GET settle now succeeds keyless, removal becomes a human decision.
-4. Retire the A.1 `REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER` gate (or narrow it to
-   verbs the executor still does not implement).
+`thin-settlement-request-plan.ts` exports:
+- `planThinSettleRequest({ method, endpoint, body })` → `{ supported, method, endpoint, body, sendBody }`
+  (POST default; GET moves params to the query and carries no body; PUT/PATCH/DELETE/HEAD → `supported: false`).
+- `isThinRunnerSettleableMethod` / `THIN_RUNNER_SETTLEABLE_METHODS` (`["POST","GET"]`) — the single
+  source of truth for the enabled verbs, so the adapt gate can delegate to it.
+
+Deliberately NOT done (money-moving / human-review-gated): the executor is not
+wired to the planner, and the A.1 gate is not widened. Doing either before the other
+would re-open the 405 (a widened gate lets non-POST candidates reach a still-POSTing
+settle), so both must land together under review.
+
+## Human-review wiring (the remaining, money-moving step)
+
+1. In `x402-thin-settlement-executor.ts`, replace the hard-coded request shape
+   (currently `endpoint: input.selected.endpoint, method: "POST", body` at
+   ~line 115-117) with the planner:
+
+   ```ts
+   const plan = planThinSettleRequest({
+     method: input.selected.method,
+     endpoint: input.selected.endpoint,
+     body,
+   });
+   if (!plan.supported) throw new Error(plan.reason); // fail closed, no payment
+   // request: { ..., endpoint: plan.endpoint, method: plan.method,
+   //            body: plan.sendBody ? plan.body : undefined, ... }
+   ```
+
+2. Widen the adapt gate: have `isMethodSupportedByThinRunner`
+   (`paid-method-honored-probe.ts`) delegate to `isThinRunnerSettleableMethod` so
+   POST+GET candidates are no longer rejected up front — landed together with step 1.
+3. Re-probe the newly-eligible candidates keyless (no payment) to confirm the catalog
+   method matches a live 402 on that verb.
+4. Re-evaluate the `api.onesource.io` blocklist entry with fresh evidence; removal
+   remains a human decision.
