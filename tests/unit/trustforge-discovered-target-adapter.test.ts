@@ -228,9 +228,9 @@ describe("discovered target adapter", () => {
     expect(result.rejectedCandidates).toEqual([
       {
         resourceUrl: unsupportedEndpoint,
-        reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method PUT != ${SETTLEMENT_PAID_HTTP_METHOD}`,
+        reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method PUT not in POST, GET`,
         evidence: {
-          method: { catalog_method: "PUT", thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD },
+          method: { catalog_method: "PUT", thin_runner_method: "POST|GET" },
         },
       },
     ]);
@@ -242,6 +242,58 @@ describe("discovered target adapter", () => {
     expect(probedMethods.every((method) => method === "POST")).toBe(true);
     // method probe + second 402 for the accepted fallback only
     expect(fetchImpl.mock.calls.filter(([url]) => String(url) === postOkEndpoint)).toHaveLength(2);
+  });
+
+  it("selects a GET-only candidate without accidentally probing it with POST", async () => {
+    const getOnlyEndpoint = "https://get-only.example/x402/quote";
+    const selection = {
+      selection: {
+        primary: {
+          method: "GET" as const,
+          handshakeStatus: "live_402_ok",
+          resourceUrl: getOnlyEndpoint,
+          quoteUsdc: "0.001125",
+          quoteAtomic: "1125",
+          selectedPayTo: "0x2222222222222222222222222222222222222222",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          scoringRationale: ["handshake_get_402"],
+        },
+        fallbacks: [],
+      },
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(containsX402PaymentHeader(init?.headers)).toBe(false);
+      expect(new Headers(init?.headers).has("payment-signature")).toBe(false);
+      expect(new Headers(init?.headers).has("x-payment")).toBe(false);
+      expect(String(input)).toBe(getOnlyEndpoint);
+      expect(init?.body).toBeUndefined();
+      if (init?.method === "POST") {
+        return new Response("Method Not Allowed", { status: 405 });
+      }
+      if (init?.method === "GET") {
+        return new Response(paymentRequiredBody("1125"), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("unexpected method", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await adaptDiscoveredTargetWithPaidMethodProbe(selection, {
+      thin: true,
+      fetchImpl,
+      now: new Date("2026-07-28T00:00:00.000Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.endpoint).toBe(getOnlyEndpoint);
+    expect(result.candidate.method).toBe("GET");
+    expect(result.paidMethodProbe?.method).toBe("GET");
+    expect(result.paidMethodProbe?.httpStatus).toBe(402);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
 
   it("rejects alternating maxAmountRequired quotes with REJECTED_QUOTE_UNSTABLE and falls back", async () => {

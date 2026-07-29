@@ -22,9 +22,9 @@ import {
   probePaidMethodHonored,
   REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
   REJECTED_PAID_METHOD_NOT_HONORED,
-  SETTLEMENT_PAID_HTTP_METHOD,
   type PaidMethodHonoredProbeResult,
 } from "./paid-method-honored-probe";
+import { THIN_RUNNER_SETTLEABLE_METHODS } from "./thin-settlement-method-contract";
 import {
   probeQuoteStability,
   REJECTED_INCOMPLETE_402_CHALLENGE,
@@ -43,6 +43,7 @@ import {
 
 const AUTHORIZATION_HEADROOM_USDC = "0.001";
 const AUTHORIZATION_MAX_CEILING_USDC = "0.01";
+const THIN_RUNNER_METHOD_LABEL = THIN_RUNNER_SETTLEABLE_METHODS.join("|");
 
 export interface DiscoveredTargetSelectionPrimary {
   readonly rank?: number;
@@ -195,9 +196,9 @@ export function resolvePinnedCandidate(
   if (!isMethodSupportedByThinRunner(candidate.method)) {
     return {
       ok: false,
-      reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method ${candidate.method} != ${SETTLEMENT_PAID_HTTP_METHOD}`,
+      reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method ${candidate.method} not in ${THIN_RUNNER_SETTLEABLE_METHODS.join(", ")}`,
       evidence: {
-        method: { catalog_method: String(candidate.method), thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD },
+        method: { catalog_method: String(candidate.method), thin_runner_method: THIN_RUNNER_METHOD_LABEL },
       },
     };
   }
@@ -521,19 +522,18 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     });
   }
 
-  // Method-awareness (root of the observed 405s): the thin runner POSTs
-  // unconditionally, so reject any candidate whose catalog method != POST up front
-  // instead of wasting a keyless settle-method probe on it.
+  // Method-awareness: reject methods outside the shared POST/GET contract before
+  // spending even a keyless HTTP request on them.
   const ranked: DiscoveredTargetSelectionFallback[] = [];
   for (const candidate of afterBlocklist) {
     if (!isMethodSupportedByThinRunner(candidate.method)) {
       rejectedCandidates.push({
         resourceUrl: candidate.resourceUrl,
-        reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method ${candidate.method} != ${SETTLEMENT_PAID_HTTP_METHOD}`,
+        reason: `${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: catalog method ${candidate.method} not in ${THIN_RUNNER_SETTLEABLE_METHODS.join(", ")}`,
         evidence: {
           method: {
             catalog_method: String(candidate.method),
-            thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD,
+            thin_runner_method: THIN_RUNNER_METHOD_LABEL,
           },
         },
       });
@@ -577,6 +577,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
 
     const probe = await probePaidMethodHonored({
       endpoint: adapted.candidate.endpoint,
+      method: adapted.candidate.method,
       expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,
     });
@@ -591,6 +592,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
 
     const stability = await probeQuoteStability({
       endpoint: adapted.candidate.endpoint,
+      method: adapted.candidate.method,
       firstMaxAmountRequiredAtomic: probe.maxAmountRequiredAtomic,
       expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,

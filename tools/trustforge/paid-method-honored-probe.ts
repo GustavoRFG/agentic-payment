@@ -1,36 +1,39 @@
 /**
  * paid-method-honored-probe — keyless settle-method check after a live 402 handshake.
  *
- * This keyless probe sends POST to the selected endpoint with no payment header
- * and rejects 404/405/501 before adapt commits a candidate. On HTTP 402 it also
- * extracts maxAmountRequired (atomic) for the subsequent quote-stability check.
+ * Uses the selected candidate's planned POST/GET request shape with no payment
+ * header and rejects 404/405/501 before adapt commits a candidate. On HTTP 402 it
+ * also extracts maxAmountRequired (atomic) for the quote-stability check.
  */
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { extractMaxAmountRequiredAtomic } from "./quote-stability-probe";
 import { startAbortDeadline } from "./abort-deadline";
-import { isThinRunnerSettleableMethod } from "./thin-settlement-request-plan";
+import {
+  isThinRunnerSettleableMethod,
+  planThinSettleRequest,
+} from "./thin-settlement-method-contract";
+export {
+  REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
+} from "./thin-settlement-method-contract";
 
 /** Statuses that mean the settle HTTP method/route is not honored by the seller. */
 export const PAID_METHOD_NOT_HONORED_HTTP_STATUSES = new Set([404, 405, 501]);
 
 export const REJECTED_PAID_METHOD_NOT_HONORED = "REJECTED_PAID_METHOD_NOT_HONORED";
 
-/** Catalog method outside the planner-backed thin runner's supported set. */
-export const REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER = "REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER";
-
 /**
- * Method used by this keyless POST probe. The method-aware executor separately
- * follows the selected candidate via planThinSettleRequest.
+ * Backward-compatible default when a catalog method is absent. Explicit methods
+ * are planned through the neutral contract.
  */
 export const SETTLEMENT_PAID_HTTP_METHOD = "POST" as const;
 
 /**
  * Whether the thin runner can settle a candidate declaring `method`. Delegates to the
- * planner's single source of truth (safeguard §4): now the executor is method-aware,
- * POST and GET are supported and PUT/PATCH/DELETE/HEAD (and absent/unknown) are not.
- * Widening this in isolation would re-open the 405 — it lands in the same commit as
- * the executor wiring.
+ * neutral method contract (safeguard §4) — the single source of truth shared with the
+ * planner and the executor, so no module re-derives the enabled verb set. POST and GET
+ * are supported; PUT/PATCH/DELETE/HEAD (and absent/unknown) are not. Widening the set
+ * belongs in the contract, alongside the executor support that makes it settleable.
  */
 export function isMethodSupportedByThinRunner(method: string | null | undefined): boolean {
   return isThinRunnerSettleableMethod(method);
@@ -39,7 +42,7 @@ export function isMethodSupportedByThinRunner(method: string | null | undefined)
 export interface PaidMethodHonoredProbeResult {
   readonly honored: boolean;
   readonly httpStatus: number | null;
-  readonly method: typeof SETTLEMENT_PAID_HTTP_METHOD;
+  readonly method: string;
   readonly endpoint: string;
   readonly maxAmountRequiredAtomic: string | null;
   readonly reason: string | null;
@@ -49,6 +52,7 @@ export interface PaidMethodHonoredProbeResult {
 
 export interface PaidMethodHonoredProbeOptions {
   readonly endpoint: string;
+  readonly method?: string | null;
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
@@ -68,14 +72,32 @@ export async function probePaidMethodHonored(
 ): Promise<PaidMethodHonoredProbeResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
-  const endpoint = options.endpoint;
-  const method = SETTLEMENT_PAID_HTTP_METHOD;
+  const plan = planThinSettleRequest({
+    method: options.method,
+    endpoint: options.endpoint,
+    body: options.body ?? {},
+  });
+  if (!plan.supported) {
+    return {
+      honored: false,
+      httpStatus: null,
+      method: plan.method,
+      endpoint: options.endpoint,
+      maxAmountRequiredAtomic: null,
+      reason: plan.reason,
+      walletUsed: false,
+      paymentAttempted: false,
+    };
+  }
+
+  const endpoint = plan.endpoint;
+  const method = plan.method;
   const deadline = startAbortDeadline(timeoutMs);
 
   const headers = new Headers({
     accept: "application/json",
-    "content-type": "application/json",
   });
+  if (plan.sendBody) headers.set("content-type", "application/json");
   if (containsX402PaymentHeader(headers)) {
     deadline.clear();
     throw new Error("paid method probe unexpectedly contains a payment header");
@@ -85,7 +107,7 @@ export async function probePaidMethodHonored(
     const response = await fetchImpl(endpoint, {
       method,
       headers,
-      body: JSON.stringify(options.body ?? {}),
+      body: plan.sendBody ? JSON.stringify(plan.body ?? {}) : undefined,
       redirect: "manual",
       signal: deadline.signal,
     });

@@ -5,7 +5,7 @@ import {
   planThinSettleRequest,
   THIN_RUNNER_SETTLEABLE_METHODS,
 } from "../../tools/trustforge/thin-settlement-request-plan";
-import { REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER } from "../../tools/trustforge/paid-method-honored-probe";
+import { REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER } from "../../tools/trustforge/thin-settlement-method-contract";
 
 const ENDPOINT = "https://seller.example/api/upload";
 const BODY = { tx: "0xabc", chain: "base" };
@@ -34,7 +34,7 @@ describe("planThinSettleRequest", () => {
   });
 
   it("POST carries the JSON body at the endpoint unchanged", () => {
-    const plan = planThinSettleRequest({ method: "POST", endpoint: ENDPOINT, body: BODY });
+    const plan = planThinSettleRequest({ method: " post ", endpoint: ENDPOINT, body: BODY });
     expect(plan).toMatchObject({ supported: true, method: "POST", endpoint: ENDPOINT, body: BODY, sendBody: true });
   });
 

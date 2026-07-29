@@ -9,9 +9,7 @@
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { startAbortDeadline } from "./abort-deadline";
-
-/** Keep aligned with paid-method-honored-probe / thin settlement (executor untouched). */
-const SETTLEMENT_PAID_HTTP_METHOD = "POST" as const;
+import { planThinSettleRequest } from "./thin-settlement-method-contract";
 
 export const REJECTED_QUOTE_UNSTABLE = "REJECTED_QUOTE_UNSTABLE";
 /** The live 402 the stability probe read disagrees with the catalog/census quote. */
@@ -243,6 +241,7 @@ export function evaluateQuoteStability(
 
 export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
   readonly endpoint: string;
+  readonly method?: string | null;
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
@@ -255,21 +254,34 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
 }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
+  const plan = planThinSettleRequest({
+    method: options.method,
+    endpoint: options.endpoint,
+    body: options.body ?? {},
+  });
+  if (!plan.supported) {
+    return {
+      httpStatus: null,
+      maxAmountRequiredAtomic: null,
+      bound: EMPTY_BOUND_QUOTE,
+      detail: plan.reason,
+    };
+  }
   const deadline = startAbortDeadline(timeoutMs);
   const headers = new Headers({
     accept: "application/json",
-    "content-type": "application/json",
   });
+  if (plan.sendBody) headers.set("content-type", "application/json");
   if (containsX402PaymentHeader(headers)) {
     deadline.clear();
     throw new Error("quote stability probe unexpectedly contains a payment header");
   }
 
   try {
-    const response = await fetchImpl(options.endpoint, {
-      method: SETTLEMENT_PAID_HTTP_METHOD,
+    const response = await fetchImpl(plan.endpoint, {
+      method: plan.method,
       headers,
-      body: JSON.stringify(options.body ?? {}),
+      body: plan.sendBody ? JSON.stringify(plan.body ?? {}) : undefined,
       redirect: "manual",
       signal: deadline.signal,
     });
@@ -316,6 +328,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
 
 export async function probeQuoteStability(options: {
   readonly endpoint: string;
+  readonly method?: string | null;
   readonly firstMaxAmountRequiredAtomic: string | null;
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
@@ -324,6 +337,7 @@ export async function probeQuoteStability(options: {
 }): Promise<QuoteStabilityResult> {
   const second = await fetchSettleMethod402MaxAmountRequiredAtomic({
     endpoint: options.endpoint,
+    method: options.method,
     expectedNetwork: options.expectedNetwork,
     fetchImpl: options.fetchImpl,
     timeoutMs: options.timeoutMs,
