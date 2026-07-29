@@ -5,6 +5,7 @@
 import { compareUsdcDecimal } from "./external-x402-get-policy";
 import { MAINNET_NETWORK, TESTNET_NETWORK } from "../../shared/payment-safety";
 import { MAINNET_BUYER_WALLET, SEPOLIA_TESTNET_BUYER_WALLET } from "./network-config";
+import { checkAuthorizationMethodBinding } from "./authorization-method-binding";
 
 export interface TargetSelectionAuditMetadata {
   readonly selected_resource_url: string;
@@ -19,6 +20,11 @@ export interface HumanPaymentAuthorization {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  /**
+   * HTTP method the human authorized. Required: it must equal the selected candidate's
+   * method, the planned method, and the intent method before any payment.
+   */
+  readonly method?: string | null;
   readonly network?: string;
   readonly asset?: string;
   readonly buyer_wallet?: string;
@@ -37,6 +43,7 @@ export interface SelectedCandidateRef {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  readonly method?: string | null;
   readonly quote_amount_usdc?: string;
   readonly recommended_max_usdc?: string;
   readonly network?: string;
@@ -102,6 +109,13 @@ export function validateHumanPaymentAuthorization(
   if (auth.endpoint !== selected.endpoint) {
     reasons.push("endpoint mismatch vs selected_candidate");
   }
+  // Pre-live method binding: an authorization for one verb must never settle another.
+  reasons.push(
+    ...checkAuthorizationMethodBinding({
+      authorizationMethod: auth.method,
+      candidateMethod: selected.method,
+    }).reasons,
+  );
   if (auth.network && selected.network && auth.network !== selected.network) {
     reasons.push("network mismatch vs selected_candidate");
   }

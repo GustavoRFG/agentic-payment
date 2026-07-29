@@ -30,12 +30,20 @@ export {
   extractFacilitatorHashFromPaymentResponseHeader,
 } from "./facilitator-settlement-receipt";
 
+import { assertAuthorizationMethodBinding } from "./authorization-method-binding";
+
 export interface SingleSettlementRequest {
   readonly network: string;
   readonly privateKeyEnvName: string;
   readonly expectedBuyerAddress: string;
   readonly endpoint: string;
   readonly method: "GET" | "POST";
+  /**
+   * Pre-live method binding: the method the human authorized. When supplied, it must
+   * equal `method` and the method stamped into the intent, or the attempt is blocked
+   * before any payment-bearing work.
+   */
+  readonly authorizedMethod?: string | null;
   readonly body?: unknown;
   readonly asset: string;
   readonly payTo: string;
@@ -138,6 +146,13 @@ export async function executeSingleX402Settlement(input: {
 }): Promise<SingleSettlementExecutionResult> {
   const env = input.env ?? process.env;
   const req = input.request;
+  // Pre-live method binding, checked before the key is even read: an authorization for
+  // one verb must never reach the signing path for another.
+  assertAuthorizationMethodBinding({
+    authorizationMethod: req.authorizedMethod ?? req.method,
+    candidateMethod: req.method,
+    plannedMethod: req.method,
+  });
   const { privateKey, buyerAddress, chainId: _chainId } = assertSettlementNetworkGuards({
     network: req.network,
     privateKeyEnvName: req.privateKeyEnvName,
@@ -163,6 +178,16 @@ export async function executeSingleX402Settlement(input: {
     payTo: req.payTo,
     asset: req.asset,
     amountAtomic: req.quotedAmountAtomic,
+    method: req.method,
+  });
+  // Intent-bound leg of the same gate: the persisted intent now carries the verb, so
+  // the authorized method is also checked against what this attempt will actually
+  // send, before the 402 handshake and before any payment header exists.
+  assertAuthorizationMethodBinding({
+    authorizationMethod: req.authorizedMethod ?? req.method,
+    candidateMethod: req.method,
+    plannedMethod: req.method,
+    intentMethod: intent.method,
   });
   const intentPath = await persistSettlementIntent(req.runDir, intent);
 

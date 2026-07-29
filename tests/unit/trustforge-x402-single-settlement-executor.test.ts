@@ -67,6 +67,70 @@ function mock402Fetch(paymentRequiredHeader: string): typeof fetch {
   ) as typeof fetch;
 }
 
+describe("x402-single-settlement-executor pre-live method binding", () => {
+  /**
+   * env is deliberately empty: if the binding did not block first, the call would fail
+   * on the missing key instead. Asserting the binding error proves it blocks before
+   * any key is read, nothing is signed, and no request is made.
+   */
+  function requestWith(method: "GET" | "POST", authorizedMethod: string | null) {
+    return {
+      network: TESTNET_NETWORK,
+      privateKeyEnvName: SEPOLIA_BUYER_PRIVATE_KEY_ENV,
+      expectedBuyerAddress: SEPOLIA_TESTNET_BUYER_WALLET,
+      endpoint: "https://seller.example/x402",
+      method,
+      authorizedMethod,
+      asset: TESTNET_USDC_ADDRESS,
+      payTo: AUTHORIZED_PAY_TO,
+      quotedAmountAtomic: AUTHORIZED_AMOUNT,
+      maxAmountAtomic: AUTHORIZED_AMOUNT,
+      runDir: "D:\\tmp\\trustforge-binding-unit-test",
+      authorizationHash: "unit-test-hash",
+    } as const;
+  }
+
+  it.each([
+    ["POST", "GET"],
+    ["GET", "POST"],
+  ] as const)("blocks request %s against authorized %s before loading a key", async (m, a) => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    await expect(
+      executeSingleX402Settlement({ request: requestWith(m, a), env: {}, fetchImpl }),
+    ).rejects.toThrow("BLOCKED_AUTHORIZATION_METHOD_MISMATCH");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("blocks a missing authorized method before loading a key", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    await expect(
+      executeSingleX402Settlement({ request: requestWith("POST", ""), env: {}, fetchImpl }),
+    ).rejects.toThrow("BLOCKED_AUTHORIZATION_METHOD_MISSING");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("stamps the bound method into the persisted intent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tf-intent-method-"));
+    try {
+      const intent = buildSettlementIntent({
+        attemptId: "attempt_method",
+        runId: "run_method",
+        authorizationHash: "hash_method",
+        network: TESTNET_NETWORK,
+        buyer: SEPOLIA_TESTNET_BUYER_WALLET,
+        payTo: AUTHORIZED_PAY_TO,
+        asset: TESTNET_USDC_ADDRESS,
+        amountAtomic: AUTHORIZED_AMOUNT,
+        method: "GET",
+      });
+      const saved = JSON.parse(await readFile(await persistSettlementIntent(dir, intent), "utf8"));
+      expect(saved.method).toBe("GET");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("x402-single-settlement-executor", () => {
   it("persists pre-call settlement intent before request", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tf-intent-"));

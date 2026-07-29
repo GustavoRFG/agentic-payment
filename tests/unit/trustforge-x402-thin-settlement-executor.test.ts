@@ -34,6 +34,7 @@ const authorization: HumanPaymentAuthorization = {
   provider: "test-provider",
   service_id: "test-service",
   endpoint: ENDPOINT,
+  method: "POST",
   network: MAINNET_NETWORK,
   asset: MAINNET_USDC_ADDRESS,
   buyer_wallet: MAINNET_X402_SETTLEMENT_PROFILE.buyerWallet,
@@ -85,17 +86,28 @@ function cannedCoreResult(): unknown {
   };
 }
 
-async function execute(method: DiscoveredSelectedCandidate["method"]) {
+async function executeWithAuth(
+  method: DiscoveredSelectedCandidate["method"],
+  auth: HumanPaymentAuthorization,
+) {
   return executeThinX402Settlement({
     profile: MAINNET_X402_SETTLEMENT_PROFILE,
     runDir: "D:\\tmp\\trustforge-a2-unit-test",
-    auth: authorization,
+    auth,
     selected: selected(method),
     authorizationHash: "unit-test-authorization-hash",
     env: {},
     skipFreshnessPreflight: true,
     requestBody: REQUEST_BODY,
   });
+}
+
+/** Authorized method defaults to the candidate method (the bound, happy-path case). */
+async function execute(
+  method: DiscoveredSelectedCandidate["method"],
+  authMethod: string | null = method,
+) {
+  return executeWithAuth(method, { ...authorization, method: authMethod });
 }
 
 describe("x402 thin settlement executor A.2 planner wiring", () => {
@@ -133,6 +145,89 @@ describe("x402 thin settlement executor A.2 planner wiring", () => {
     async (method) => {
       await expect(execute(method)).rejects.toThrow(
         "BLOCKED_METHOD_NOT_SETTLEABLE: REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER",
+      );
+      expect(coreMock).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("pre-live authorization method binding at the thin executor", () => {
+  beforeEach(() => {
+    coreMock.mockReset();
+    coreMock.mockResolvedValue(cannedCoreResult() as never);
+  });
+
+  it("passes POST end to end and forwards the authorized method", async () => {
+    const result = await execute("POST", "POST");
+
+    expect(coreMock).toHaveBeenCalledTimes(1);
+    expect(coreMock.mock.calls[0]?.[0].request).toMatchObject({
+      method: "POST",
+      authorizedMethod: "POST",
+    });
+    expect(result.methodBinding).toMatchObject({
+      authorization_method: "POST",
+      selected_candidate_method: "POST",
+      planned_method: "POST",
+      intent_method: "POST",
+      request_method: "POST",
+    });
+  });
+
+  it("passes GET end to end with no body and forwards the authorized method", async () => {
+    const result = await execute("GET", "GET");
+
+    expect(coreMock).toHaveBeenCalledTimes(1);
+    const request = coreMock.mock.calls[0]?.[0].request;
+    expect(request.method).toBe("GET");
+    expect(request.authorizedMethod).toBe("GET");
+    expect(request.body).toBeUndefined();
+    expect(result.methodBinding).toMatchObject({
+      authorization_method: "GET",
+      selected_candidate_method: "GET",
+      planned_method: "GET",
+      intent_method: "GET",
+      request_method: "GET",
+    });
+  });
+
+  it("blocks a POST authorization against a GET candidate before the shared executor", async () => {
+    await expect(execute("GET", "POST")).rejects.toThrow(
+      "BLOCKED_AUTHORIZATION_METHOD_MISMATCH",
+    );
+    expect(coreMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks a GET authorization against a POST candidate before the shared executor", async () => {
+    await expect(execute("POST", "GET")).rejects.toThrow(
+      "BLOCKED_AUTHORIZATION_METHOD_MISMATCH",
+    );
+    expect(coreMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks an authorization whose method key is absent entirely", async () => {
+    const { method: _omitted, ...authWithoutMethod } = authorization;
+    await expect(
+      executeWithAuth("POST", authWithoutMethod as HumanPaymentAuthorization),
+    ).rejects.toThrow("BLOCKED_AUTHORIZATION_METHOD_MISSING");
+    expect(coreMock).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "", "   "])(
+    "blocks an authorization with a blank method (%p) before the shared executor",
+    async (authMethod) => {
+      await expect(execute("POST", authMethod)).rejects.toThrow(
+        "BLOCKED_AUTHORIZATION_METHOD_MISSING",
+      );
+      expect(coreMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["PUT", "PATCH", "DELETE", "HEAD"])(
+    "blocks an unsupported authorized %s before the shared executor",
+    async (authMethod) => {
+      await expect(execute("POST", authMethod)).rejects.toThrow(
+        /BLOCKED_AUTHORIZATION_METHOD_(UNSUPPORTED|MISMATCH)/,
       );
       expect(coreMock).not.toHaveBeenCalled();
     },

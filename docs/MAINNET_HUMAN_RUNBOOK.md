@@ -32,8 +32,9 @@ node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-adapt-disco
   --target-selection "<mainnet_run>/target_selection.json" `
   --output "<mainnet_run>/selected_candidate.json" --thin
 ```
-Confirm `selected_candidate.json` shape: `network: eip155:8453`, a fresh `endpoint`, `quote_atomic`,
-`authorized_pay_to`, `asset == 0x8335…2913`. **Discovery is unpaid; the paid probe is later and human-gated.**
+Confirm `selected_candidate.json` shape: `network: eip155:8453`, a fresh `endpoint`, `method`
+(`GET` or `POST`), `quote_atomic`, `authorized_pay_to`, `asset == 0x8335…2913`.
+**Discovery is unpaid; the paid probe is later and human-gated.**
 
 ## 2. Keyless preflight (read-only, no key, no payment)
 
@@ -71,7 +72,30 @@ node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-prefli
 ```
 
 **3b. Human authorization.** Write `<mainnet_run>/human_payment_authorization.json` with
-`decision: authorize_one_payment`, `max_usdc` ≥ the fresh quote. One payment. No retry, no failover.
+`decision: authorize_one_payment`, `max_usdc` ≥ the fresh quote, and **`method`** — the HTTP verb you
+are authorizing, either `method: "GET"` or `method: "POST"`. One payment. No retry, no failover.
+
+You must check the method yourself, exactly as you check the amount. Since the thin runner became
+method-aware (POST **and** GET), authorizing a verb is a distinct decision from authorizing a price.
+The settle is blocked unless all four agree:
+
+```
+authorization.method == selected_candidate.method == planned.method == intent-bound method
+```
+
+Copy `method` from `selected_candidate.json`; do not guess it. An authorization with no `method`
+is refused — the runner never assumes `POST` on your behalf. Fail-closed states, all raised
+**before** any key is read, anything is signed, or any payment header exists:
+
+| State | Meaning |
+| --- | --- |
+| `BLOCKED_AUTHORIZATION_METHOD_MISSING` | the authorization declares no `method` |
+| `BLOCKED_AUTHORIZATION_METHOD_UNSUPPORTED` | authorized verb outside `POST`/`GET` |
+| `BLOCKED_AUTHORIZATION_METHOD_MISMATCH` | authorized verb ≠ candidate or planned verb |
+| `BLOCKED_INTENT_METHOD_MISMATCH` | authorized verb ≠ verb stamped in the settlement intent |
+
+The persisted `settlement_intent_*.json` records `method`, so the verb that was authorized and the
+verb that was actually sent are both auditable after the fact.
 
 **3c. Single-shot settle (exactly one attempt):**
 ```powershell

@@ -15,6 +15,10 @@ import {
 } from "./x402-single-settlement-executor";
 import { planThinSettleRequest } from "./thin-settlement-request-plan";
 import {
+  assertAuthorizationMethodBinding,
+  type AuthorizationMethodBindingEvidence,
+} from "./authorization-method-binding";
+import {
   assertProfileEnvBeforeSettlement,
   expectedAssetForProfile,
   type X402SettlementProfile,
@@ -34,6 +38,10 @@ export interface ThinSettlementExecutionResult {
   readonly facilitatorReceiptParseStatus: string | null;
   readonly attemptId: string;
   readonly intentPath: string;
+  /** Auditable method chain: candidate, authorization, planner, request, intent. */
+  readonly methodBinding: AuthorizationMethodBindingEvidence & {
+    readonly request_method: string;
+  };
 }
 
 export function buildThinSettlementRequestBody(profile: X402SettlementProfile): unknown {
@@ -49,8 +57,10 @@ export function buildThinSettlementRequestBody(profile: X402SettlementProfile): 
 function mapThinResult(
   result: SingleSettlementExecutionResult,
   network: string,
+  methodBinding: ThinSettlementExecutionResult["methodBinding"],
 ): ThinSettlementExecutionResult {
   return {
+    methodBinding,
     ok: result.ok,
     status: result.status,
     httpStatus: result.httpStatus,
@@ -119,6 +129,20 @@ export async function executeThinX402Settlement(input: {
     throw new Error(`BLOCKED_METHOD_NOT_SETTLEABLE: ${plan.reason}`);
   }
 
+  // Pre-live method binding gate. Throws BEFORE the shared executor is reached, so a
+  // cross-method authorization can never load a key, sign, or send a payment header.
+  const bindingEvidence = assertAuthorizationMethodBinding({
+    authorizationMethod: input.auth.method,
+    candidateMethod: input.selected.method,
+    plannedMethod: plan.method,
+  });
+  const methodBinding = {
+    ...bindingEvidence,
+    planned_method: plan.method,
+    intent_method: plan.method,
+    request_method: plan.method,
+  };
+
   const result = await executeSingleX402Settlement({
     request: {
       network: input.selected.network,
@@ -126,6 +150,7 @@ export async function executeThinX402Settlement(input: {
       expectedBuyerAddress: input.profile.buyerWallet,
       endpoint: plan.endpoint,
       method: plan.method,
+      authorizedMethod: input.auth.method,
       body: plan.sendBody ? plan.body : undefined,
       asset,
       payTo: input.selected.authorized_pay_to,
@@ -140,5 +165,5 @@ export async function executeThinX402Settlement(input: {
     fetchImpl: input.fetchImpl,
   });
 
-  return mapThinResult(result, input.selected.network);
+  return mapThinResult(result, input.selected.network, methodBinding);
 }

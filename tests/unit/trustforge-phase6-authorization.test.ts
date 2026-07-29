@@ -9,6 +9,7 @@ const selected = {
   provider: "Zapper",
   service_id: "zapper_tx_explainer",
   endpoint: "https://public.zapper.xyz/x402/transaction-details",
+  method: "POST",
 };
 
 const validAuth: HumanPaymentAuthorization = {
@@ -17,6 +18,7 @@ const validAuth: HumanPaymentAuthorization = {
   provider: "Zapper",
   service_id: "zapper_tx_explainer",
   endpoint: "https://public.zapper.xyz/x402/transaction-details",
+  method: "POST",
   max_usdc: "0.10",
   max_payment_attempts: 1,
   allow_retry: false,
@@ -45,6 +47,40 @@ describe("validateHumanPaymentAuthorization", () => {
       selected,
     );
     expect(result.valid).toBe(false);
+  });
+
+  it("rejects an authorization with no method", () => {
+    const { method: _omitted, ...withoutMethod } = validAuth;
+    const result = validateHumanPaymentAuthorization(
+      withoutMethod as HumanPaymentAuthorization,
+      selected,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reasons.join(" ")).toContain("BLOCKED_AUTHORIZATION_METHOD_MISSING");
+  });
+
+  it("rejects a cross-method authorization vs the selected candidate", () => {
+    const result = validateHumanPaymentAuthorization({ ...validAuth, method: "GET" }, selected);
+    expect(result.valid).toBe(false);
+    expect(result.reasons.join(" ")).toContain("BLOCKED_AUTHORIZATION_METHOD_MISMATCH");
+  });
+
+  it("accepts a GET authorization for a GET candidate", () => {
+    const result = validateHumanPaymentAuthorization(
+      { ...validAuth, method: "GET" },
+      { ...selected, method: "GET" },
+    );
+    expect(result.valid).toBe(true);
+    expect(result.reasons).toEqual([]);
+  });
+
+  it.each(["PUT", "PATCH", "DELETE", "HEAD"])("rejects unsupported authorized %s", (method) => {
+    const result = validateHumanPaymentAuthorization(
+      { ...validAuth, method },
+      { ...selected, method },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reasons.join(" ")).toContain("BLOCKED_AUTHORIZATION_METHOD_UNSUPPORTED");
   });
 
   it("rejects provider mismatch", () => {

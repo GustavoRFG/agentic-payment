@@ -28,6 +28,8 @@ export interface SettlementIntent {
   readonly pay_to: string;
   readonly asset: string;
   readonly amount_atomic: string;
+  /** HTTP method bound to this attempt; must equal the authorized method. */
+  readonly method?: string;
   readonly request_started_at_utc: string;
 }
 
@@ -105,6 +107,7 @@ export function buildSettlementIntent(input: {
   readonly payTo: string;
   readonly asset: string;
   readonly amountAtomic: string;
+  readonly method?: string;
   readonly now?: Date;
 }): SettlementIntent {
   return {
@@ -116,6 +119,7 @@ export function buildSettlementIntent(input: {
     pay_to: input.payTo.toLowerCase(),
     asset: input.asset.toLowerCase(),
     amount_atomic: input.amountAtomic,
+    ...(input.method ? { method: input.method } : {}),
     request_started_at_utc: (input.now ?? new Date()).toISOString(),
   };
 }

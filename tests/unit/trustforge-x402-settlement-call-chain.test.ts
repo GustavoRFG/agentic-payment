@@ -69,7 +69,7 @@ async function makeRunDir(network: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "x402-callchain-"));
   await writeFile(
     join(dir, "human_payment_authorization.json"),
-    JSON.stringify({ decision: "APPROVE", max_usdc: "0.01" }),
+    JSON.stringify({ decision: "APPROVE", max_usdc: "0.01", method: "POST" }),
     "utf8",
   );
   await writeFile(
@@ -77,6 +77,7 @@ async function makeRunDir(network: string): Promise<string> {
     JSON.stringify({
       network,
       endpoint: "https://seller.example/x402",
+      method: "POST",
       quote_amount_usdc: "0.001",
       quote_atomic: "1000",
       authorized_pay_to: "0xSeLLeR",

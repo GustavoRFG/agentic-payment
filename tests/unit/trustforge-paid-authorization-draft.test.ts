@@ -39,6 +39,19 @@ describe("human payment authorization DRAFT generator", () => {
     expect(draft.rationale).toBe("");
   });
 
+  it.each(["POST", "GET"] as const)("carries the candidate's explicit %s method", (method) => {
+    const draft = buildHumanPaymentAuthorizationDraft({ ...candidate, method });
+    expect(draft.method).toBe(method);
+  });
+
+  it("defaults to POST only when the candidate declares no method", () => {
+    const { method: _absent, ...withoutMethod } = candidate;
+    const draft = buildHumanPaymentAuthorizationDraft(
+      withoutMethod as DiscoveredSelectedCandidate,
+    );
+    expect(draft.method).toBe("POST");
+  });
+
   it("hard-fails when asked to emit a non-pending decision", () => {
     expect(() => assertDraftDecisionIsPending("authorize_one_payment")).toThrow(
       "BLOCKED_AUTHORIZATION_DRAFT_DECISION",

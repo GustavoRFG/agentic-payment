@@ -23,6 +23,18 @@ export function isThinRunnerSettleableMethod(
   return normalized === "POST" || normalized === "GET";
 }
 
+/**
+ * The method the thin runner will actually use for a candidate: the explicit catalog
+ * method when present, else the backward-compatible POST default. This is the single
+ * place that default lives, so the planner, the authorization draft, and the
+ * method-binding gate cannot drift apart on what "no declared method" means.
+ */
+export function resolveEffectiveThinSettlementMethod(
+  method: string | null | undefined,
+): string {
+  return normalizeThinSettlementMethod(method) ?? "POST";
+}
+
 export type ThinSettleRequestPlan =
   | {
       readonly supported: true;
@@ -62,7 +74,7 @@ export function planThinSettleRequest(input: {
   readonly endpoint: string;
   readonly body: unknown;
 }): ThinSettleRequestPlan {
-  const method = normalizeThinSettlementMethod(input.method) ?? "POST";
+  const method = resolveEffectiveThinSettlementMethod(input.method);
 
   if (!isThinRunnerSettleableMethod(method)) {
     return {

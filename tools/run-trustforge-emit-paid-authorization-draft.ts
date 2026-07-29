@@ -6,6 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
+import { resolveEffectiveThinSettlementMethod } from "./trustforge/thin-settlement-method-contract";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -18,6 +19,8 @@ export interface HumanPaymentAuthorizationDraft {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  /** Verb the human is authorizing; must match the candidate at settle time. */
+  readonly method: string;
   readonly network: string;
   readonly asset: string;
   readonly buyer_wallet: string;
@@ -40,6 +43,10 @@ export function buildHumanPaymentAuthorizationDraft(
     provider: candidate.provider,
     service_id: candidate.service_id,
     endpoint: candidate.endpoint,
+    // Carried from the candidate, never invented: an explicit catalog method is used
+    // verbatim; only a candidate with no declared method falls back to the contract's
+    // historical POST default.
+    method: resolveEffectiveThinSettlementMethod(candidate.method),
     network: candidate.network,
     asset: candidate.asset,
     buyer_wallet: candidate.buyer_wallet,
