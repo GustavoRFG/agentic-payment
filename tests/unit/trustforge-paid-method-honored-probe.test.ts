@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import {
+  isMethodSupportedByThinRunner,
   probePaidMethodHonored,
   REJECTED_PAID_METHOD_NOT_HONORED,
   SETTLEMENT_PAID_HTTP_METHOD,
@@ -25,6 +26,17 @@ function paymentRequiredBody(amount: string): string {
 }
 
 describe("paid method honored probe", () => {
+  it.each(["POST", "GET"])("A.1 accepts the planner-supported %s method", (method) => {
+    expect(isMethodSupportedByThinRunner(method)).toBe(true);
+  });
+
+  it.each(["PUT", "PATCH", "DELETE", "HEAD"])(
+    "A.1 rejects the planner-unsupported %s method",
+    (method) => {
+      expect(isMethodSupportedByThinRunner(method)).toBe(false);
+    },
+  );
+
   it("accepts a keyless settle POST that returns 402 and extracts maxAmountRequired", async () => {
     const fetchImpl = vi.fn(async (_input, init) => {
       expect(init?.method).toBe(SETTLEMENT_PAID_HTTP_METHOD);

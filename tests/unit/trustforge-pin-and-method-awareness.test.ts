@@ -9,7 +9,6 @@ import {
 } from "../../tools/trustforge/discovered-target-to-selected-candidate";
 import {
   REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
-  SETTLEMENT_PAID_HTTP_METHOD,
 } from "../../tools/trustforge/paid-method-honored-probe";
 import { SKIPPED_BLOCKLISTED, type ProviderBlocklist } from "../../tools/trustforge/provider-blocklist";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
@@ -65,12 +64,9 @@ describe("resolvePinnedCandidate — honest causes against the fresh selection",
     expect(res.reason).toContain(PIN_EXCLUDED_NOT_IN_FRESH_DISCOVERY);
   });
 
-  it("REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER when the pin's catalog method != POST", () => {
+  it("accepts a well-formed GET pin now that A.1 delegates to the planner", () => {
     const res = resolvePinnedCandidate(fresh, "https://get.example/x402", EMPTY_BLOCKLIST);
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reason).toContain(REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER);
-    expect(res.evidence?.method).toEqual({ catalog_method: "GET", thin_runner_method: SETTLEMENT_PAID_HTTP_METHOD });
+    expect(res.ok).toBe(true);
   });
 
   it("EXCLUDED_HANDSHAKE_MALFORMED when the pin's handshake is not live_402_ok", () => {
@@ -96,10 +92,10 @@ describe("resolvePinnedCandidate — honest causes against the fresh selection",
 });
 
 describe("adapt — method-awareness (A.1)", () => {
-  it("rejects a lone non-POST primary up front without any probe", async () => {
+  it("rejects a lone unsupported primary up front without any probe", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 500 })) as unknown as typeof fetch;
     const result = await adaptDiscoveredTargetWithPaidMethodProbe(
-      { selection: { primary: candidate({ resourceUrl: "https://get.example/x402", method: "GET" }), fallbacks: [] } },
+      { selection: { primary: candidate({ resourceUrl: "https://put.example/x402", method: "PUT" }), fallbacks: [] } },
       { thin: true, fetchImpl, providerBlocklist: EMPTY_BLOCKLIST, now: new Date("2026-07-25T00:00:00.000Z") },
     );
     expect(result.ok).toBe(false);
@@ -110,11 +106,11 @@ describe("adapt — method-awareness (A.1)", () => {
 });
 
 describe("adapt — pin honored strictly vs --pin-with-fallback (B)", () => {
-  const pinUrl = "https://get.example/x402";
+  const pinUrl = "https://put.example/x402";
   const fallbackUrl = "https://post.example/x402";
   const selection = {
     selection: {
-      primary: candidate({ resourceUrl: pinUrl, method: "GET" as const }),
+      primary: candidate({ resourceUrl: pinUrl, method: "PUT" as const }),
       fallbacks: [candidate({ resourceUrl: fallbackUrl })],
     },
   };

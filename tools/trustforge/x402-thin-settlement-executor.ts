@@ -13,6 +13,7 @@ import {
   executeSingleX402Settlement,
   type SingleSettlementExecutionResult,
 } from "./x402-single-settlement-executor";
+import { planThinSettleRequest } from "./thin-settlement-request-plan";
 import {
   assertProfileEnvBeforeSettlement,
   expectedAssetForProfile,
@@ -107,14 +108,25 @@ export async function executeThinX402Settlement(input: {
   const asset = input.selected.asset ?? expectedAssetForProfile(input.profile);
   const body = input.requestBody ?? buildThinSettlementRequestBody(input.profile);
 
+  // A.2: method-aware request shaping via the pre-tested planner. Fail-closed BEFORE
+  // any payment — an unsupported method never reaches the shared executor.
+  const plan = planThinSettleRequest({
+    method: input.selected.method,
+    endpoint: input.selected.endpoint,
+    body,
+  });
+  if (!plan.supported) {
+    throw new Error(`BLOCKED_METHOD_NOT_SETTLEABLE: ${plan.reason}`);
+  }
+
   const result = await executeSingleX402Settlement({
     request: {
       network: input.selected.network,
       privateKeyEnvName: input.profile.privateKeyEnvName,
       expectedBuyerAddress: input.profile.buyerWallet,
-      endpoint: input.selected.endpoint,
-      method: "POST",
-      body,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      body: plan.sendBody ? plan.body : undefined,
       asset,
       payTo: input.selected.authorized_pay_to,
       quotedAmountAtomic: input.selected.quote_atomic,

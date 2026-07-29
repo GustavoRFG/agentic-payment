@@ -1,39 +1,39 @@
 /**
  * paid-method-honored-probe — keyless settle-method check after a live 402 handshake.
  *
- * Thin/x402 settlement sends POST to the selected endpoint without relying on the
- * discovery handshake method (often GET). This probe uses the same method/route
- * settle would use, with no payment header, and rejects 404/405/501 before adapt
- * commits a candidate. On HTTP 402 it also extracts maxAmountRequired (atomic)
- * for the subsequent quote-stability check.
+ * This keyless probe sends POST to the selected endpoint with no payment header
+ * and rejects 404/405/501 before adapt commits a candidate. On HTTP 402 it also
+ * extracts maxAmountRequired (atomic) for the subsequent quote-stability check.
  */
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { extractMaxAmountRequiredAtomic } from "./quote-stability-probe";
 import { startAbortDeadline } from "./abort-deadline";
+import { isThinRunnerSettleableMethod } from "./thin-settlement-request-plan";
 
 /** Statuses that mean the settle HTTP method/route is not honored by the seller. */
 export const PAID_METHOD_NOT_HONORED_HTTP_STATUSES = new Set([404, 405, 501]);
 
 export const REJECTED_PAID_METHOD_NOT_HONORED = "REJECTED_PAID_METHOD_NOT_HONORED";
 
-/** Catalog method the thin runner cannot settle: it POSTs unconditionally (executor untouched). */
+/** Catalog method outside the planner-backed thin runner's supported set. */
 export const REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER = "REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER";
 
 /**
- * Method the thin/x402 settlement path actually sends (executor left untouched).
- * Kept here as a constant so adapt can stay aligned without importing the executor.
+ * Method used by this keyless POST probe. The method-aware executor separately
+ * follows the selected candidate via planThinSettleRequest.
  */
 export const SETTLEMENT_PAID_HTTP_METHOD = "POST" as const;
 
 /**
- * Whether the thin runner can settle a candidate declaring `method`. It sends POST
- * unconditionally, so a catalog method other than POST would settle to the wrong verb
- * (the root of the observed 405s). An absent/unknown method is treated as supported —
- * the keyless settle-method probe still gates it at request time.
+ * Whether the thin runner can settle a candidate declaring `method`. Delegates to the
+ * planner's single source of truth (safeguard §4): now the executor is method-aware,
+ * POST and GET are supported and PUT/PATCH/DELETE/HEAD (and absent/unknown) are not.
+ * Widening this in isolation would re-open the 405 — it lands in the same commit as
+ * the executor wiring.
  */
 export function isMethodSupportedByThinRunner(method: string | null | undefined): boolean {
-  return !method || method.toUpperCase() === SETTLEMENT_PAID_HTTP_METHOD;
+  return isThinRunnerSettleableMethod(method);
 }
 
 export interface PaidMethodHonoredProbeResult {
