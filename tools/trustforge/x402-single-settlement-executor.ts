@@ -39,11 +39,12 @@ export interface SingleSettlementRequest {
   readonly endpoint: string;
   readonly method: "GET" | "POST";
   /**
-   * Pre-live method binding: the method the human authorized. When supplied, it must
-   * equal `method` and the method stamped into the intent, or the attempt is blocked
-   * before any payment-bearing work.
+   * Pre-live method binding: the method the human authorized. It must equal `method`
+   * and the method stamped into the intent, or the attempt is blocked before any
+   * payment-bearing work. Callers must provide it explicitly; the shared executor
+   * never infers authorization from the request it is about to send.
    */
-  readonly authorizedMethod?: string | null;
+  readonly authorizedMethod: string | null;
   readonly body?: unknown;
   readonly asset: string;
   readonly payTo: string;
@@ -149,7 +150,7 @@ export async function executeSingleX402Settlement(input: {
   // Pre-live method binding, checked before the key is even read: an authorization for
   // one verb must never reach the signing path for another.
   assertAuthorizationMethodBinding({
-    authorizationMethod: req.authorizedMethod ?? req.method,
+    authorizationMethod: req.authorizedMethod,
     candidateMethod: req.method,
     plannedMethod: req.method,
   });
@@ -184,7 +185,7 @@ export async function executeSingleX402Settlement(input: {
   // the authorized method is also checked against what this attempt will actually
   // send, before the 402 handshake and before any payment header exists.
   assertAuthorizationMethodBinding({
-    authorizationMethod: req.authorizedMethod ?? req.method,
+    authorizationMethod: req.authorizedMethod,
     candidateMethod: req.method,
     plannedMethod: req.method,
     intentMethod: intent.method,

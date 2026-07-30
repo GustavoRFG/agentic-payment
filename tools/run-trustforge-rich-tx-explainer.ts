@@ -399,6 +399,7 @@ export async function runRichTxExplainerPhase3(options: {
     paidResponse = await performRichTxExplainerPaidRequest({
       policy,
       handshake,
+      authorizedMethod: policy.method,
       txHash: targetTx,
       wallet,
       paidInvocationGuard: guards.paidInvocationGuard,

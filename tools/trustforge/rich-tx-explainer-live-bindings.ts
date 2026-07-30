@@ -77,6 +77,7 @@ export async function loadRichBuyerWallet(
 export async function performRichTxExplainerPaidRequest(options: {
   readonly policy: RichTxExplainerPolicy;
   readonly handshake: RichTxExplainerHandshake;
+  readonly authorizedMethod: "GET" | "POST";
   readonly txHash: string;
   readonly wallet: RichWalletHandle;
   readonly paidInvocationGuard: PaidInvocationGuard;
@@ -117,6 +118,7 @@ export async function performRichTxExplainerPaidRequest(options: {
       expectedBuyerAddress: MAINNET_BUYER_WALLET,
       endpoint: options.handshake.endpointUrl,
       method: options.policy.method,
+      authorizedMethod: options.authorizedMethod,
       body: requestBody,
       asset,
       payTo: options.handshake.payTo,

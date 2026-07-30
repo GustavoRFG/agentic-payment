@@ -9,6 +9,7 @@ import {
   decodePaymentRequiredHeader,
   executeSingleX402Settlement,
   persistSettlementIntent,
+  type SingleSettlementRequest,
 } from "../../tools/trustforge/x402-single-settlement-executor";
 import { buildSettlementIntent } from "../../tools/trustforge/settlement-run-binding";
 import {
@@ -101,13 +102,40 @@ describe("x402-single-settlement-executor pre-live method binding", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("blocks a missing authorized method before loading a key", async () => {
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
-    await expect(
-      executeSingleX402Settlement({ request: requestWith("POST", ""), env: {}, fetchImpl }),
-    ).rejects.toThrow("BLOCKED_AUTHORIZATION_METHOD_MISSING");
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
+  it.each(["absent", "undefined"] as const)(
+    "blocks an %s authorized method before loading a key or creating a payment header",
+    async (variant) => {
+      const fetchImpl = vi.fn() as unknown as typeof fetch;
+      const paymentBearingGuard = createPaymentBearingRequestGuard({
+        maxPaymentBearingRequests: 1,
+      });
+      const completeRequest = requestWith("POST", "POST");
+      const { authorizedMethod: _omitted, ...requestWithoutMethod } = completeRequest;
+      const request =
+        variant === "absent"
+          ? requestWithoutMethod
+          : { ...completeRequest, authorizedMethod: undefined };
+      const keyGuard = vi.spyOn(networkGuards, "assertSettlementNetworkGuards");
+
+      try {
+        await expect(
+          executeSingleX402Settlement({
+            // Runtime defense is intentional: JavaScript callers can bypass the
+            // required TypeScript field, so the shared executor must still fail closed.
+            request: request as unknown as SingleSettlementRequest,
+            env: {},
+            fetchImpl,
+            paymentBearingGuard,
+          }),
+        ).rejects.toThrow("BLOCKED_AUTHORIZATION_METHOD_MISSING");
+        expect(keyGuard).not.toHaveBeenCalled();
+        expect(fetchImpl).not.toHaveBeenCalled();
+        expect(paymentBearingGuard.getPaymentBearingRequests()).toBe(0);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    },
+  );
 
   it("stamps the bound method into the persisted intent", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tf-intent-method-"));
@@ -169,6 +197,7 @@ describe("x402-single-settlement-executor", () => {
           expectedBuyerAddress: TEST_SIGNING_ADDRESS_A,
           endpoint: "http://localhost:4021/paid/analyze-text",
           method: "POST",
+          authorizedMethod: "POST",
           body: { text: "test" },
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
@@ -193,6 +222,7 @@ describe("x402-single-settlement-executor", () => {
           expectedBuyerAddress: TEST_SIGNING_ADDRESS_A,
           endpoint: "http://localhost:4021/paid/analyze-text",
           method: "POST",
+          authorizedMethod: "POST",
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
           quotedAmountAtomic: AUTHORIZED_AMOUNT,
@@ -227,6 +257,7 @@ describe("x402-single-settlement-executor", () => {
           expectedBuyerAddress: TEST_SIGNING_ADDRESS_A,
           endpoint: "http://localhost:4021/paid/analyze-text",
           method: "POST",
+          authorizedMethod: "POST",
           body: { text: "test" },
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
@@ -292,6 +323,7 @@ describe("payment-required intent match", () => {
           expectedBuyerAddress: TEST_SIGNING_ADDRESS_A,
           endpoint: "http://localhost:4021/paid/analyze-text",
           method: "POST",
+          authorizedMethod: "POST",
           body: { text: "test" },
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,

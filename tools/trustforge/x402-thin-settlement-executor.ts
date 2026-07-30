@@ -150,7 +150,7 @@ export async function executeThinX402Settlement(input: {
       expectedBuyerAddress: input.profile.buyerWallet,
       endpoint: plan.endpoint,
       method: plan.method,
-      authorizedMethod: input.auth.method,
+      authorizedMethod: input.auth.method!,
       body: plan.sendBody ? plan.body : undefined,
       asset,
       payTo: input.selected.authorized_pay_to,
