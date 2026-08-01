@@ -28,6 +28,8 @@ import { THIN_RUNNER_SETTLEABLE_METHODS } from "./thin-settlement-method-contrac
 import {
   probeQuoteStability,
   REJECTED_INCOMPLETE_402_CHALLENGE,
+  REJECTED_NON_POSITIVE_QUOTE,
+  REJECTED_QUOTE_EXTRACTION_FAILED,
   REJECTED_QUOTE_SOURCE_DISAGREEMENT,
   REJECTED_QUOTE_UNSTABLE,
   type QuoteStabilityEvidence,
@@ -127,6 +129,18 @@ export interface MethodMismatchEvidence {
   readonly thin_runner_method: string;
 }
 
+export interface QuoteValidationEvidence {
+  readonly first_atomic: string | null;
+  readonly second_atomic: string | null;
+  readonly bound_atomic: string | null;
+  readonly raw_source_field: "maxAmountRequired" | "amount" | null;
+  readonly raw_source_value: string | null;
+  readonly endpoint: string;
+  readonly method: string;
+  readonly http_status: number | null;
+  readonly reason: string;
+}
+
 export interface DiscoveredTargetAdaptRejection {
   readonly resourceUrl: string;
   readonly reason: string;
@@ -136,6 +150,26 @@ export interface DiscoveredTargetAdaptRejection {
     readonly method?: MethodMismatchEvidence;
     readonly quote_source?: { readonly bound_atomic: string | null; readonly catalog_atomic: string };
     readonly challenge?: { readonly nonce_present: boolean; readonly expires_at_present: boolean };
+    readonly quote_validation?: QuoteValidationEvidence;
+  };
+}
+
+function quoteValidationEvidence(
+  stability: QuoteStabilityResult,
+  endpoint: string,
+  method: string | null | undefined,
+  reason: string,
+): QuoteValidationEvidence {
+  return {
+    first_atomic: stability.evidence.first_max_amount_required_atomic,
+    second_atomic: stability.evidence.second_max_amount_required_atomic,
+    bound_atomic: stability.bound.atomic,
+    raw_source_field: stability.bound.rawSourceField,
+    raw_source_value: stability.bound.rawSourceValue,
+    endpoint,
+    method: method ?? "",
+    http_status: stability.httpStatus,
+    reason,
   };
 }
 
@@ -450,9 +484,9 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
 }
 
 /**
- * Adapt after a live 402 handshake: keyless settle-method probe (POST, no payment),
- * then a second 402 for quote stability. REJECTED_PAID_METHOD_NOT_HONORED /
- * REJECTED_QUOTE_UNSTABLE fall through to the next fallback.
+ * Adapt after a live 402 handshake: keyless settle-method probe (POST/GET, no
+ * payment), then a second 402. Extraction failure, instability, stable non-positive
+ * quotes, source disagreement, and incomplete challenges remain distinct gates.
  */
 export async function adaptDiscoveredTargetWithPaidMethodProbe(
   input: DiscoveredTargetSelectionInput,
@@ -602,17 +636,68 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       const reason =
         stability.reason ??
         `${REJECTED_QUOTE_UNSTABLE}: quote unstable for ${adapted.candidate.endpoint}`;
+      const extractionFailed = reason.includes(REJECTED_QUOTE_EXTRACTION_FAILED);
       rejectedCandidates.push({
         resourceUrl: entry.resourceUrl,
         reason,
-        evidence: { quote_stability: stability.evidence },
+        evidence: {
+          quote_stability: stability.evidence,
+          ...(extractionFailed
+            ? {
+                quote_validation: quoteValidationEvidence(
+                  stability,
+                  adapted.candidate.endpoint,
+                  adapted.candidate.method,
+                  reason,
+                ),
+              }
+            : {}),
+        },
+      });
+      continue;
+    }
+
+    const { atomic: boundAtomic, nonce, expiresAt } = stability.bound;
+    if (boundAtomic === null) {
+      const reason = `${REJECTED_QUOTE_EXTRACTION_FAILED}: stable comparison produced no bound atomic quote for ${adapted.candidate.endpoint}`;
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason,
+        evidence: {
+          quote_stability: stability.evidence,
+          quote_validation: quoteValidationEvidence(
+            stability,
+            adapted.candidate.endpoint,
+            adapted.candidate.method,
+            reason,
+          ),
+        },
+      });
+      continue;
+    }
+
+    // Equality answers stability only. An equal zero quote is stable but not an
+    // acceptable payment quote, and must never materialize a candidate.
+    if (BigInt(boundAtomic) <= 0n) {
+      const reason = `${REJECTED_NON_POSITIVE_QUOTE}: first=${stability.evidence.first_max_amount_required_atomic ?? "null"} second=${stability.evidence.second_max_amount_required_atomic ?? "null"} bound=${boundAtomic} for ${adapted.candidate.endpoint}`;
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason,
+        evidence: {
+          quote_stability: stability.evidence,
+          quote_validation: quoteValidationEvidence(
+            stability,
+            adapted.candidate.endpoint,
+            adapted.candidate.method,
+            reason,
+          ),
+        },
       });
       continue;
     }
 
     // Challenge completeness: a 402 missing nonce or expiresAt is not an acceptable
     // challenge — do not materialize a candidate on it.
-    const { atomic: boundAtomic, nonce, expiresAt } = stability.bound;
     if (!nonce || !expiresAt) {
       rejectedCandidates.push({
         resourceUrl: entry.resourceUrl,
@@ -667,7 +752,11 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     entry.reason.includes(REJECTED_PAID_METHOD_NOT_HONORED),
   );
   const quoteRejection = rejectedCandidates.find((entry) =>
-    entry.reason.includes(REJECTED_QUOTE_UNSTABLE),
+    [
+      REJECTED_QUOTE_EXTRACTION_FAILED,
+      REJECTED_NON_POSITIVE_QUOTE,
+      REJECTED_QUOTE_UNSTABLE,
+    ].some((code) => entry.reason.includes(code)),
   );
   return {
     ok: false,

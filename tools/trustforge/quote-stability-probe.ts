@@ -1,9 +1,9 @@
 /**
  * quote-stability-probe — second keyless 402 after the settle-method probe.
  *
- * Compares maxAmountRequired (atomic) across the method-probe 402 and a fresh
- * 402 on the same settle method/route. Divergence or zero rejects with
- * REJECTED_QUOTE_UNSTABLE so adapt can fall through to the next fallback.
+ * Compares the atomic quote across the method-probe 402 and a fresh 402 on the
+ * same settle method/route. Stability means equality only. Missing/invalid
+ * extraction and stable-but-non-positive acceptability are classified separately.
  */
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
@@ -12,6 +12,10 @@ import { startAbortDeadline } from "./abort-deadline";
 import { planThinSettleRequest } from "./thin-settlement-method-contract";
 
 export const REJECTED_QUOTE_UNSTABLE = "REJECTED_QUOTE_UNSTABLE";
+/** One or both 402 responses did not yield a valid unsigned integer atomic quote. */
+export const REJECTED_QUOTE_EXTRACTION_FAILED = "REJECTED_QUOTE_EXTRACTION_FAILED";
+/** Equal live quotes were extracted, but their atomic value is not positive. */
+export const REJECTED_NON_POSITIVE_QUOTE = "REJECTED_NON_POSITIVE_QUOTE";
 /** The live 402 the stability probe read disagrees with the catalog/census quote. */
 export const REJECTED_QUOTE_SOURCE_DISAGREEMENT = "REJECTED_QUOTE_SOURCE_DISAGREEMENT";
 /** The 402 challenge is missing nonce and/or expiresAt. */
@@ -31,6 +35,8 @@ export interface BoundQuote {
   readonly atomic: string | null;
   readonly nonce: string | null;
   readonly expiresAt: string | null;
+  readonly rawSourceField: "maxAmountRequired" | "amount" | null;
+  readonly rawSourceValue: string | null;
 }
 
 export interface QuoteStabilityResult {
@@ -48,8 +54,8 @@ interface AcceptEntry {
   scheme?: string;
   network?: string;
   asset?: string;
-  amount?: string;
-  maxAmountRequired?: string;
+  amount?: unknown;
+  maxAmountRequired?: unknown;
   payTo?: string;
   nonce?: unknown;
   expiresAt?: unknown;
@@ -62,7 +68,30 @@ interface PaymentEnvelope {
   expiresAt?: unknown;
 }
 
-const EMPTY_BOUND_QUOTE: BoundQuote = { atomic: null, nonce: null, expiresAt: null };
+const EMPTY_BOUND_QUOTE: BoundQuote = {
+  atomic: null,
+  nonce: null,
+  expiresAt: null,
+  rawSourceField: null,
+  rawSourceValue: null,
+};
+
+interface RawAtomicQuoteSource {
+  readonly field: "maxAmountRequired" | "amount";
+  readonly value: unknown;
+}
+
+interface SelectedUsdcAccept {
+  readonly entry: AcceptEntry;
+  readonly atomic: string;
+  readonly rawSource: RawAtomicQuoteSource;
+}
+
+interface UsdcAcceptSelection {
+  readonly selected: SelectedUsdcAccept | null;
+  /** First matching USDC source, retained when its value cannot be parsed. */
+  readonly diagnosticSource: RawAtomicQuoteSource | null;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -111,9 +140,26 @@ function envelopeFromBody(body: unknown): PaymentEnvelope | null {
   return null;
 }
 
-function parseAtomic(value: string | undefined): string | null {
-  if (!value || !/^\d+$/.test(value)) return null;
+function parseAtomic(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
   return value;
+}
+
+function rawAtomicQuoteSource(entry: AcceptEntry): RawAtomicQuoteSource | null {
+  if (entry.maxAmountRequired !== null && entry.maxAmountRequired !== undefined) {
+    return { field: "maxAmountRequired", value: entry.maxAmountRequired };
+  }
+  if (entry.amount !== null && entry.amount !== undefined) {
+    return { field: "amount", value: entry.amount };
+  }
+  return null;
+}
+
+function displayRawSourceValue(source: RawAtomicQuoteSource | null): string | null {
+  if (!source || source.value === null || source.value === undefined) return null;
+  if (typeof source.value === "string") return source.value;
+  return JSON.stringify(source.value) ?? String(source.value);
 }
 
 function isUsdc(entry: AcceptEntry, expectedNetwork: string): boolean {
@@ -139,17 +185,25 @@ function nonEmptyString(value: unknown): string | null {
 function selectCheapestUsdcAccept(
   envelope: PaymentEnvelope,
   expectedNetwork: string,
-): { readonly entry: AcceptEntry; readonly atomic: string } | null {
-  let best: { entry: AcceptEntry; atomic: string; amount: bigint } | null = null;
+): UsdcAcceptSelection {
+  let best: (SelectedUsdcAccept & { readonly amount: bigint }) | null = null;
+  let diagnosticSource: RawAtomicQuoteSource | null = null;
   for (const entry of envelope.accepts ?? []) {
     if (entry.network !== expectedNetwork) continue;
     if (!isUsdc(entry, expectedNetwork)) continue;
-    const atomic = parseAtomic(entry.maxAmountRequired ?? entry.amount);
+    const rawSource = rawAtomicQuoteSource(entry);
+    diagnosticSource ??= rawSource;
+    const atomic = parseAtomic(rawSource?.value);
     if (atomic === null) continue;
     const amount = BigInt(atomic);
-    if (!best || amount < best.amount) best = { entry, atomic, amount };
+    if (!best || amount < best.amount) best = { entry, atomic, amount, rawSource: rawSource! };
   }
-  return best ? { entry: best.entry, atomic: best.atomic } : null;
+  return {
+    selected: best
+      ? { entry: best.entry, atomic: best.atomic, rawSource: best.rawSource }
+      : null,
+    diagnosticSource: best?.rawSource ?? diagnosticSource,
+  };
 }
 
 /**
@@ -163,7 +217,7 @@ export function extractMaxAmountRequiredAtomic(
   const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
   const envelope = envelopeFromHeaders(response.headers) ?? envelopeFromBody(response.body);
   if (!envelope?.accepts?.length) return null;
-  return selectCheapestUsdcAccept(envelope, expectedNetwork)?.atomic ?? null;
+  return selectCheapestUsdcAccept(envelope, expectedNetwork).selected?.atomic ?? null;
 }
 
 /**
@@ -179,8 +233,16 @@ export function extractBoundQuote(
   const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
   const envelope = envelopeFromHeaders(response.headers) ?? envelopeFromBody(response.body);
   if (!envelope?.accepts?.length) return EMPTY_BOUND_QUOTE;
-  const best = selectCheapestUsdcAccept(envelope, expectedNetwork);
-  if (!best) return EMPTY_BOUND_QUOTE;
+  const selection = selectCheapestUsdcAccept(envelope, expectedNetwork);
+  const rawSource = selection.diagnosticSource;
+  const best = selection.selected;
+  if (!best) {
+    return {
+      ...EMPTY_BOUND_QUOTE,
+      rawSourceField: rawSource?.field ?? null,
+      rawSourceValue: displayRawSourceValue(rawSource),
+    };
+  }
   const extra = best.entry.extra ?? {};
   return {
     atomic: best.atomic,
@@ -189,7 +251,19 @@ export function extractBoundQuote(
       nonEmptyString(best.entry.expiresAt) ??
       nonEmptyString(extra.expiresAt) ??
       nonEmptyString(envelope.expiresAt),
+    rawSourceField: best.rawSource.field,
+    rawSourceValue: displayRawSourceValue(best.rawSource),
   };
+}
+
+function quoteExtractionFailureReason(first: string | null, second: string | null): string | null {
+  const failures: string[] = [];
+  if (first === null) failures.push("first=missing");
+  else if (!/^\d+$/.test(first)) failures.push("first=invalid_unsigned_integer");
+  if (second === null) failures.push("second=missing");
+  else if (!/^\d+$/.test(second)) failures.push("second=invalid_unsigned_integer");
+  if (failures.length === 0) return null;
+  return `${REJECTED_QUOTE_EXTRACTION_FAILED}: first=${first ?? "null"} second=${second ?? "null"}; ${failures.join(", ")}`;
 }
 
 export function evaluateQuoteStability(
@@ -203,10 +277,11 @@ export function evaluateQuoteStability(
 
   const first = firstMaxAmountRequiredAtomic;
   const second = secondMaxAmountRequiredAtomic;
-  if (!first || !second || !/^\d+$/.test(first) || !/^\d+$/.test(second)) {
+  const extractionFailure = quoteExtractionFailureReason(first, second);
+  if (extractionFailure) {
     return {
       stable: false,
-      reason: `${REJECTED_QUOTE_UNSTABLE}: first=${first ?? "null"} second=${second ?? "null"}`,
+      reason: extractionFailure,
       evidence,
       bound: EMPTY_BOUND_QUOTE,
       httpStatus: null,
@@ -215,8 +290,7 @@ export function evaluateQuoteStability(
     };
   }
 
-  // Divergence includes zero: any zero quote or unequal pair is unstable.
-  if (first === "0" || second === "0" || first !== second) {
+  if (first !== second) {
     return {
       stable: false,
       reason: `${REJECTED_QUOTE_UNSTABLE}: first=${first} second=${second}`,
@@ -348,15 +422,15 @@ export async function probeQuoteStability(options: {
     second.maxAmountRequiredAtomic,
   );
   if (!evaluated.stable) {
+    const reason =
+      evaluated.reason?.includes(REJECTED_QUOTE_EXTRACTION_FAILED) && second.detail
+        ? `${evaluated.reason}; second_detail=${second.detail}`
+        : evaluated.reason;
     return {
       ...evaluated,
       bound: second.bound,
       httpStatus: second.httpStatus,
-      reason:
-        evaluated.reason ??
-        (second.detail
-          ? `${REJECTED_QUOTE_UNSTABLE}: ${second.detail}`
-          : `${REJECTED_QUOTE_UNSTABLE}: first=${options.firstMaxAmountRequiredAtomic ?? "null"} second=${second.maxAmountRequiredAtomic ?? "null"}`),
+      reason,
     };
   }
   return {

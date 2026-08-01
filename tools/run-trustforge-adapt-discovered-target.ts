@@ -1,10 +1,10 @@
 /**
  * run-trustforge-adapt-discovered-target — map target_selection.json primary to selected_candidate.json.
  *
- * After a live_402_ok handshake selection, runs a keyless settle-method probe (POST,
- * no payment header), then a second 402 for quote stability. 404/405/501 →
- * REJECTED_PAID_METHOD_NOT_HONORED; divergent/zero maxAmountRequired →
- * REJECTED_QUOTE_UNSTABLE. Falls through to the next fallback. Executor untouched.
+ * After a live_402_ok handshake selection, runs a keyless settle-method probe (POST/GET,
+ * no payment header), then a second 402 for quote stability. Method rejection,
+ * quote extraction, instability, and non-positive quotes use distinct fail-closed
+ * codes. Falls through to the next fallback. Executor untouched.
  */
 
 import { readFile, writeFile } from "node:fs/promises";

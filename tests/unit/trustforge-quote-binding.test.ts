@@ -7,6 +7,8 @@ import {
 import {
   extractBoundQuote,
   REJECTED_INCOMPLETE_402_CHALLENGE,
+  REJECTED_NON_POSITIVE_QUOTE,
+  REJECTED_QUOTE_EXTRACTION_FAILED,
   REJECTED_QUOTE_SOURCE_DISAGREEMENT,
 } from "../../tools/trustforge/quote-stability-probe";
 import type { ProviderBlocklist } from "../../tools/trustforge/provider-blocklist";
@@ -38,6 +40,19 @@ function body(
   return JSON.stringify(out);
 }
 
+function bodyUsingAmountField(
+  amount: string,
+  opts: { nonce?: string | null; expiresAt?: string | null } = {},
+): string {
+  const parsed = JSON.parse(body(amount, opts)) as {
+    accepts: Array<Record<string, unknown>>;
+  };
+  const accept = parsed.accepts[0]!;
+  delete accept.maxAmountRequired;
+  accept.amount = amount;
+  return JSON.stringify(parsed);
+}
+
 function response(bodyText: string): Response {
   return new Response(bodyText, { status: 402, headers: { "content-type": "application/json" } });
 }
@@ -63,6 +78,15 @@ function fetchReturning(bodyText: string) {
   }) as unknown as typeof fetch;
 }
 
+function fetchReturningSequence(...bodyTexts: string[]) {
+  let index = 0;
+  return vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    expect(containsX402PaymentHeader(init?.headers)).toBe(false);
+    const bodyText = bodyTexts[index++] ?? bodyTexts[bodyTexts.length - 1]!;
+    return response(bodyText);
+  }) as unknown as typeof fetch;
+}
+
 async function adaptOne(primary: DiscoveredTargetSelectionPrimary, fetchImpl: typeof fetch) {
   return adaptDiscoveredTargetWithPaidMethodProbe(
     { selection: { primary, fallbacks: [] } },
@@ -77,6 +101,8 @@ describe("extractBoundQuote", () => {
       atomic: "2000000",
       nonce: "probe-nonce",
       expiresAt: "2099-01-01T00:00:00.000Z",
+      rawSourceField: "maxAmountRequired",
+      rawSourceValue: "2000000",
     });
   });
 
@@ -98,6 +124,8 @@ describe("extractBoundQuote", () => {
       atomic: "1125",
       nonce: "n-extra",
       expiresAt: "2099-02-02T00:00:00.000Z",
+      rawSourceField: "maxAmountRequired",
+      rawSourceValue: "1125",
     });
   });
 
@@ -107,6 +135,85 @@ describe("extractBoundQuote", () => {
       atomic: "1125",
       nonce: null,
       expiresAt: null,
+      rawSourceField: "maxAmountRequired",
+      rawSourceValue: "1125",
+    });
+  });
+
+  it("retains the invalid raw amount source when extraction fails", () => {
+    const parsed = JSON.parse(body("-1"));
+    expect(extractBoundQuote({ headers: {}, body: parsed })).toEqual({
+      atomic: null,
+      nonce: null,
+      expiresAt: null,
+      rawSourceField: "maxAmountRequired",
+      rawSourceValue: "-1",
+    });
+  });
+});
+
+describe("adapt quote classification", () => {
+  it("rejects an equal zero quote as non-positive without false instability or materialization", async () => {
+    const fetchImpl = fetchReturning(bodyUsingAmountField("0"));
+    const result = await adaptOne(candidate("0", "0"), fetchImpl);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain(REJECTED_NON_POSITIVE_QUOTE);
+    expect(result.reason).not.toContain("REJECTED_QUOTE_UNSTABLE");
+    const rejection = result.rejectedCandidates.find((entry) =>
+      entry.reason.includes(REJECTED_NON_POSITIVE_QUOTE),
+    );
+    expect(rejection?.evidence?.quote_stability).toEqual({
+      first_max_amount_required_atomic: "0",
+      second_max_amount_required_atomic: "0",
+    });
+    expect(rejection?.evidence?.quote_validation).toEqual({
+      first_atomic: "0",
+      second_atomic: "0",
+      bound_atomic: "0",
+      raw_source_field: "amount",
+      raw_source_value: "0",
+      endpoint: "https://quote.example/api/upload",
+      method: "POST",
+      http_status: 402,
+      reason: rejection?.reason,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects absent amounts as extraction failure, never as instability", async () => {
+    const missingAmount = JSON.stringify({
+      x402Version: 2,
+      accepts: [
+        {
+          scheme: "exact",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          payTo: PAY_TO,
+        },
+      ],
+      nonce: "probe-nonce",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const result = await adaptOne(candidate("1125", "0.001125"), fetchReturning(missingAmount));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain(REJECTED_QUOTE_EXTRACTION_FAILED);
+    expect(result.reason).not.toContain("REJECTED_QUOTE_UNSTABLE");
+    const rejection = result.rejectedCandidates.find((entry) =>
+      entry.reason.includes(REJECTED_QUOTE_EXTRACTION_FAILED),
+    );
+    expect(rejection?.evidence?.quote_validation).toMatchObject({
+      first_atomic: null,
+      second_atomic: null,
+      bound_atomic: null,
+      raw_source_field: null,
+      raw_source_value: null,
+      endpoint: "https://quote.example/api/upload",
+      method: "POST",
+      http_status: 402,
     });
   });
 });
@@ -158,7 +265,11 @@ describe("adapt quote binding — REJECTED_INCOMPLETE_402_CHALLENGE", () => {
 
 describe("adapt quote binding — regression: stable, complete, agreeing quote materializes", () => {
   it("materializes with quote_atomic bound to the live 402 (identical to catalog) + binding evidence", async () => {
-    const result = await adaptOne(candidate("1125", "0.001125"), fetchReturning(body("1125")));
+    const fetchImpl = fetchReturningSequence(
+      body("1125", { nonce: "first-probe-nonce" }),
+      body("1125", { nonce: "second-bound-nonce" }),
+    );
+    const result = await adaptOne(candidate("1125", "0.001125"), fetchImpl);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -172,8 +283,15 @@ describe("adapt quote binding — regression: stable, complete, agreeing quote m
     expect(result.candidate.adapt_evidence?.quote_binding).toEqual({
       bound_atomic: "1125",
       catalog_atomic: "1125",
-      nonce: "probe-nonce",
+      nonce: "second-bound-nonce",
       expires_at: "2099-01-01T00:00:00.000Z",
     });
+    expect(result.quoteStability?.bound).toMatchObject({
+      atomic: "1125",
+      nonce: "second-bound-nonce",
+      rawSourceField: "maxAmountRequired",
+      rawSourceValue: "1125",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
