@@ -35,13 +35,25 @@ function paymentRequiredBody(amount: string, payTo = "0x222222222222222222222222
 }
 
 describe("provider blocklist config", () => {
-  it("ships api.onesource.io as an evidence-backed entry", () => {
+  it("retires the stale api.onesource.io block and preserves its evidence in watch", () => {
     const blocklist = loadProviderBlocklist();
     const entry = blocklist.entries.find((candidate) => candidate.domain === "api.onesource.io");
-    expect(entry).toBeDefined();
-    expect(entry?.reason).toBe("PAID_REQUEST_405_AFTER_KEYLESS_402_OK");
-    expect(entry?.evidence_runs).toEqual(["run_20260723_153238", "run_20260724_005838"]);
-    expect(typeof entry?.added_at).toBe("string");
+    expect(entry).toBeUndefined();
+
+    const watch = watchEntryFor("https://api.onesource.io/api/chain/chain-id", blocklist);
+    expect(watch).toMatchObject({
+      domain: "api.onesource.io",
+      status: "retired_stale_blocklist_entry",
+      reason: "legacy POST-only probe produced HTTP 405 against GET-catalogued endpoints",
+      decision: "retired after method-aware A.2 keyless revalidation",
+      audit_run:
+        "D:\\trustforge\\artifacts\\runs\\blocklist-revalidation\\run_20260802_010704",
+      evidence_runs: ["run_20260723_153238", "run_20260724_005838"],
+      reprobe_result: "25/25 HTTP 402, complete challenges, positive coherent quotes",
+      decided_by: "Gustavo",
+      effect: "watch only — must not exclude discovery/adapt candidates",
+    });
+    expect(Date.parse((watch as unknown as { decided_at_utc: string }).decided_at_utc)).not.toBeNaN();
   });
 
   it("documents that removal is a human decision", () => {
@@ -55,6 +67,14 @@ describe("provider blocklist config", () => {
     expect(entry).toBeDefined();
     expect(entry?.reason).toBe("PAY_TIME_402_EVAPORATION_AFTER_CONSISTENT_KEYLESS_402");
     expect(entry?.evidence_runs).toEqual(["run_20260724_044303", "run_20260726_130507"]);
+  });
+
+  it("keeps the blocklist config schema shape valid", () => {
+    const blocklist = loadProviderBlocklist();
+    expect(blocklist.schema_name).toBe("trustforge_x402_provider_blocklist");
+    expect(blocklist.schema_version).toBe("0.1.0");
+    expect(Array.isArray(blocklist.entries)).toBe(true);
+    expect(Array.isArray(blocklist.watch)).toBe(true);
   });
 });
 
@@ -77,6 +97,29 @@ describe("evidence-strict policy: siblings are watched, not blocked", () => {
       expect(watch?.related_to).toBe("stableenrich.dev");
       expect(watch?.reason).toBe("WATCH_SAME_OPERATOR_AS_BLOCKED_PEER");
     }
+  });
+
+  it("keeps retired OneSource non-excluding across host, path, endpoint, and subdomain", () => {
+    const urls = [
+      "https://api.onesource.io",
+      "https://api.onesource.io/api/chain/chain-id?network=ethereum",
+      "https://api.onesource.io/api/chain/block-number",
+      "https://deep.api.onesource.io/any/path",
+    ];
+    for (const url of urls) {
+      expect(isDomainBlocklisted(url, blocklist)).toBe(false);
+      expect(blocklistEntryFor(url, blocklist)).toBeNull();
+      expect(isDomainWatched(url, blocklist)).toBe(true);
+      expect(watchEntryFor(url, blocklist)?.domain).toBe("api.onesource.io");
+    }
+
+    const { allowed, skipped } = partitionByBlocklist(
+      urls.map((resourceUrl) => ({ resourceUrl })),
+      blocklist,
+      (item) => item.resourceUrl,
+    );
+    expect(allowed.map((item) => item.resourceUrl)).toEqual(urls);
+    expect(skipped).toEqual([]);
   });
 
   it("keeps a watched-domain candidate in the allowed set (reaches selection)", () => {
@@ -135,8 +178,8 @@ describe("provider blocklist matching", () => {
   });
 });
 
-describe("adapt excludes blocklisted domains before ranking", () => {
-  const blocklistedEndpoint = "https://api.onesource.io/x402";
+describe("adapt applies excluding entries but not watch entries", () => {
+  const retiredWatchEndpoint = "https://api.onesource.io/x402";
   const cleanEndpoint = "https://clean.example/x402";
 
   function selection(primaryUrl: string, fallbackUrls: string[]) {
@@ -168,13 +211,11 @@ describe("adapt excludes blocklisted domains before ranking", () => {
     };
   }
 
-  it("skips a blocklisted primary (via the shipped config), never probes it, and selects the clean fallback", async () => {
+  it("probes and selects the retired OneSource primary because shipped watch is non-excluding", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       expect(containsX402PaymentHeader(init?.headers)).toBe(false);
-      // A blocklisted domain must never be contacted at all.
-      expect(url.startsWith("https://api.onesource.io")).toBe(false);
-      if (url === cleanEndpoint) {
+      if (url === retiredWatchEndpoint) {
         return new Response(paymentRequiredBody("1125"), {
           status: 402,
           headers: { "content-type": "application/json" },
@@ -184,30 +225,21 @@ describe("adapt excludes blocklisted domains before ranking", () => {
     }) as unknown as typeof fetch;
 
     const result = await adaptDiscoveredTargetWithPaidMethodProbe(
-      selection(blocklistedEndpoint, [cleanEndpoint]),
+      selection(retiredWatchEndpoint, [cleanEndpoint]),
       { thin: true, fetchImpl, now: new Date("2026-07-24T00:00:00.000Z") },
     );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.candidate.endpoint).toBe(cleanEndpoint);
+    expect(result.candidate.endpoint).toBe(retiredWatchEndpoint);
     const onesourceRejection = result.rejectedCandidates.find(
-      (r) => r.resourceUrl === blocklistedEndpoint,
+      (r) => r.resourceUrl === retiredWatchEndpoint,
     );
-    expect(onesourceRejection?.reason).toBe(
-      `${SKIPPED_BLOCKLISTED}: api.onesource.io (PAID_REQUEST_405_AFTER_KEYLESS_402_OK)`,
-    );
-    expect(onesourceRejection?.evidence?.blocklist).toMatchObject({
-      domain: "api.onesource.io",
-      reason: "PAID_REQUEST_405_AFTER_KEYLESS_402_OK",
-      evidence_runs: ["run_20260723_153238", "run_20260724_005838"],
-    });
-    // A.3: the reinterpretation note ships with the entry.
-    expect(onesourceRejection?.evidence?.blocklist?.reinterpretation).toContain("POST-to-GET");
-    const contactedOnesource = fetchImpl.mock.calls.some(([url]) =>
-      String(url).startsWith("https://api.onesource.io"),
-    );
-    expect(contactedOnesource).toBe(false);
+    expect(onesourceRejection).toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // method probe + quote-stability probe
+    expect(
+      fetchImpl.mock.calls.every(([url]) => String(url).startsWith(retiredWatchEndpoint)),
+    ).toBe(true);
   });
 
   it("never reaches a selected candidate when every candidate is blocklisted", async () => {

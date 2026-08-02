@@ -5,13 +5,6 @@
   "watch_note": "watch[] is NOT a blocklist: watched domains are never excluded from discovery/adapt. The blocklist is strictly evidence-based — a domain is blocked only on its OWN failing runs. Peers that merely share an apparent operator with a blocked domain (guilt-by-association, no run of their own) are recorded here for attention only. A watched domain graduates to entries[] only when it earns its own evidence run — a human decision.",
   "entries": [
     {
-      "domain": "api.onesource.io",
-      "reason": "PAID_REQUEST_405_AFTER_KEYLESS_402_OK",
-      "evidence_runs": ["run_20260723_153238", "run_20260724_005838"],
-      "added_at": "2026-07-24T00:00:00Z",
-      "reinterpretation": "2026-07-25: the 405 was our own POST-to-GET mismatch (the thin runner POSTs unconditionally while this candidate's catalog method is GET), not a seller defect. Kept as a blocklist entry until a method-aware executor (spec A.2) ships; once settle honors the catalog method, re-evaluate with fresh evidence. Removal remains a human decision."
-    },
-    {
       "domain": "stableenrich.dev",
       "reason": "PAY_TIME_402_EVAPORATION_AFTER_CONSISTENT_KEYLESS_402",
       "evidence_runs": ["run_20260724_044303", "run_20260726_130507"],
@@ -20,6 +13,19 @@
     }
   ],
   "watch": [
+    {
+      "domain": "api.onesource.io",
+      "status": "retired_stale_blocklist_entry",
+      "reason": "legacy POST-only probe produced HTTP 405 against GET-catalogued endpoints",
+      "decision": "retired after method-aware A.2 keyless revalidation",
+      "audit_run": "D:\\trustforge\\artifacts\\runs\\blocklist-revalidation\\run_20260802_010704",
+      "evidence_runs": ["run_20260723_153238", "run_20260724_005838"],
+      "reprobe_result": "25/25 HTTP 402, complete challenges, positive coherent quotes",
+      "added_at": "2026-08-02T06:06:29Z",
+      "decided_by": "Gustavo",
+      "decided_at_utc": "2026-08-02T06:06:29Z",
+      "effect": "watch only — must not exclude discovery/adapt candidates"
+    },
     {
       "domain": "stableupload.dev",
       "reason": "WATCH_SAME_OPERATOR_AS_BLOCKED_PEER",
