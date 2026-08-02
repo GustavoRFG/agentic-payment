@@ -26,6 +26,8 @@ import {
   MAINNET_BUYER_WALLET,
 } from "./network-config";
 import { executeSingleX402Settlement } from "./x402-single-settlement-executor";
+import { createThinSettlementRequestBinding } from "./thin-settlement-request-binding";
+import { planThinSettleRequest } from "./thin-settlement-method-contract";
 
 export interface RichPaidResponse {
   readonly httpStatus: number;
@@ -109,6 +111,15 @@ export async function performRichTxExplainerPaidRequest(options: {
     options.txHash,
     options.policy.targetChainId,
   );
+  const requestBinding = createThinSettlementRequestBinding({
+    endpoint: options.handshake.endpointUrl,
+    method: options.policy.method,
+    input_status: "known",
+    query: [],
+    body: requestBody,
+  });
+  const requestPlan = planThinSettleRequest({ requestBinding });
+  if (!requestPlan.supported) throw new Error(requestPlan.reason);
   const maxAmountAtomic = parseUsdcDecimalToAtomic(options.policy.maxTotalSpendUsdc).toString();
 
   const settlement = await executeSingleX402Settlement({
@@ -116,10 +127,12 @@ export async function performRichTxExplainerPaidRequest(options: {
       network: options.handshake.network,
       privateKeyEnvName: MAINNET_BUYER_PRIVATE_KEY_ENV,
       expectedBuyerAddress: MAINNET_BUYER_WALLET,
-      endpoint: options.handshake.endpointUrl,
-      method: options.policy.method,
+      endpoint: requestPlan.endpoint,
+      method: requestPlan.method,
       authorizedMethod: options.authorizedMethod,
-      body: requestBody,
+      authorizedRequestBindingSha256: requestBinding.binding_sha256,
+      plannedRequestBinding: requestBinding,
+      body: requestPlan.body,
       asset,
       payTo: options.handshake.payTo,
       quotedAmountAtomic: options.handshake.amountAtomic,

@@ -31,6 +31,16 @@ export {
 } from "./facilitator-settlement-receipt";
 
 import { assertAuthorizationMethodBinding } from "./authorization-method-binding";
+import {
+  bindingFromOutboundRequest,
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
+  BLOCKED_INTENT_REQUEST_BINDING_MISMATCH,
+  BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH,
+  requireThinSettlementRequestBinding,
+  thinSettlementRequestSummary,
+  type ThinSettlementRequestBinding,
+} from "./thin-settlement-request-binding";
 
 export interface SingleSettlementRequest {
   readonly network: string;
@@ -45,6 +55,10 @@ export interface SingleSettlementRequest {
    * never infers authorization from the request it is about to send.
    */
   readonly authorizedMethod: string | null;
+  /** Human-authorized request-shape hash. Never inferred from the planned request. */
+  readonly authorizedRequestBindingSha256: string | null;
+  /** Canonical request shape produced by the caller's planner. */
+  readonly plannedRequestBinding: ThinSettlementRequestBinding | null;
   readonly body?: unknown;
   readonly asset: string;
   readonly payTo: string;
@@ -80,6 +94,13 @@ export interface SingleSettlementExecutionResult {
   readonly attemptId: string;
   readonly intent: SettlementIntent;
   readonly intentPath: string;
+  readonly requestBinding: {
+    readonly authorization_request_binding_sha256: string;
+    readonly selected_candidate_request_binding_sha256: string;
+    readonly planned_request_binding_sha256: string;
+    readonly intent_request_binding_sha256: string;
+    readonly outbound_request_binding_sha256: string;
+  };
 }
 
 export interface PaymentRequiredIntentSpec {
@@ -154,13 +175,42 @@ export async function executeSingleX402Settlement(input: {
     candidateMethod: req.method,
     plannedMethod: req.method,
   });
-  const { privateKey, buyerAddress, chainId: _chainId } = assertSettlementNetworkGuards({
-    network: req.network,
-    privateKeyEnvName: req.privateKeyEnvName,
-    expectedBuyerAddress: req.expectedBuyerAddress,
-    asset: req.asset,
-    env,
+
+  const authorizedRequestBindingSha256 =
+    req.authorizedRequestBindingSha256?.trim().toLowerCase();
+  if (!authorizedRequestBindingSha256) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: shared executor requires explicit authorization binding`,
+    );
+  }
+  if (!req.plannedRequestBinding) {
+    throw new Error(
+      `${BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH}: planned request binding missing`,
+    );
+  }
+  let plannedRequestBinding: ThinSettlementRequestBinding;
+  try {
+    plannedRequestBinding = requireThinSettlementRequestBinding(req.plannedRequestBinding);
+  } catch (error) {
+    throw new Error(
+      `${BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (authorizedRequestBindingSha256 !== plannedRequestBinding.binding_sha256) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: authorization differs from planned request`,
+    );
+  }
+  const outboundRequestBinding = bindingFromOutboundRequest({
+    endpoint: req.endpoint,
+    method: req.method,
+    body: req.method === "GET" ? null : req.body,
   });
+  if (outboundRequestBinding.binding_sha256 !== plannedRequestBinding.binding_sha256) {
+    throw new Error(
+      `${BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH}: planned request differs from outbound request`,
+    );
+  }
 
   if (BigInt(req.quotedAmountAtomic) > BigInt(req.maxAmountAtomic)) {
     throw new Error(
@@ -175,11 +225,13 @@ export async function executeSingleX402Settlement(input: {
     runId,
     authorizationHash: req.authorizationHash,
     network: req.network,
-    buyer: buyerAddress,
+    buyer: req.expectedBuyerAddress,
     payTo: req.payTo,
     asset: req.asset,
     amountAtomic: req.quotedAmountAtomic,
     method: req.method,
+    requestBindingSha256: plannedRequestBinding.binding_sha256,
+    requestSummary: thinSettlementRequestSummary(plannedRequestBinding),
   });
   // Intent-bound leg of the same gate: the persisted intent now carries the verb, so
   // the authorized method is also checked against what this attempt will actually
@@ -189,6 +241,21 @@ export async function executeSingleX402Settlement(input: {
     candidateMethod: req.method,
     plannedMethod: req.method,
     intentMethod: intent.method,
+  });
+  if (intent.request_binding_sha256 !== plannedRequestBinding.binding_sha256) {
+    throw new Error(
+      `${BLOCKED_INTENT_REQUEST_BINDING_MISMATCH}: intent differs from planned request`,
+    );
+  }
+
+  // All authorization/planner/intent/outbound request-shape gates above run before
+  // this call, which is the first operation allowed to read the private key.
+  const { privateKey, buyerAddress, chainId: _chainId } = assertSettlementNetworkGuards({
+    network: req.network,
+    privateKeyEnvName: req.privateKeyEnvName,
+    expectedBuyerAddress: req.expectedBuyerAddress,
+    asset: req.asset,
+    env,
   });
   const intentPath = await persistSettlementIntent(req.runDir, intent);
 
@@ -206,7 +273,7 @@ export async function executeSingleX402Settlement(input: {
     const unpaid = await fetchImpl(req.endpoint, {
       method: req.method,
       headers,
-      body: req.method === "POST" ? JSON.stringify(req.body ?? {}) : undefined,
+      body: req.method === "POST" ? JSON.stringify(req.body) : undefined,
       redirect: "manual",
     });
     if (unpaid.status !== 402) {
@@ -256,7 +323,7 @@ export async function executeSingleX402Settlement(input: {
   const response = await fetchWithPayment(req.endpoint, {
     method: req.method,
     headers,
-    body: req.method === "POST" ? JSON.stringify(req.body ?? {}) : undefined,
+    body: req.method === "POST" ? JSON.stringify(req.body) : undefined,
     redirect: "manual",
   });
 
@@ -299,5 +366,12 @@ export async function executeSingleX402Settlement(input: {
     attemptId,
     intent,
     intentPath,
+    requestBinding: {
+      authorization_request_binding_sha256: authorizedRequestBindingSha256,
+      selected_candidate_request_binding_sha256: plannedRequestBinding.binding_sha256,
+      planned_request_binding_sha256: plannedRequestBinding.binding_sha256,
+      intent_request_binding_sha256: intent.request_binding_sha256!,
+      outbound_request_binding_sha256: outboundRequestBinding.binding_sha256,
+    },
   };
 }

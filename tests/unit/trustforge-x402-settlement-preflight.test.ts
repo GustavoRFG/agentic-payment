@@ -13,6 +13,7 @@ import {
   type ChainStateReader,
   type X402PreflightResult,
 } from "../../tools/trustforge/x402-settlement-preflight";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const NOW = new Date("2026-07-06T00:00:00.000Z");
 const MAINNET_PAY_TO = "0x43a2a720cd0911690c248075f4a29a5e7716f758";
@@ -26,10 +27,11 @@ function makeRunDir(): string {
 }
 
 function mainnetCandidate(overrides: Record<string, unknown> = {}) {
-  return {
+  const candidate = {
     provider: "zapper",
     service_id: "zapper_tx_explainer",
     endpoint: ZAPPER_TX_EXPLAINER_POLICY.endpointUrl,
+    method: "POST" as const,
     quote_amount_usdc: "0.001125",
     quote_atomic: "1125",
     authorized_pay_to: MAINNET_PAY_TO,
@@ -46,13 +48,29 @@ function mainnetCandidate(overrides: Record<string, unknown> = {}) {
     selected_at_utc: NOW.toISOString(),
     ...overrides,
   };
+  const binding = createThinSettlementRequestBinding({
+    endpoint: String(candidate.endpoint),
+    method: String(candidate.method),
+    input_status: "known",
+    query: [],
+    body: candidate.method === "GET" ? null : {},
+  });
+  return {
+    ...candidate,
+    request_input_status: "known" as const,
+    request_query: binding.query,
+    request_body: binding.body,
+    request_input_provenance: "legacy_explicit_request_binding" as const,
+    request_binding_sha256: binding.binding_sha256,
+  };
 }
 
 function sepoliaCandidate(overrides: Record<string, unknown> = {}) {
-  return {
+  const candidate = {
     provider: "sepolia_local_seller",
     service_id: "local_analyze_text",
     endpoint: "http://localhost:4021/paid/analyze-text",
+    method: "POST" as const,
     quote_amount_usdc: "0.001",
     quote_atomic: "1000",
     authorized_pay_to: "0xf75d6B83D366a6E9Fc2fb8bf113D67050c44F392",
@@ -68,6 +86,21 @@ function sepoliaCandidate(overrides: Record<string, unknown> = {}) {
     },
     selected_at_utc: NOW.toISOString(),
     ...overrides,
+  };
+  const binding = createThinSettlementRequestBinding({
+    endpoint: String(candidate.endpoint),
+    method: String(candidate.method),
+    input_status: "known",
+    query: [],
+    body: { text: "TrustForge Sepolia freshness probe.", mode: "full" },
+  });
+  return {
+    ...candidate,
+    request_input_status: "known" as const,
+    request_query: binding.query,
+    request_body: binding.body,
+    request_input_provenance: "legacy_explicit_request_binding" as const,
+    request_binding_sha256: binding.binding_sha256,
   };
 }
 

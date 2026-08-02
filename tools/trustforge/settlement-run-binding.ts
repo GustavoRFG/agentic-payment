@@ -3,6 +3,7 @@
  */
 
 import type { SanitizedFacilitatorReceipt } from "./facilitator-settlement-receipt";
+import type { ThinSettlementRequestSummary } from "./thin-settlement-request-binding";
 
 export const CLOCK_SKEW_TOLERANCE_MS = 120_000 as const;
 export const ONCHAIN_SETTLEMENT_GRACE_MS = 30 * 60 * 1000 as const;
@@ -30,6 +31,8 @@ export interface SettlementIntent {
   readonly amount_atomic: string;
   /** HTTP method bound to this attempt; must equal the authorized method. */
   readonly method?: string;
+  readonly request_binding_sha256?: string;
+  readonly request_summary?: ThinSettlementRequestSummary;
   readonly request_started_at_utc: string;
 }
 
@@ -108,6 +111,8 @@ export function buildSettlementIntent(input: {
   readonly asset: string;
   readonly amountAtomic: string;
   readonly method?: string;
+  readonly requestBindingSha256?: string;
+  readonly requestSummary?: ThinSettlementRequestSummary;
   readonly now?: Date;
 }): SettlementIntent {
   return {
@@ -120,6 +125,10 @@ export function buildSettlementIntent(input: {
     asset: input.asset.toLowerCase(),
     amount_atomic: input.amountAtomic,
     ...(input.method ? { method: input.method } : {}),
+    ...(input.requestBindingSha256
+      ? { request_binding_sha256: input.requestBindingSha256 }
+      : {}),
+    ...(input.requestSummary ? { request_summary: input.requestSummary } : {}),
     request_started_at_utc: (input.now ?? new Date()).toISOString(),
   };
 }

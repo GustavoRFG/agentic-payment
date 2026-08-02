@@ -44,6 +44,10 @@ import {
   SEPOLIA_X402_SETTLEMENT_PROFILE,
   type X402SettlementProfile,
 } from "../../tools/trustforge/x402-settlement-profile";
+import {
+  createThinSettlementRequestBinding,
+  thinSettlementRequestSummary,
+} from "../../tools/trustforge/thin-settlement-request-binding";
 
 const thinSpy = vi.mocked(executeThinX402Settlement);
 const coreMock = vi.mocked(executeSingleX402Settlement);
@@ -62,14 +66,34 @@ function cannedCoreResult(profile: X402SettlementProfile): unknown {
     facilitatorReceipt: { source: "payment-response-header", parseStatus: "parsed", transaction_hash: "0xabc" },
     attemptId: "attempt_1",
     intentPath: "intent.json",
+    requestBinding: {
+      authorization_request_binding_sha256: "binding",
+      selected_candidate_request_binding_sha256: "binding",
+      planned_request_binding_sha256: "binding",
+      intent_request_binding_sha256: "binding",
+      outbound_request_binding_sha256: "binding",
+    },
   };
 }
 
 async function makeRunDir(network: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "x402-callchain-"));
+  const binding = createThinSettlementRequestBinding({
+    endpoint: "https://seller.example/x402",
+    method: "POST",
+    input_status: "known",
+    query: [],
+    body: null,
+  });
   await writeFile(
     join(dir, "human_payment_authorization.json"),
-    JSON.stringify({ decision: "APPROVE", max_usdc: "0.01", method: "POST" }),
+    JSON.stringify({
+      decision: "APPROVE",
+      max_usdc: "0.01",
+      method: "POST",
+      request_binding_sha256: binding.binding_sha256,
+      request_summary: thinSettlementRequestSummary(binding),
+    }),
     "utf8",
   );
   await writeFile(
@@ -78,6 +102,11 @@ async function makeRunDir(network: string): Promise<string> {
       network,
       endpoint: "https://seller.example/x402",
       method: "POST",
+      request_input_status: "known",
+      request_query: binding.query,
+      request_body: binding.body,
+      request_input_provenance: "legacy_explicit_request_binding",
+      request_binding_sha256: binding.binding_sha256,
       quote_amount_usdc: "0.001",
       quote_atomic: "1000",
       authorized_pay_to: "0xSeLLeR",

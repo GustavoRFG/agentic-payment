@@ -39,6 +39,12 @@ describe("thin settlement method contract", () => {
       ),
       "utf8",
     );
+    const bindingSource = readFileSync(
+      fileURLToPath(
+        new URL("../../tools/trustforge/thin-settlement-request-binding.ts", import.meta.url),
+      ),
+      "utf8",
+    );
     const probeSource = readFileSync(
       fileURLToPath(
         new URL("../../tools/trustforge/paid-method-honored-probe.ts", import.meta.url),
@@ -46,7 +52,11 @@ describe("thin settlement method contract", () => {
       "utf8",
     );
 
-    expect(contractSource).not.toMatch(/\bfrom\s+["']/);
+    expect(contractSource).toContain('from "./thin-settlement-request-binding"');
+    expect(contractSource).not.toContain("./paid-method-honored-probe");
+    expect(bindingSource).not.toContain("./thin-settlement-method-contract");
+    expect(bindingSource).not.toContain("./target-");
+    expect(bindingSource).not.toContain("./x402-");
     expect(plannerSource).not.toContain("./paid-method-honored-probe");
     expect(probeSource).not.toContain("./thin-settlement-request-plan");
 

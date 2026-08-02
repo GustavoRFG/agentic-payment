@@ -14,6 +14,7 @@ import {
 import type { ProviderBlocklist } from "../../tools/trustforge/provider-blocklist";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const EMPTY_BLOCKLIST: ProviderBlocklist = { entries: [] };
 const PAY_TO = "0x2222222222222222222222222222222222222222";
@@ -58,10 +59,24 @@ function response(bodyText: string): Response {
 }
 
 function candidate(quoteAtomic: string, quoteUsdc: string): DiscoveredTargetSelectionPrimary {
+  const endpoint = "https://quote.example/api/upload";
+  const binding = createThinSettlementRequestBinding({
+    endpoint,
+    method: "POST",
+    input_status: "known",
+    query: [],
+    body: {},
+  });
   return {
     method: "POST",
     handshakeStatus: "live_402_ok",
-    resourceUrl: "https://quote.example/api/upload",
+    resourceUrl: endpoint,
+    requestEndpoint: binding.endpoint,
+    requestInputStatus: "known",
+    requestQuery: binding.query,
+    requestBody: binding.body,
+    requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+    requestBindingSha256: binding.binding_sha256,
     quoteUsdc,
     quoteAtomic,
     selectedPayTo: PAY_TO,

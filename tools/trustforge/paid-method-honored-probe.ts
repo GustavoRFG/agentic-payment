@@ -13,6 +13,7 @@ import {
   isThinRunnerSettleableMethod,
   planThinSettleRequest,
 } from "./thin-settlement-method-contract";
+import type { ThinSettlementRequestBinding } from "./thin-settlement-request-binding";
 export {
   REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
 } from "./thin-settlement-method-contract";
@@ -51,12 +52,10 @@ export interface PaidMethodHonoredProbeResult {
 }
 
 export interface PaidMethodHonoredProbeOptions {
-  readonly endpoint: string;
-  readonly method?: string | null;
+  readonly requestBinding: ThinSettlementRequestBinding;
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
-  readonly body?: unknown;
 }
 
 function lowerHeaders(headers: Headers): Record<string, string> {
@@ -73,16 +72,14 @@ export async function probePaidMethodHonored(
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
   const plan = planThinSettleRequest({
-    method: options.method,
-    endpoint: options.endpoint,
-    body: options.body ?? {},
+    requestBinding: options.requestBinding,
   });
   if (!plan.supported) {
     return {
       honored: false,
       httpStatus: null,
       method: plan.method,
-      endpoint: options.endpoint,
+      endpoint: options.requestBinding.endpoint,
       maxAmountRequiredAtomic: null,
       reason: plan.reason,
       walletUsed: false,
@@ -107,7 +104,7 @@ export async function probePaidMethodHonored(
     const response = await fetchImpl(endpoint, {
       method,
       headers,
-      body: plan.sendBody ? JSON.stringify(plan.body ?? {}) : undefined,
+      body: plan.sendBody ? JSON.stringify(plan.body) : undefined,
       redirect: "manual",
       signal: deadline.signal,
     });

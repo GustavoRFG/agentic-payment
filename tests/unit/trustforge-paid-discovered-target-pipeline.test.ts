@@ -12,8 +12,16 @@ import { evaluateFresh402AgainstAuthorizedQuote } from "../../tools/trustforge/p
 import { runPhase6SinglePaidRichProbe } from "../../tools/run-trustforge-phase6-single-paid-rich-probe";
 import { validateHumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
 import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
+const requestBinding = createThinSettlementRequestBinding({
+  endpoint,
+  method: "POST",
+  input_status: "known",
+  query: [],
+  body: { hash: "0xabc", chainId: 1 },
+});
 
 describe("paid discovered target pipeline (offline/testnet-safe)", () => {
   it("adapts canonical discovery, drafts authorization, and blocks preflight no-go before key load", async () => {
@@ -22,8 +30,15 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
       const adapted = adaptDiscoveredPrimaryToSelectedCandidate({
         selection: {
           primary: {
+            method: "POST",
             handshakeStatus: "live_402_ok",
             resourceUrl: endpoint,
+            requestEndpoint: requestBinding.endpoint,
+            requestInputStatus: "known",
+            requestQuery: requestBinding.query,
+            requestBody: requestBinding.body,
+            requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+            requestBindingSha256: requestBinding.binding_sha256,
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
@@ -76,6 +91,7 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
           quote_atomic: adapted.candidate.quote_atomic,
           authorized_max_usdc: auth.max_usdc,
           pay_to: adapted.candidate.authorized_pay_to,
+          request_binding: requestBinding,
         },
       );
       expect(noGo.go).toBe(false);

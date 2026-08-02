@@ -7,6 +7,7 @@ import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearin
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { atomicUsdcToDecimal } from "./external-x402-get-policy";
 import type { TargetAccept, TargetCandidate } from "./target-candidates";
+import { planThinSettleRequest } from "./thin-settlement-method-contract";
 
 export type TargetHandshakeStatus =
   | "live_402_ok"
@@ -242,14 +243,6 @@ function cheapest(entries: readonly AcceptEntry[]): AcceptEntry | null {
   return best?.entry ?? null;
 }
 
-function requestBodyFromCandidate(candidate: TargetCandidate): unknown {
-  for (const record of nestedRecords(candidate.registrationMetadata)) {
-    if (isRecord(record.input) && isRecord(record.input.body)) return record.input.body;
-    if (isRecord(record.body)) return record.body;
-  }
-  return {};
-}
-
 export function classifyTargetProbeResponse(
   candidate: TargetCandidate,
   response: RecordedProbeResponse,
@@ -439,6 +432,27 @@ export async function probeTargetLiveness(
   candidate: TargetCandidate,
   options: ProbeTargetOptions,
 ): Promise<TargetHandshakeOutcome> {
+  if (!candidate.requestBinding) {
+    return {
+      candidateId: candidate.candidateId,
+      resourceUrl: candidate.resourceUrl,
+      status: "malformed",
+      httpStatus: null,
+      selectedAccept: null,
+      challenge: { nonce: null, expiresAt: null },
+      quoteAtomic: null,
+      quoteUsdc: null,
+      rawResponse: { httpStatus: null, headers: {}, body: null, bodySha256: null },
+      detail: candidate.requestBindingError ?? "REJECTED_REQUEST_BINDING_NOT_PERSISTED",
+      walletUsed: false,
+      paymentAttempted: false,
+      paymentBearingHttpRequestCount: 0,
+    };
+  }
+  const plan = planThinSettleRequest({ requestBinding: candidate.requestBinding });
+  if (!plan.supported) {
+    throw new Error(plan.reason);
+  }
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
   const controller = new AbortController();
@@ -447,16 +461,15 @@ export async function probeTargetLiveness(
   (timer as { unref?: () => void }).unref?.();
 
   const headers = new Headers({ accept: "application/json" });
-  const bodyAllowed = ["POST", "PUT", "PATCH"].includes(candidate.method);
-  const body = bodyAllowed ? JSON.stringify(requestBodyFromCandidate(candidate)) : undefined;
-  if (bodyAllowed) headers.set("content-type", "application/json");
+  const body = plan.sendBody ? JSON.stringify(plan.body) : undefined;
+  if (plan.sendBody) headers.set("content-type", "application/json");
   if (containsX402PaymentHeader(headers)) {
     throw new Error("target liveness probe unexpectedly contains a payment header");
   }
 
   try {
-    const response = await fetchImpl(candidate.resourceUrl, {
-      method: candidate.method,
+    const response = await fetchImpl(plan.endpoint, {
+      method: plan.method,
       headers,
       body,
       redirect: "manual",

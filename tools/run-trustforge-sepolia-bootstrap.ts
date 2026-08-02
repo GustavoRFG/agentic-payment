@@ -6,7 +6,10 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { adaptDiscoveredPrimaryToSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
+import {
+  adaptDiscoveredPrimaryToSelectedCandidate,
+  requestBindingFromSelectedCandidate,
+} from "./trustforge/discovered-target-to-selected-candidate";
 import { runPaidQuoteFreshnessPreflight } from "./trustforge/paid-quote-freshness-preflight";
 import {
   buildSepoliaTargetSelectionFromHandshake,
@@ -85,6 +88,7 @@ async function main(): Promise<number> {
       pay_to: adapted.candidate.authorized_pay_to,
       network: adapted.candidate.network,
       asset: adapted.candidate.asset,
+      request_binding: requestBindingFromSelectedCandidate(adapted.candidate),
     },
   });
   await writeFile(

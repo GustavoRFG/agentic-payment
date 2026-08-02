@@ -7,6 +7,7 @@ import {
   selectTargets,
   stableStringifyTargetSelection,
 } from "../../tools/trustforge/target-selection";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 function candidate(input: {
   readonly id: string;
@@ -23,6 +24,15 @@ function candidate(input: {
       sortKey: input.freshness,
     },
     registrationMetadata: {},
+    requestBinding: createThinSettlementRequestBinding({
+      endpoint: input.url,
+      method: "GET",
+      input_status: "known",
+      query: [],
+      body: null,
+    }),
+    requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+    requestBindingError: null,
     accepts: [
       {
         scheme: "exact",

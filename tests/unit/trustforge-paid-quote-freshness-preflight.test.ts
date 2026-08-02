@@ -10,9 +10,17 @@ import {
 } from "../../tools/trustforge/paid-quote-freshness-preflight";
 import type { TargetHandshakeOutcome } from "../../tools/trustforge/target-liveness";
 import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const repoRoot = join(__dirname, "..", "..");
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
+const authorizedRequestBinding = createThinSettlementRequestBinding({
+  endpoint,
+  method: "POST",
+  input_status: "known",
+  query: [],
+  body: {},
+});
 
 const authorized = {
   endpoint,
@@ -20,6 +28,7 @@ const authorized = {
   quote_atomic: "1125",
   authorized_max_usdc: "0.01",
   pay_to: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+  request_binding: authorizedRequestBinding,
 };
 
 function liveOutcome(overrides: Partial<TargetHandshakeOutcome> = {}): TargetHandshakeOutcome {
@@ -144,14 +153,23 @@ describe("paid quote freshness pre-flight", () => {
   });
 
   it("builds a generic probe candidate for non-allowlisted discovered endpoints", () => {
+    const genericEndpoint = "https://valid-provider.example/x402/tx-details";
+    const genericBinding = createThinSettlementRequestBinding({
+      endpoint: genericEndpoint,
+      method: "GET",
+      input_status: "known",
+      query: { network: "ethereum" },
+      body: null,
+    });
     const candidate = buildProbeCandidateForAuthorizedQuote({
       ...authorized,
-      endpoint: "https://valid-provider.example/x402/tx-details",
+      endpoint: genericEndpoint,
       method: "GET",
+      request_binding: genericBinding,
       network: "eip155:8453",
       asset: MAINNET_USDC_ADDRESS,
     });
-    expect(candidate.resourceUrl).toBe("https://valid-provider.example/x402/tx-details");
+    expect(candidate.resourceUrl).toBe(genericEndpoint);
     expect(candidate.method).toBe("GET");
     expect(candidate.accepts[0]).toMatchObject({
       network: "eip155:8453",

@@ -42,7 +42,7 @@ export interface TargetResolutionSafety {
 }
 
 export interface TargetResolutionReport {
-  readonly schema_version: "trustforge_target_resolution.v1";
+  readonly schema_version: "trustforge_target_resolution.v2";
   readonly stage: "TARGET RESOLUTION";
   readonly mode: "dry_run_no_payment";
   readonly discovery: {
@@ -70,6 +70,9 @@ export interface TargetResolutionReport {
     readonly resourceUrl: string;
     readonly method: TargetCandidate["method"];
     readonly freshnessSortKey: string;
+    readonly requestBinding: TargetCandidate["requestBinding"];
+    readonly requestInputProvenance: TargetCandidate["requestInputProvenance"];
+    readonly requestBindingError: string | null;
   }[];
   readonly handshakeOutcomes: readonly TargetHandshakeOutcome[];
   readonly selection: TargetSelectionReport;
@@ -89,7 +92,7 @@ export interface CanonicalTargetHandshakeSummary {
 }
 
 export interface CanonicalTargetResolution {
-  readonly schema_version: "trustforge_target_resolution.v1";
+  readonly schema_version: "trustforge_target_resolution.v2";
   readonly stage: TargetResolutionReport["stage"];
   readonly mode: TargetResolutionReport["mode"];
   readonly discovery: TargetResolutionReport["discovery"];
@@ -110,7 +113,8 @@ export interface CanonicalTargetResolution {
 }
 
 export interface TargetResolutionEvidence {
-  readonly schema_version: "trustforge_target_resolution_evidence.v1";
+  readonly schema_version: "trustforge_target_resolution_evidence.v2";
+  readonly candidateRequestBindings: TargetResolutionReport["candidates"];
   readonly handshakeOutcomes: readonly TargetHandshakeOutcome[];
 }
 
@@ -226,7 +230,8 @@ export function targetResolutionEvidence(
   report: TargetResolutionReport,
 ): TargetResolutionEvidence {
   return {
-    schema_version: "trustforge_target_resolution_evidence.v1",
+    schema_version: "trustforge_target_resolution_evidence.v2",
+    candidateRequestBindings: report.candidates,
     handshakeOutcomes: report.handshakeOutcomes,
   };
 }
@@ -299,7 +304,7 @@ export async function runTargetResolution(
   });
 
   const report: TargetResolutionReport = {
-    schema_version: "trustforge_target_resolution.v1",
+    schema_version: "trustforge_target_resolution.v2",
     stage: "TARGET RESOLUTION",
     mode: "dry_run_no_payment",
     discovery: {
@@ -320,6 +325,9 @@ export async function runTargetResolution(
       resourceUrl: candidate.resourceUrl,
       method: candidate.method,
       freshnessSortKey: candidate.freshness.sortKey,
+      requestBinding: candidate.requestBinding,
+      requestInputProvenance: candidate.requestInputProvenance,
+      requestBindingError: candidate.requestBindingError,
     })),
     handshakeOutcomes,
     selection,

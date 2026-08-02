@@ -2,7 +2,10 @@
  * x402-thin-settlement-executor — network-parameterized thin wrapper over shared x402 executor.
  */
 
-import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
+import {
+  requestBindingFromSelectedCandidate,
+  type DiscoveredSelectedCandidate,
+} from "./discovered-target-to-selected-candidate";
 import { parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
 import { runPaidQuoteFreshnessPreflight } from "./paid-quote-freshness-preflight";
 import {
@@ -13,7 +16,16 @@ import {
   executeSingleX402Settlement,
   type SingleSettlementExecutionResult,
 } from "./x402-single-settlement-executor";
-import { planThinSettleRequest } from "./thin-settlement-request-plan";
+import {
+  isThinRunnerSettleableMethod,
+  planThinSettleRequest,
+  REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
+} from "./thin-settlement-request-plan";
+import {
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
+  BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH,
+} from "./thin-settlement-request-binding";
 import {
   assertAuthorizationMethodBinding,
   type AuthorizationMethodBindingEvidence,
@@ -42,16 +54,13 @@ export interface ThinSettlementExecutionResult {
   readonly methodBinding: AuthorizationMethodBindingEvidence & {
     readonly request_method: string;
   };
+  readonly requestBinding: SingleSettlementExecutionResult["requestBinding"];
 }
 
 export function buildThinSettlementRequestBody(profile: X402SettlementProfile): unknown {
-  if (profile.id === "sepolia") {
-    return {
-      text: "TrustForge Sepolia settlement proof — single authorized attempt.",
-      mode: "full",
-    };
-  }
-  return {};
+  throw new Error(
+    `REJECTED_REQUEST_BINDING_NOT_PERSISTED: ${profile.id} request body fallback is disabled`,
+  );
 }
 
 function mapThinResult(
@@ -61,6 +70,7 @@ function mapThinResult(
 ): ThinSettlementExecutionResult {
   return {
     methodBinding,
+    requestBinding: result.requestBinding,
     ok: result.ok,
     status: result.status,
     httpStatus: result.httpStatus,
@@ -86,14 +96,34 @@ export async function executeThinX402Settlement(input: {
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly skipFreshnessPreflight?: boolean;
-  readonly requestBody?: unknown;
 }): Promise<ThinSettlementExecutionResult> {
   const env = input.env ?? process.env;
   assertProfileEnvBeforeSettlement(input.profile, env);
 
+  if (!isThinRunnerSettleableMethod(input.selected.method)) {
+    throw new Error(
+      `BLOCKED_METHOD_NOT_SETTLEABLE: ${REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER}: ${String(input.selected.method)} not settleable by the thin runner`,
+    );
+  }
+  assertAuthorizationMethodBinding({
+    authorizationMethod: input.auth.method,
+    candidateMethod: input.selected.method,
+  });
+
   const validation = validateHumanPaymentAuthorization(input.auth, input.selected);
   if (!validation.valid) {
     throw new Error(`BLOCKED_INVALID_PAYMENT_AUTHORIZATION: ${validation.reasons.join("; ")}`);
+  }
+
+  const requestBinding = requestBindingFromSelectedCandidate(input.selected);
+  const authorizedRequestBinding = input.auth.request_binding_sha256?.trim().toLowerCase();
+  if (!authorizedRequestBinding) {
+    throw new Error(`${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: authorization hash absent`);
+  }
+  if (authorizedRequestBinding !== requestBinding.binding_sha256) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: authorization differs from selected_candidate`,
+    );
   }
 
   if (!input.skipFreshnessPreflight) {
@@ -106,6 +136,7 @@ export async function executeThinX402Settlement(input: {
         pay_to: input.selected.authorized_pay_to,
         network: input.selected.network,
         asset: input.selected.asset,
+        request_binding: requestBinding,
       },
       fetchImpl: input.fetchImpl,
     });
@@ -116,17 +147,18 @@ export async function executeThinX402Settlement(input: {
 
   const maxAmountAtomic = parseUsdcDecimalToAtomic(input.auth.max_usdc).toString();
   const asset = input.selected.asset ?? expectedAssetForProfile(input.profile);
-  const body = input.requestBody ?? buildThinSettlementRequestBody(input.profile);
-
   // A.2: method-aware request shaping via the pre-tested planner. Fail-closed BEFORE
   // any payment — an unsupported method never reaches the shared executor.
   const plan = planThinSettleRequest({
-    method: input.selected.method,
-    endpoint: input.selected.endpoint,
-    body,
+    requestBinding,
   });
   if (!plan.supported) {
     throw new Error(`BLOCKED_METHOD_NOT_SETTLEABLE: ${plan.reason}`);
+  }
+  if (plan.requestBindingSha256 !== requestBinding.binding_sha256) {
+    throw new Error(
+      `${BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH}: planner differs from selected_candidate`,
+    );
   }
 
   // Pre-live method binding gate. Throws BEFORE the shared executor is reached, so a
@@ -151,6 +183,8 @@ export async function executeThinX402Settlement(input: {
       endpoint: plan.endpoint,
       method: plan.method,
       authorizedMethod: input.auth.method!,
+      authorizedRequestBindingSha256: authorizedRequestBinding,
+      plannedRequestBinding: plan.requestBinding,
       body: plan.sendBody ? plan.body : undefined,
       asset,
       payTo: input.selected.authorized_pay_to,

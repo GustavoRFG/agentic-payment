@@ -51,6 +51,7 @@ import { runPaidQuoteFreshnessPreflight } from "./trustforge/paid-quote-freshnes
 import { ZAPPER_TX_EXPLAINER_POLICY } from "./trustforge/rich-tx-explainer-policy";
 import { verifyBaseUsdcPayment } from "./trustforge/verify-base-usdc-payment";
 import { parseUsdcDecimalToAtomic } from "./trustforge/external-x402-get-policy";
+import { requestBindingFromSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -201,6 +202,7 @@ export async function runPhase6SinglePaidRichProbe(
         quote_atomic: quoteAtomic,
         authorized_max_usdc: auth.max_usdc,
         pay_to: payTo,
+        request_binding: requestBindingFromSelectedCandidate(selected),
       },
       fetchImpl: options.fetchImpl,
       now: options.now,

@@ -5,10 +5,20 @@ import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import {
   isMethodSupportedByThinRunner,
   probePaidMethodHonored,
-  REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
   REJECTED_PAID_METHOD_NOT_HONORED,
   SETTLEMENT_PAID_HTTP_METHOD,
 } from "../../tools/trustforge/paid-method-honored-probe";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+
+function requestBinding(endpoint: string, method: "GET" | "POST", query: unknown, body: unknown) {
+  return createThinSettlementRequestBinding({
+    endpoint,
+    method,
+    input_status: "known",
+    query,
+    body,
+  });
+}
 
 function paymentRequiredBody(amount: string): string {
   return JSON.stringify({
@@ -48,10 +58,11 @@ describe("paid method honored probe", () => {
   it("POST preserves endpoint and body, with zero payment headers", async () => {
     const endpoint = "https://seller.example/x402";
     const body = { tx: "0xabc", chain: "base" };
+    const binding = requestBinding(endpoint, "POST", [], body);
     const fetchImpl = vi.fn(async (input, init) => {
       expect(String(input)).toBe(endpoint);
       expect(init?.method).toBe(SETTLEMENT_PAID_HTTP_METHOD);
-      expect(init?.body).toBe(JSON.stringify(body));
+      expect(init?.body).toBe(JSON.stringify(binding.body));
       expectNoPaymentHeaders(init?.headers);
       return new Response(paymentRequiredBody("1125"), {
         status: 402,
@@ -60,9 +71,7 @@ describe("paid method honored probe", () => {
     }) as unknown as typeof fetch;
 
     const result = await probePaidMethodHonored({
-      endpoint,
-      method: "POST",
-      body,
+      requestBinding: binding,
       fetchImpl,
     });
     expect(result.honored).toBe(true);
@@ -91,9 +100,12 @@ describe("paid method honored probe", () => {
     }) as unknown as typeof fetch;
 
     const result = await probePaidMethodHonored({
-      endpoint,
-      method: "GET",
-      body: { tx: "0xabc", chain: "base" },
+      requestBinding: requestBinding(
+        endpoint,
+        "GET",
+        { tx: "0xabc", chain: "base" },
+        null,
+      ),
       fetchImpl,
     });
 
@@ -106,28 +118,16 @@ describe("paid method honored probe", () => {
     expect(fetchImpl.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
-  it.each(["PUT", "PATCH", "DELETE", "HEAD"])(
-    "blocks unsupported %s before fetch",
-    async (method) => {
-      const fetchImpl = vi.fn() as unknown as typeof fetch;
-      const result = await probePaidMethodHonored({
-        endpoint: "https://unsupported.example/x402",
-        method,
-        fetchImpl,
-      });
-      expect(result.honored).toBe(false);
-      expect(result.reason).toContain(REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER);
-      expect(fetchImpl).not.toHaveBeenCalled();
-    },
-  );
-
   it.each([404, 405, 501])("rejects HTTP %s as REJECTED_PAID_METHOD_NOT_HONORED", async (status) => {
     const endpoint = "https://seller.example/x402";
     const fetchImpl = vi.fn(async (_input, init) => {
       expectNoPaymentHeaders(init?.headers);
       return new Response("nope", { status });
     }) as unknown as typeof fetch;
-    const result = await probePaidMethodHonored({ endpoint, fetchImpl });
+    const result = await probePaidMethodHonored({
+      requestBinding: requestBinding(endpoint, "POST", [], null),
+      fetchImpl,
+    });
     expect(result.honored).toBe(false);
     expect(result.httpStatus).toBe(status);
     expect(result.maxAmountRequiredAtomic).toBeNull();

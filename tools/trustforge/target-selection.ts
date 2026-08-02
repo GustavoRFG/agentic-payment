@@ -4,6 +4,11 @@
 
 import type { TargetCandidate } from "./target-candidates";
 import type { TargetHandshakeOutcome } from "./target-liveness";
+import type {
+  CanonicalJsonValue,
+  CanonicalQuery,
+  RequestInputProvenance,
+} from "./thin-settlement-request-binding";
 
 export interface TargetReliabilityMetric {
   readonly resourceUrl: string;
@@ -25,6 +30,12 @@ export interface TargetSelectionEntry {
   readonly candidateId: string;
   readonly resourceUrl: string;
   readonly method: TargetCandidate["method"];
+  readonly requestEndpoint: string;
+  readonly requestInputStatus: "known";
+  readonly requestQuery: CanonicalQuery;
+  readonly requestBody: CanonicalJsonValue | null;
+  readonly requestInputProvenance: RequestInputProvenance;
+  readonly requestBindingSha256: string;
   readonly handshakeStatus: "live_402_ok";
   readonly quoteAtomic: string;
   readonly quoteUsdc: string;
@@ -36,7 +47,7 @@ export interface TargetSelectionEntry {
 }
 
 export interface TargetSelectionReport {
-  readonly schema_version: "trustforge_target_selection.v1";
+  readonly schema_version: "trustforge_target_selection.v2";
   readonly selection_mode: "dry_run_no_payment";
   readonly primary: TargetSelectionEntry | null;
   readonly fallbacks: readonly TargetSelectionEntry[];
@@ -85,7 +96,13 @@ function entryFromOutcome(
   outcome: TargetHandshakeOutcome,
   reliabilityMetrics: readonly TargetReliabilityMetric[],
 ): TargetSelectionEntry | null {
-  if (outcome.status !== "live_402_ok" || !outcome.quoteAtomic || !outcome.quoteUsdc) {
+  if (
+    outcome.status !== "live_402_ok" ||
+    !outcome.quoteAtomic ||
+    !outcome.quoteUsdc ||
+    !candidate.requestBinding ||
+    !candidate.requestInputProvenance
+  ) {
     return null;
   }
   const reliabilityScore = reliabilityFor(candidate.resourceUrl, reliabilityMetrics);
@@ -94,6 +111,12 @@ function entryFromOutcome(
     candidateId: candidate.candidateId,
     resourceUrl: candidate.resourceUrl,
     method: candidate.method,
+    requestEndpoint: candidate.requestBinding.endpoint,
+    requestInputStatus: candidate.requestBinding.input_status,
+    requestQuery: candidate.requestBinding.query,
+    requestBody: candidate.requestBinding.body,
+    requestInputProvenance: candidate.requestInputProvenance,
+    requestBindingSha256: candidate.requestBinding.binding_sha256,
     handshakeStatus: "live_402_ok",
     quoteAtomic: outcome.quoteAtomic,
     quoteUsdc: outcome.quoteUsdc,
@@ -140,7 +163,7 @@ export function selectTargets(input: {
   const selectedIds = new Set(ranked.map((entry) => entry.candidateId));
 
   return {
-    schema_version: "trustforge_target_selection.v1",
+    schema_version: "trustforge_target_selection.v2",
     selection_mode: "dry_run_no_payment",
     primary: ranked[0] ?? null,
     fallbacks: ranked.slice(1),

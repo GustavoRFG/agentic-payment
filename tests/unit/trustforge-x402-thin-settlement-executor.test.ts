@@ -23,6 +23,10 @@ import type { HumanPaymentAuthorization } from "../../tools/trustforge/validate-
 import { executeSingleX402Settlement } from "../../tools/trustforge/x402-single-settlement-executor";
 import { executeThinX402Settlement } from "../../tools/trustforge/x402-thin-settlement-executor";
 import { MAINNET_X402_SETTLEMENT_PROFILE } from "../../tools/trustforge/x402-settlement-profile";
+import {
+  createThinSettlementRequestBinding,
+  thinSettlementRequestSummary,
+} from "../../tools/trustforge/thin-settlement-request-binding";
 
 const ENDPOINT = "https://seller.example/x402";
 const REQUEST_BODY = { tx: "0xabc", chain: "base" };
@@ -47,11 +51,24 @@ const authorization: HumanPaymentAuthorization = {
 };
 
 function selected(method: DiscoveredSelectedCandidate["method"]): DiscoveredSelectedCandidate {
+  const settleableMethod = method === "GET" ? "GET" : "POST";
+  const requestBinding = createThinSettlementRequestBinding({
+    endpoint: ENDPOINT,
+    method: settleableMethod,
+    input_status: "known",
+    query: settleableMethod === "GET" ? REQUEST_BODY : [],
+    body: settleableMethod === "GET" ? null : REQUEST_BODY,
+  });
   return {
     provider: authorization.provider,
     service_id: authorization.service_id,
     endpoint: ENDPOINT,
     method,
+    request_input_status: "known",
+    request_query: requestBinding.query,
+    request_body: requestBinding.body,
+    request_input_provenance: "bazaar.extensions.bazaar.info.input",
+    request_binding_sha256: requestBinding.binding_sha256,
     quote_amount_usdc: "0.001",
     quote_atomic: "1000",
     authorized_pay_to: "0x1111111111111111111111111111111111111111",
@@ -83,6 +100,13 @@ function cannedCoreResult(): unknown {
     facilitatorReceipt: { parseStatus: "absent" },
     attemptId: "attempt_unit_test",
     intentPath: "intent-unit-test.json",
+    requestBinding: {
+      authorization_request_binding_sha256: "binding",
+      selected_candidate_request_binding_sha256: "binding",
+      planned_request_binding_sha256: "binding",
+      intent_request_binding_sha256: "binding",
+      outbound_request_binding_sha256: "binding",
+    },
   };
 }
 
@@ -98,7 +122,6 @@ async function executeWithAuth(
     authorizationHash: "unit-test-authorization-hash",
     env: {},
     skipFreshnessPreflight: true,
-    requestBody: REQUEST_BODY,
   });
 }
 
@@ -107,7 +130,20 @@ async function execute(
   method: DiscoveredSelectedCandidate["method"],
   authMethod: string | null = method,
 ) {
-  return executeWithAuth(method, { ...authorization, method: authMethod });
+  const candidate = selected(method);
+  const binding = createThinSettlementRequestBinding({
+    endpoint: candidate.endpoint,
+    method: method === "GET" ? "GET" : "POST",
+    input_status: "known",
+    query: candidate.request_query,
+    body: candidate.request_body,
+  });
+  return executeWithAuth(method, {
+    ...authorization,
+    method: authMethod,
+    request_binding_sha256: binding.binding_sha256,
+    request_summary: thinSettlementRequestSummary(binding),
+  });
 }
 
 describe("x402 thin settlement executor A.2 planner wiring", () => {
@@ -206,7 +242,19 @@ describe("pre-live authorization method binding at the thin executor", () => {
   });
 
   it("blocks an authorization whose method key is absent entirely", async () => {
-    const { method: _omitted, ...authWithoutMethod } = authorization;
+    const candidate = selected("POST");
+    const binding = createThinSettlementRequestBinding({
+      endpoint: candidate.endpoint,
+      method: "POST",
+      input_status: "known",
+      query: candidate.request_query,
+      body: candidate.request_body,
+    });
+    const { method: _omitted, ...authWithoutMethod } = {
+      ...authorization,
+      request_binding_sha256: binding.binding_sha256,
+      request_summary: thinSettlementRequestSummary(binding),
+    };
     await expect(
       executeWithAuth("POST", authWithoutMethod as HumanPaymentAuthorization),
     ).rejects.toThrow("BLOCKED_AUTHORIZATION_METHOD_MISSING");
@@ -232,4 +280,39 @@ describe("pre-live authorization method binding at the thin executor", () => {
       expect(coreMock).not.toHaveBeenCalled();
     },
   );
+
+  it("blocks missing or mismatched authorization request binding before the shared executor", async () => {
+    await expect(
+      executeWithAuth("POST", { ...authorization, method: "POST" }),
+    ).rejects.toThrow("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING");
+    await expect(
+      executeWithAuth("POST", {
+        ...authorization,
+        method: "POST",
+        request_binding_sha256: "0".repeat(64),
+      }),
+    ).rejects.toThrow("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH");
+    expect(coreMock).not.toHaveBeenCalled();
+  });
+
+  it("detects selected-candidate request input tampering before the shared executor", async () => {
+    const candidate = selected("GET");
+    const auth = {
+      ...authorization,
+      method: "GET",
+      request_binding_sha256: candidate.request_binding_sha256,
+    };
+    await expect(
+      executeThinX402Settlement({
+        profile: MAINNET_X402_SETTLEMENT_PROFILE,
+        runDir: "D:\\tmp\\trustforge-a3-unit-test",
+        auth,
+        selected: { ...candidate, request_query: [] },
+        authorizationHash: "unit-test-authorization-hash",
+        env: {},
+        skipFreshnessPreflight: true,
+      }),
+    ).rejects.toThrow("REJECTED_REQUEST_BINDING_INVALID");
+    expect(coreMock).not.toHaveBeenCalled();
+  });
 });

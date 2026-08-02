@@ -18,6 +18,8 @@ import {
 } from "../../tools/trustforge/settlement-test-credentials";
 import { SEPOLIA_BUYER_PRIVATE_KEY_ENV, SEPOLIA_TESTNET_BUYER_WALLET } from "../../tools/trustforge/network-config";
 import { TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { planThinSettleRequest } from "../../tools/trustforge/thin-settlement-method-contract";
 
 const AUTHORIZED_PAY_TO = "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71";
 const AUTHORIZED_AMOUNT = "1000";
@@ -68,6 +70,20 @@ function mock402Fetch(paymentRequiredHeader: string): typeof fetch {
   ) as typeof fetch;
 }
 
+function requestBindingFields(endpoint: string, method: "GET" | "POST", body: unknown) {
+  const plannedRequestBinding = createThinSettlementRequestBinding({
+    endpoint,
+    method,
+    input_status: "known",
+    query: [],
+    body: method === "GET" ? null : body,
+  });
+  return {
+    authorizedRequestBindingSha256: plannedRequestBinding.binding_sha256,
+    plannedRequestBinding,
+  };
+}
+
 describe("x402-single-settlement-executor pre-live method binding", () => {
   /**
    * env is deliberately empty: if the binding did not block first, the call would fail
@@ -75,13 +91,16 @@ describe("x402-single-settlement-executor pre-live method binding", () => {
    * any key is read, nothing is signed, and no request is made.
    */
   function requestWith(method: "GET" | "POST", authorizedMethod: string | null) {
+    const endpoint = "https://seller.example/x402";
     return {
       network: TESTNET_NETWORK,
       privateKeyEnvName: SEPOLIA_BUYER_PRIVATE_KEY_ENV,
       expectedBuyerAddress: SEPOLIA_TESTNET_BUYER_WALLET,
-      endpoint: "https://seller.example/x402",
+      endpoint,
       method,
       authorizedMethod,
+      body: method === "POST" ? null : undefined,
+      ...requestBindingFields(endpoint, method, null),
       asset: TESTNET_USDC_ADDRESS,
       payTo: AUTHORIZED_PAY_TO,
       quotedAmountAtomic: AUTHORIZED_AMOUNT,
@@ -157,9 +176,143 @@ describe("x402-single-settlement-executor pre-live method binding", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it.each(["authorization", "planned"] as const)(
+    "blocks a missing %s request binding before key read, fetch, or payment header",
+    async (missing) => {
+      const complete = requestWith("POST", "POST");
+      const request = { ...complete } as Record<string, unknown>;
+      delete request[
+        missing === "authorization"
+          ? "authorizedRequestBindingSha256"
+          : "plannedRequestBinding"
+      ];
+      const keyGuard = vi.spyOn(networkGuards, "assertSettlementNetworkGuards");
+      const fetchImpl = vi.fn() as unknown as typeof fetch;
+      const paymentBearingGuard = createPaymentBearingRequestGuard({
+        maxPaymentBearingRequests: 1,
+      });
+      try {
+        await expect(
+          executeSingleX402Settlement({
+            request: request as unknown as SingleSettlementRequest,
+            env: {},
+            fetchImpl,
+            paymentBearingGuard,
+          }),
+        ).rejects.toThrow(
+          missing === "authorization"
+            ? "BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING"
+            : "BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH",
+        );
+        expect(keyGuard).not.toHaveBeenCalled();
+        expect(fetchImpl).not.toHaveBeenCalled();
+        expect(paymentBearingGuard.getPaymentBearingRequests()).toBe(0);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    },
+  );
+
+  it("blocks changed GET query and POST body before key read", async () => {
+    const keyGuard = vi.spyOn(networkGuards, "assertSettlementNetworkGuards");
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const getBinding = createThinSettlementRequestBinding({
+      endpoint: "https://api.onesource.io/api/chain/network-info",
+      method: "GET",
+      input_status: "known",
+      query: { network: "ethereum" },
+      body: null,
+    });
+    const postBinding = createThinSettlementRequestBinding({
+      endpoint: "https://seller.example/x402",
+      method: "POST",
+      input_status: "known",
+      query: [],
+      body: { network: "ethereum" },
+    });
+    try {
+      for (const request of [
+        {
+          ...requestWith("GET", "GET"),
+          endpoint: "https://api.onesource.io/api/chain/network-info?network=base",
+          authorizedRequestBindingSha256: getBinding.binding_sha256,
+          plannedRequestBinding: getBinding,
+        },
+        {
+          ...requestWith("POST", "POST"),
+          endpoint: postBinding.endpoint,
+          body: { network: "base" },
+          authorizedRequestBindingSha256: postBinding.binding_sha256,
+          plannedRequestBinding: postBinding,
+        },
+      ]) {
+        await expect(
+          executeSingleX402Settlement({ request, env: {}, fetchImpl }),
+        ).rejects.toThrow("BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH");
+      }
+      expect(keyGuard).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 describe("x402-single-settlement-executor", () => {
+  it("preserves a complete GET request binding through planner, intent, and outbound", async () => {
+    vi.spyOn(networkGuards, "assertSettlementNetworkGuards").mockReturnValue({
+      privateKey: TEST_SIGNING_KEY_A,
+      buyerAddress: TEST_SIGNING_ADDRESS_A,
+      chainId: 84532,
+    });
+    const binding = createThinSettlementRequestBinding({
+      endpoint: "https://api.onesource.io/api/chain/network-info",
+      method: "GET",
+      input_status: "known",
+      query: { network: "ethereum" },
+      body: null,
+    });
+    const plan = planThinSettleRequest({ requestBinding: binding });
+    expect(plan.supported).toBe(true);
+    if (!plan.supported) return;
+    const dir = await mkdtemp(join(tmpdir(), "tf-get-binding-"));
+    try {
+      const result = await executeSingleX402Settlement({
+        request: {
+          network: TESTNET_NETWORK,
+          privateKeyEnvName: SEPOLIA_BUYER_PRIVATE_KEY_ENV,
+          expectedBuyerAddress: TEST_SIGNING_ADDRESS_A,
+          endpoint: plan.endpoint,
+          method: plan.method,
+          authorizedMethod: "GET",
+          authorizedRequestBindingSha256: binding.binding_sha256,
+          plannedRequestBinding: binding,
+          body: undefined,
+          asset: TESTNET_USDC_ADDRESS,
+          payTo: AUTHORIZED_PAY_TO,
+          quotedAmountAtomic: AUTHORIZED_AMOUNT,
+          maxAmountAtomic: "2000",
+          runDir: dir,
+          authorizationHash: "hash",
+          require402BeforePayment: false,
+        },
+        env: { [SEPOLIA_BUYER_PRIVATE_KEY_ENV]: TEST_SIGNING_KEY_A },
+        fetchImpl: vi.fn(),
+      });
+      expect(new Set(Object.values(result.requestBinding)).size).toBe(1);
+      expect(result.intent.request_summary).toMatchObject({
+        method: "GET",
+        query: [["network", "ethereum"]],
+        body: null,
+      });
+      expect(result.paymentBearingHttpRequestCount).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      vi.restoreAllMocks();
+    }
+  });
+
   it("persists pre-call settlement intent before request", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tf-intent-"));
     try {
@@ -199,6 +352,11 @@ describe("x402-single-settlement-executor", () => {
           method: "POST",
           authorizedMethod: "POST",
           body: { text: "test" },
+          ...requestBindingFields(
+            "http://localhost:4021/paid/analyze-text",
+            "POST",
+            { text: "test" },
+          ),
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
           quotedAmountAtomic: "5000",
@@ -223,6 +381,8 @@ describe("x402-single-settlement-executor", () => {
           endpoint: "http://localhost:4021/paid/analyze-text",
           method: "POST",
           authorizedMethod: "POST",
+          body: null,
+          ...requestBindingFields("http://localhost:4021/paid/analyze-text", "POST", null),
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
           quotedAmountAtomic: AUTHORIZED_AMOUNT,
@@ -259,6 +419,11 @@ describe("x402-single-settlement-executor", () => {
           method: "POST",
           authorizedMethod: "POST",
           body: { text: "test" },
+          ...requestBindingFields(
+            "http://localhost:4021/paid/analyze-text",
+            "POST",
+            { text: "test" },
+          ),
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
           quotedAmountAtomic: AUTHORIZED_AMOUNT,
@@ -280,6 +445,15 @@ describe("x402-single-settlement-executor", () => {
       expect(saved.transaction_hash).toBe(SETTLEMENT_TX.toLowerCase());
       expect(saved.contains_secret_material).toBe(false);
       expect(JSON.stringify(saved).toLowerCase()).not.toContain("privatekey");
+      const intent = JSON.parse(await readFile(result.intentPath, "utf8"));
+      expect(intent.request_binding_sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(intent.request_summary).toMatchObject({
+        method: "POST",
+        endpoint: "http://localhost:4021/paid/analyze-text",
+        query: [],
+        body: { text: "test" },
+      });
+      expect(new Set(Object.values(result.requestBinding))).toHaveProperty("size", 1);
     } finally {
       await rm(dir, { recursive: true, force: true });
       vi.restoreAllMocks();
@@ -325,6 +499,11 @@ describe("payment-required intent match", () => {
           method: "POST",
           authorizedMethod: "POST",
           body: { text: "test" },
+          ...requestBindingFields(
+            "http://localhost:4021/paid/analyze-text",
+            "POST",
+            { text: "test" },
+          ),
           asset: TESTNET_USDC_ADDRESS,
           payTo: AUTHORIZED_PAY_TO,
           quotedAmountAtomic: AUTHORIZED_AMOUNT,

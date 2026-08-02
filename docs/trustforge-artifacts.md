@@ -55,3 +55,14 @@ The `fast-track-e2e` run (`D:\trustforge\artifacts\runs\fast-track-e2e\run_<ts>`
 holds the run log, snapshots, governance/secret/binding reports, the T0C paid
 execution and on-chain verification, contracts validation, tests, builds, and the
 final report. Run `run_20260614_010720` is the first real paid T0C smoke (PASS).
+
+## Thin settlement request binding
+
+Fresh discovery output uses `trustforge_target_selection.v2` and
+`trustforge_target_resolution_evidence.v2`. Primary/fallback candidates and the
+corresponding evidence persist the canonical request endpoint, method, query,
+body, input provenance, and `request_binding_sha256`. A
+`selected_candidate.json` must carry the identical fields and hash. Artifacts
+from older schemas that do not persist the request binding fail closed with
+`REJECTED_REQUEST_BINDING_NOT_PERSISTED`; absence is never interpreted as an
+empty request input.

@@ -15,8 +15,32 @@ import { REJECTED_QUOTE_UNSTABLE } from "../../tools/trustforge/quote-stability-
 import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
+
+function requestFields(
+  resourceUrl: string,
+  method: "GET" | "POST",
+  query: unknown = [],
+  body: unknown = {},
+) {
+  const binding = createThinSettlementRequestBinding({
+    endpoint: resourceUrl,
+    method,
+    input_status: "known",
+    query,
+    body: method === "GET" ? null : body,
+  });
+  return {
+    requestEndpoint: binding.endpoint,
+    requestInputStatus: "known" as const,
+    requestQuery: binding.query,
+    requestBody: binding.body,
+    requestInputProvenance: "bazaar.extensions.bazaar.info.input" as const,
+    requestBindingSha256: binding.binding_sha256,
+  };
+}
 
 function paymentRequiredBody(amount: string, payTo = "0x2222222222222222222222222222222222222222"): string {
   return JSON.stringify({
@@ -37,13 +61,35 @@ function paymentRequiredBody(amount: string, payTo = "0x222222222222222222222222
 }
 
 describe("discovered target adapter", () => {
+  it("rejects an old target-selection artifact without a persisted request binding", () => {
+    const result = adaptDiscoveredPrimaryToThinSettlementCandidate({
+      selection: {
+        primary: {
+          method: "GET",
+          handshakeStatus: "live_402_ok",
+          resourceUrl: "https://api.onesource.io/api/chain/network-info",
+          quoteUsdc: "0.001",
+          quoteAtomic: "1000",
+          selectedPayTo: "0x1111111111111111111111111111111111111111",
+          scoringRationale: [],
+        },
+        fallbacks: [],
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("REJECTED_REQUEST_BINDING_NOT_PERSISTED");
+  });
+
   it("maps a live_402_ok primary to selected_candidate with audit metadata", () => {
     const result = adaptDiscoveredPrimaryToSelectedCandidate(
       {
         selection: {
           primary: {
+            method: "POST",
             handshakeStatus: "live_402_ok",
             resourceUrl: endpoint,
+            ...requestFields(endpoint, "POST"),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
@@ -110,6 +156,7 @@ describe("discovered target adapter", () => {
           method: "GET" as const,
           handshakeStatus: "live_402_ok",
           resourceUrl: autonomousEndpoint,
+          ...requestFields(autonomousEndpoint, "GET"),
           quoteUsdc: "0.001",
           quoteAtomic: "1000",
           selectedPayTo: "0x1111111111111111111111111111111111111111",
@@ -122,6 +169,7 @@ describe("discovered target adapter", () => {
             method: "POST" as const,
             handshakeStatus: "live_402_ok",
             resourceUrl: endpoint,
+            ...requestFields(endpoint, "POST"),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
@@ -182,6 +230,7 @@ describe("discovered target adapter", () => {
             method: "POST" as const,
             handshakeStatus: "live_402_ok",
             resourceUrl: postOkEndpoint,
+            ...requestFields(postOkEndpoint, "POST"),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x2222222222222222222222222222222222222222",
@@ -252,6 +301,7 @@ describe("discovered target adapter", () => {
           method: "GET" as const,
           handshakeStatus: "live_402_ok",
           resourceUrl: getOnlyEndpoint,
+          ...requestFields(getOnlyEndpoint, "GET", { network: "ethereum" }),
           quoteUsdc: "0.001125",
           quoteAtomic: "1125",
           selectedPayTo: "0x2222222222222222222222222222222222222222",
@@ -266,7 +316,9 @@ describe("discovered target adapter", () => {
       expect(containsX402PaymentHeader(init?.headers)).toBe(false);
       expect(new Headers(init?.headers).has("payment-signature")).toBe(false);
       expect(new Headers(init?.headers).has("x-payment")).toBe(false);
-      expect(String(input)).toBe(getOnlyEndpoint);
+      const url = new URL(String(input));
+      expect(url.origin + url.pathname).toBe(getOnlyEndpoint);
+      expect(url.searchParams.get("network")).toBe("ethereum");
       expect(init?.body).toBeUndefined();
       if (init?.method === "POST") {
         return new Response("Method Not Allowed", { status: 405 });
@@ -290,10 +342,44 @@ describe("discovered target adapter", () => {
     if (!result.ok) return;
     expect(result.candidate.endpoint).toBe(getOnlyEndpoint);
     expect(result.candidate.method).toBe("GET");
+    expect(result.candidate.request_query).toEqual([["network", "ethereum"]]);
+    expect(result.candidate.request_body).toBeNull();
+    expect(result.candidate.request_binding_sha256).toBe(
+      selection.selection.primary.requestBindingSha256,
+    );
     expect(result.paidMethodProbe?.method).toBe("GET");
     expect(result.paidMethodProbe?.httpStatus).toBe(402);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("detects a query change after target selection before any probe", async () => {
+    const target = "https://api.onesource.io/api/chain/network-info";
+    const persisted = requestFields(target, "GET", { network: "ethereum" });
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const result = await adaptDiscoveredTargetWithPaidMethodProbe(
+      {
+        selection: {
+          primary: {
+            method: "GET",
+            handshakeStatus: "live_402_ok",
+            resourceUrl: target,
+            ...persisted,
+            requestQuery: [["network", "base"]],
+            quoteUsdc: "0.001",
+            quoteAtomic: "1000",
+            selectedPayTo: "0x1111111111111111111111111111111111111111",
+            scoringRationale: [],
+          },
+          fallbacks: [],
+        },
+      },
+      { thin: true, fetchImpl, providerBlocklist: { entries: [] } },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("REJECTED_REQUEST_BINDING_INVALID");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects alternating maxAmountRequired quotes with REJECTED_QUOTE_UNSTABLE and falls back", async () => {
@@ -305,6 +391,7 @@ describe("discovered target adapter", () => {
           method: "POST" as const,
           handshakeStatus: "live_402_ok",
           resourceUrl: unstableEndpoint,
+          ...requestFields(unstableEndpoint, "POST"),
           quoteUsdc: "0.001",
           quoteAtomic: "1000",
           selectedPayTo: "0x1111111111111111111111111111111111111111",
@@ -317,6 +404,7 @@ describe("discovered target adapter", () => {
             method: "POST" as const,
             handshakeStatus: "live_402_ok",
             resourceUrl: stableEndpoint,
+            ...requestFields(stableEndpoint, "POST"),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x2222222222222222222222222222222222222222",

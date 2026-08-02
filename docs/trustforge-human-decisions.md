@@ -29,3 +29,11 @@ that the authorized run is complete:
   executor does not read directly. For the next run, set it as
   `BUYER_PRIVATE_KEY=0x…` in the process environment / secure loader. Consider
   rotating this dedicated wallet key since it surfaced in a session name-scan.
+
+## Request-shape authorization
+
+Any future human payment authorization must copy both
+`request_binding_sha256` and the auditable `request_summary` from the selected
+candidate. A missing or changed endpoint, method, query, or body requires a new
+candidate and a new human decision; agents must not reconstruct, default, or
+silently amend the authorized invocation shape.

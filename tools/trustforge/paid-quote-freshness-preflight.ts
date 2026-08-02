@@ -2,7 +2,7 @@
  * paid-quote-freshness-preflight — unsigned pay-time 402 re-handshake before key load.
  */
 
-import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
+import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
 import {
   classifyTargetProbeResponse,
@@ -12,13 +12,14 @@ import {
 } from "./target-liveness";
 import type { TargetCandidate } from "./target-candidates";
 import {
-  ALLOWLISTED_RICH_TX_EXPLAINER_POLICIES,
-  ZAPPER_TX_EXPLAINER_POLICY,
-} from "./rich-tx-explainer-policy";
+  requireThinSettlementRequestBinding,
+  type ThinSettlementRequestBinding,
+} from "./thin-settlement-request-binding";
 
 export interface AuthorizedPaymentQuote {
   readonly endpoint: string;
   readonly method?: TargetCandidate["method"];
+  readonly request_binding: ThinSettlementRequestBinding;
   readonly quote_amount_usdc: string;
   readonly quote_atomic: string;
   readonly authorized_max_usdc: string;
@@ -33,21 +34,6 @@ export interface PaidQuoteFreshnessPreflightResult {
   readonly outcome: TargetHandshakeOutcome | null;
 }
 
-function policyForEndpoint(endpoint: string) {
-  for (const policy of Object.values(ALLOWLISTED_RICH_TX_EXPLAINER_POLICIES)) {
-    if (policy.endpointUrl === endpoint) return policy;
-  }
-  if (endpoint.includes("/paid/analyze-text")) {
-    return {
-      serviceId: "local_analyze_text",
-      method: "POST" as const,
-      policyId: "sepolia_local_analyze_text",
-      buildRequestBody: () => ({}),
-    };
-  }
-  return null;
-}
-
 function genericCandidateId(endpoint: string): string {
   return endpoint
     .replace(/^https?:\/\//, "")
@@ -59,51 +45,28 @@ function genericCandidateId(endpoint: string): string {
 export function buildProbeCandidateForAuthorizedQuote(
   quote: AuthorizedPaymentQuote,
 ): TargetCandidate {
-  const policy = policyForEndpoint(quote.endpoint);
-
+  const requestBinding = requireThinSettlementRequestBinding(quote.request_binding);
+  if (requestBinding.endpoint !== quote.endpoint) {
+    throw new Error("BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH: freshness endpoint differs from binding");
+  }
+  if (quote.method && requestBinding.method !== quote.method) {
+    throw new Error("BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH: freshness method differs from binding");
+  }
   const expectedNetwork = quote.network ?? MAINNET_NETWORK;
   const expectedAsset = quote.asset ?? MAINNET_USDC_ADDRESS;
-  const isZapper = policy?.policyId === ZAPPER_TX_EXPLAINER_POLICY.policyId;
-  const isSepoliaLocal = quote.endpoint.includes("/paid/analyze-text");
   return {
-    candidateId: policy?.serviceId ?? genericCandidateId(quote.endpoint),
+    candidateId: genericCandidateId(quote.endpoint),
     resourceUrl: quote.endpoint,
-    method: policy?.method ?? quote.method ?? "GET",
+    method: requestBinding.method,
     x402Version: 2,
     freshness: {
       lastUpdated: new Date().toISOString(),
       sortKey: new Date().toISOString(),
     },
-    registrationMetadata: isZapper
-      ? {
-          bazaar: {
-            info: {
-              input: {
-                type: "http",
-                method: "POST",
-                bodyType: "json",
-                body: policy!.buildRequestBody(
-                  "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
-                  1,
-                ),
-              },
-            },
-          },
-        }
-      : isSepoliaLocal
-        ? {
-            bazaar: {
-              info: {
-                input: {
-                  type: "http",
-                  method: "POST",
-                  bodyType: "json",
-                  body: { text: "TrustForge Sepolia freshness probe.", mode: "full" },
-                },
-              },
-            },
-          }
-        : {},
+    registrationMetadata: {},
+    requestBinding,
+    requestInputProvenance: "legacy_explicit_request_binding",
+    requestBindingError: null,
     accepts: [
       {
         scheme: "exact",

@@ -66,6 +66,39 @@ describe("TargetCandidate normalization and filtering", () => {
       maxTimeoutSeconds: 300,
     });
     expect(candidate.freshness.sortKey).toBe("2026-06-20T00:00:00.000Z");
+    expect(candidate.requestBinding?.body).toEqual({});
+    expect(candidate.requestInputProvenance).toBe(
+      "bazaar.extensions.bazaar.info.input",
+    );
+  });
+
+  it("persists the declared OneSource GET query instead of its duplicated catalog body", () => {
+    const candidate = normalizeTargetCandidate(
+      resource({
+        resourceUrl: "https://api.onesource.io/api/chain/network-info",
+        extensions: {
+          bazaar: {
+            info: {
+              input: {
+                type: "http",
+                method: "GET",
+                queryParams: { network: "ethereum" },
+                body: { network: "ethereum" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(candidate.method).toBe("GET");
+    expect(candidate.requestBinding).toMatchObject({
+      endpoint: "https://api.onesource.io/api/chain/network-info",
+      method: "GET",
+      input_status: "known",
+      query: [["network", "ethereum"]],
+      body: null,
+    });
+    expect(candidate.requestBinding?.binding_sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("keeps USDC-on-Base candidates within budget", () => {

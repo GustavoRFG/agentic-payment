@@ -13,13 +13,14 @@ import {
 import { SKIPPED_BLOCKLISTED, type ProviderBlocklist } from "../../tools/trustforge/provider-blocklist";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const EMPTY_BLOCKLIST: ProviderBlocklist = { entries: [] };
 
 function candidate(
   overrides: Partial<DiscoveredTargetSelectionPrimary> & { resourceUrl: string },
 ): DiscoveredTargetSelectionPrimary {
-  return {
+  const base = {
     method: "POST",
     handshakeStatus: "live_402_ok",
     quoteUsdc: "0.001125",
@@ -30,6 +31,25 @@ function candidate(
     scoringRationale: [],
     ...overrides,
   };
+  if (base.method !== "GET" && base.method !== "POST") {
+    return base as DiscoveredTargetSelectionPrimary;
+  }
+  const binding = createThinSettlementRequestBinding({
+    endpoint: base.resourceUrl,
+    method: base.method,
+    input_status: "known",
+    query: [],
+    body: base.method === "GET" ? null : {},
+  });
+  return {
+    ...base,
+    requestEndpoint: binding.endpoint,
+    requestInputStatus: "known",
+    requestQuery: binding.query,
+    requestBody: binding.body,
+    requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+    requestBindingSha256: binding.binding_sha256,
+  } as DiscoveredTargetSelectionPrimary;
 }
 
 function paymentRequiredBody(amount: string): string {

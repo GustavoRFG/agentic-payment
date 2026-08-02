@@ -12,6 +12,7 @@ import {
   type RecordedProbeResponse,
 } from "../../tools/trustforge/target-liveness";
 import type { TargetCandidate } from "../../tools/trustforge/target-candidates";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const repoRoot = join(__dirname, "..", "..");
 
@@ -60,6 +61,10 @@ function readFixture(name: string): RecordedProbeResponse {
 }
 
 function candidate(): TargetCandidate {
+  const body = {
+    hash: "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
+    chainId: 1,
+  };
   return {
     candidateId: "zapper_tx_explainer",
     resourceUrl: "https://public.zapper.xyz/x402/transaction-details",
@@ -76,14 +81,20 @@ function candidate(): TargetCandidate {
             type: "http",
             method: "POST",
             bodyType: "json",
-            body: {
-              hash: "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
-              chainId: 1,
-            },
+            body,
           },
         },
       },
     },
+    requestBinding: createThinSettlementRequestBinding({
+      endpoint: "https://public.zapper.xyz/x402/transaction-details",
+      method: "POST",
+      input_status: "known",
+      query: [],
+      body,
+    }),
+    requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+    requestBindingError: null,
     accepts: [
       {
         scheme: "exact",
@@ -193,6 +204,47 @@ describe("Target liveness handshake probe", () => {
     assertUnsignedDiscoveryBody(capturedInit?.body ?? null);
     expect(outcome.status).toBe("live_402_ok");
     expect(outcome.paymentBearingHttpRequestCount).toBe(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("probes OneSource network-info as GET with network=ethereum and no body", async () => {
+    const fixture = readFixture("zapper_phase5_live_402.json");
+    const endpoint = "https://api.onesource.io/api/chain/network-info";
+    const base = candidate();
+    const requestBinding = createThinSettlementRequestBinding({
+      endpoint,
+      method: "GET",
+      input_status: "known",
+      query: { network: "ethereum" },
+      body: null,
+    });
+    const getCandidate: TargetCandidate = {
+      ...base,
+      candidateId: "onesource_network_info",
+      resourceUrl: endpoint,
+      method: "GET",
+      requestBinding,
+      requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+      requestBindingError: null,
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.origin + url.pathname).toBe(endpoint);
+      expect(url.searchParams.get("network")).toBe("ethereum");
+      expect(init?.method).toBe("GET");
+      expect(init?.body).toBeUndefined();
+      assertNoPaymentBearingHeaders(init?.headers);
+      return new Response(JSON.stringify(fixture.body), {
+        status: fixture.httpStatus ?? 402,
+        headers: fixture.headers,
+      });
+    }) as unknown as typeof fetch;
+
+    const outcome = await probeTargetLiveness(getCandidate, {
+      fetchImpl,
+      maxTargetPriceAtomic: "10000",
+    });
+    expect(outcome.status).toBe("live_402_ok");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 

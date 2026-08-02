@@ -5,8 +5,14 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
-import { resolveEffectiveThinSettlementMethod } from "./trustforge/thin-settlement-method-contract";
+import {
+  requestBindingFromSelectedCandidate,
+  type DiscoveredSelectedCandidate,
+} from "./trustforge/discovered-target-to-selected-candidate";
+import {
+  thinSettlementRequestSummary,
+  type ThinSettlementRequestSummary,
+} from "./trustforge/thin-settlement-request-binding";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -21,6 +27,8 @@ export interface HumanPaymentAuthorizationDraft {
   readonly endpoint: string;
   /** Verb the human is authorizing; must match the candidate at settle time. */
   readonly method: string;
+  readonly request_binding_sha256: string;
+  readonly request_summary: ThinSettlementRequestSummary;
   readonly network: string;
   readonly asset: string;
   readonly buyer_wallet: string;
@@ -36,6 +44,7 @@ export interface HumanPaymentAuthorizationDraft {
 export function buildHumanPaymentAuthorizationDraft(
   candidate: DiscoveredSelectedCandidate,
 ): HumanPaymentAuthorizationDraft {
+  const requestBinding = requestBindingFromSelectedCandidate(candidate);
   return {
     authorization_schema_version: "trustforge_paid_probe_authorization.v1",
     decision: PENDING_HUMAN_DECISION,
@@ -43,10 +52,9 @@ export function buildHumanPaymentAuthorizationDraft(
     provider: candidate.provider,
     service_id: candidate.service_id,
     endpoint: candidate.endpoint,
-    // Carried from the candidate, never invented: an explicit catalog method is used
-    // verbatim; only a candidate with no declared method falls back to the contract's
-    // historical POST default.
-    method: resolveEffectiveThinSettlementMethod(candidate.method),
+    method: requestBinding.method,
+    request_binding_sha256: requestBinding.binding_sha256,
+    request_summary: thinSettlementRequestSummary(requestBinding),
     network: candidate.network,
     asset: candidate.asset,
     buyer_wallet: candidate.buyer_wallet,

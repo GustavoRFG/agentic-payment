@@ -26,6 +26,14 @@ import {
 } from "./paid-method-honored-probe";
 import { THIN_RUNNER_SETTLEABLE_METHODS } from "./thin-settlement-method-contract";
 import {
+  createThinSettlementRequestBinding,
+  REJECTED_REQUEST_BINDING_NOT_PERSISTED,
+  type CanonicalJsonValue,
+  type CanonicalQuery,
+  type RequestInputProvenance,
+  type ThinSettlementRequestBinding,
+} from "./thin-settlement-request-binding";
+import {
   probeQuoteStability,
   REJECTED_INCOMPLETE_402_CHALLENGE,
   REJECTED_NON_POSITIVE_QUOTE,
@@ -51,6 +59,12 @@ export interface DiscoveredTargetSelectionPrimary {
   readonly rank?: number;
   readonly candidateId?: string;
   readonly method?: TargetCandidate["method"];
+  readonly requestEndpoint?: string;
+  readonly requestInputStatus?: "known";
+  readonly requestQuery?: CanonicalQuery;
+  readonly requestBody?: CanonicalJsonValue | null;
+  readonly requestInputProvenance?: RequestInputProvenance;
+  readonly requestBindingSha256?: string;
   readonly handshakeStatus: string;
   readonly resourceUrl: string;
   readonly quoteUsdc: string;
@@ -77,6 +91,11 @@ export interface DiscoveredSelectedCandidate {
   readonly service_id: string;
   readonly endpoint: string;
   readonly method?: TargetCandidate["method"];
+  readonly request_input_status: "known";
+  readonly request_query: CanonicalQuery;
+  readonly request_body: CanonicalJsonValue | null;
+  readonly request_input_provenance: RequestInputProvenance;
+  readonly request_binding_sha256: string;
   readonly quote_amount_usdc: string;
   readonly quote_atomic: string;
   readonly authorized_pay_to: string;
@@ -152,6 +171,76 @@ export interface DiscoveredTargetAdaptRejection {
     readonly challenge?: { readonly nonce_present: boolean; readonly expires_at_present: boolean };
     readonly quote_validation?: QuoteValidationEvidence;
   };
+}
+
+function bindingFromSelectionEntry(
+  entry: DiscoveredTargetSelectionFallback,
+):
+  | {
+      readonly ok: true;
+      readonly binding: ThinSettlementRequestBinding;
+      readonly provenance: RequestInputProvenance;
+    }
+  | { readonly ok: false; readonly reason: string } {
+  if (
+    entry.requestInputStatus !== "known" ||
+    !Array.isArray(entry.requestQuery) ||
+    !Object.prototype.hasOwnProperty.call(entry, "requestBody") ||
+    !entry.requestInputProvenance ||
+    !entry.requestBindingSha256
+  ) {
+    return {
+      ok: false,
+      reason: `${REJECTED_REQUEST_BINDING_NOT_PERSISTED}: ${entry.resourceUrl} lacks canonical request input`,
+    };
+  }
+  try {
+    const binding = createThinSettlementRequestBinding({
+      endpoint: entry.requestEndpoint ?? entry.resourceUrl,
+      method: String(entry.method ?? ""),
+      input_status: "known",
+      query: entry.requestQuery,
+      body: entry.requestBody,
+    });
+    if (binding.binding_sha256 !== entry.requestBindingSha256.toLowerCase()) {
+      return {
+        ok: false,
+        reason: `REJECTED_REQUEST_BINDING_INVALID: ${entry.resourceUrl} persisted hash mismatch`,
+      };
+    }
+    return { ok: true, binding, provenance: entry.requestInputProvenance };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function requestBindingFromSelectedCandidate(
+  candidate: DiscoveredSelectedCandidate,
+): ThinSettlementRequestBinding {
+  if (
+    candidate.request_input_status !== "known" ||
+    !Array.isArray(candidate.request_query) ||
+    !Object.prototype.hasOwnProperty.call(candidate, "request_body") ||
+    !candidate.request_input_provenance ||
+    !candidate.request_binding_sha256
+  ) {
+    throw new Error(
+      `${REJECTED_REQUEST_BINDING_NOT_PERSISTED}: selected_candidate lacks canonical request input`,
+    );
+  }
+  const binding = createThinSettlementRequestBinding({
+    endpoint: candidate.endpoint,
+    method: String(candidate.method ?? ""),
+    input_status: candidate.request_input_status,
+    query: candidate.request_query,
+    body: candidate.request_body,
+  });
+  if (binding.binding_sha256 !== candidate.request_binding_sha256?.toLowerCase()) {
+    throw new Error(
+      "REJECTED_REQUEST_BINDING_INVALID: selected_candidate request binding hash mismatch",
+    );
+  }
+  return binding;
 }
 
 function quoteValidationEvidence(
@@ -385,6 +474,8 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
   if (!primary.selectedPayTo?.trim()) {
     return { ok: false, reason: "selection.primary is missing selectedPayTo" };
   }
+  const request = bindingFromSelectionEntry(primary);
+  if (!request.ok) return request;
 
   const sepoliaPolicy = resolveSepoliaLocalPolicy(primary.resourceUrl);
   const network = primary.network ?? (sepoliaPolicy ? TESTNET_NETWORK : MAINNET_NETWORK);
@@ -403,8 +494,13 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
     candidate: {
       provider,
       service_id: serviceId,
-      endpoint: primary.resourceUrl,
+      endpoint: request.binding.endpoint,
       ...(primary.method ? { method: primary.method } : {}),
+      request_input_status: request.binding.input_status,
+      request_query: request.binding.query,
+      request_body: request.binding.body,
+      request_input_provenance: request.provenance,
+      request_binding_sha256: request.binding.binding_sha256,
       quote_amount_usdc: primary.quoteUsdc,
       quote_atomic: primary.quoteAtomic,
       authorized_pay_to: primary.selectedPayTo,
@@ -413,7 +509,7 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
       asset,
       buyer_wallet: buyerWallet,
       target_selection_audit: {
-        selected_resource_url: primary.resourceUrl,
+        selected_resource_url: request.binding.endpoint,
         handshake_status: primary.handshakeStatus,
         fallback_resource_urls: fallbacks.map((entry) => entry.resourceUrl),
         scoring_rationale: [...(primary.scoringRationale ?? [])],
@@ -443,6 +539,8 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
   if (!primary.selectedPayTo?.trim()) {
     return { ok: false, reason: "selection.primary is missing selectedPayTo" };
   }
+  const request = bindingFromSelectionEntry(primary);
+  if (!request.ok) return request;
 
   const sepoliaPolicy = resolveSepoliaLocalPolicy(primary.resourceUrl);
   const policy = sepoliaPolicy ?? resolveAllowlistedPolicy(primary.resourceUrl);
@@ -463,8 +561,13 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
     candidate: {
       provider: policy.provider,
       service_id: policy.serviceId,
-      endpoint: primary.resourceUrl,
+      endpoint: request.binding.endpoint,
       ...(primary.method ? { method: primary.method } : {}),
+      request_input_status: request.binding.input_status,
+      request_query: request.binding.query,
+      request_body: request.binding.body,
+      request_input_provenance: request.provenance,
+      request_binding_sha256: request.binding.binding_sha256,
       quote_amount_usdc: primary.quoteUsdc,
       quote_atomic: primary.quoteAtomic,
       authorized_pay_to: primary.selectedPayTo,
@@ -473,7 +576,7 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
       asset,
       buyer_wallet: buyerWallet,
       target_selection_audit: {
-        selected_resource_url: primary.resourceUrl,
+        selected_resource_url: request.binding.endpoint,
         handshake_status: primary.handshakeStatus,
         fallback_resource_urls: fallbacks.map((entry) => entry.resourceUrl),
         scoring_rationale: [...(primary.scoringRationale ?? [])],
@@ -610,8 +713,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     }
 
     const probe = await probePaidMethodHonored({
-      endpoint: adapted.candidate.endpoint,
-      method: adapted.candidate.method,
+      requestBinding: requestBindingFromSelectedCandidate(adapted.candidate),
       expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,
     });
@@ -625,8 +727,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
     }
 
     const stability = await probeQuoteStability({
-      endpoint: adapted.candidate.endpoint,
-      method: adapted.candidate.method,
+      requestBinding: requestBindingFromSelectedCandidate(adapted.candidate),
       firstMaxAmountRequiredAtomic: probe.maxAmountRequiredAtomic,
       expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,

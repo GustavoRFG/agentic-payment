@@ -10,6 +10,7 @@ import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearin
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { startAbortDeadline } from "./abort-deadline";
 import { planThinSettleRequest } from "./thin-settlement-method-contract";
+import type { ThinSettlementRequestBinding } from "./thin-settlement-request-binding";
 
 export const REJECTED_QUOTE_UNSTABLE = "REJECTED_QUOTE_UNSTABLE";
 /** One or both 402 responses did not yield a valid unsigned integer atomic quote. */
@@ -314,12 +315,10 @@ export function evaluateQuoteStability(
 }
 
 export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
-  readonly endpoint: string;
-  readonly method?: string | null;
+  readonly requestBinding: ThinSettlementRequestBinding;
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
-  readonly body?: unknown;
 }): Promise<{
   readonly httpStatus: number | null;
   readonly maxAmountRequiredAtomic: string | null;
@@ -329,9 +328,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
   const plan = planThinSettleRequest({
-    method: options.method,
-    endpoint: options.endpoint,
-    body: options.body ?? {},
+    requestBinding: options.requestBinding,
   });
   if (!plan.supported) {
     return {
@@ -355,7 +352,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
     const response = await fetchImpl(plan.endpoint, {
       method: plan.method,
       headers,
-      body: plan.sendBody ? JSON.stringify(plan.body ?? {}) : undefined,
+      body: plan.sendBody ? JSON.stringify(plan.body) : undefined,
       redirect: "manual",
       signal: deadline.signal,
     });
@@ -401,21 +398,17 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
 }
 
 export async function probeQuoteStability(options: {
-  readonly endpoint: string;
-  readonly method?: string | null;
+  readonly requestBinding: ThinSettlementRequestBinding;
   readonly firstMaxAmountRequiredAtomic: string | null;
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
-  readonly body?: unknown;
 }): Promise<QuoteStabilityResult> {
   const second = await fetchSettleMethod402MaxAmountRequiredAtomic({
-    endpoint: options.endpoint,
-    method: options.method,
+    requestBinding: options.requestBinding,
     expectedNetwork: options.expectedNetwork,
     fetchImpl: options.fetchImpl,
     timeoutMs: options.timeoutMs,
-    body: options.body,
   });
   const evaluated = evaluateQuoteStability(
     options.firstMaxAmountRequiredAtomic,

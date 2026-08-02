@@ -10,10 +10,19 @@ import {
 } from "../../shared/payment-safety";
 import { classifyTargetProbeResponse, type TargetHandshakeOutcome } from "./target-liveness";
 import type { TargetCandidate } from "./target-candidates";
+import {
+  createThinSettlementRequestBinding,
+  type ThinSettlementRequestBinding,
+} from "./thin-settlement-request-binding";
+import { planThinSettleRequest } from "./thin-settlement-method-contract";
 
 export const SEPOLIA_LOCAL_PROVIDER = "TrustForgeLocalSeller" as const;
 export const SEPOLIA_LOCAL_SERVICE_ID = "local_analyze_text" as const;
 export const SEPOLIA_LOCAL_ROUTE = "/paid/analyze-text" as const;
+export const SEPOLIA_LOCAL_REQUEST_BODY = {
+  text: "TrustForge Sepolia settlement proof handshake.",
+  mode: "full",
+} as const;
 
 export interface SepoliaSellerHandshakeAccept {
   readonly scheme: string;
@@ -29,6 +38,7 @@ export interface SepoliaSellerHandshakeResult {
   readonly statusCode: number;
   readonly outcome: TargetHandshakeOutcome;
   readonly accept: SepoliaSellerHandshakeAccept | null;
+  readonly requestBinding: ThinSettlementRequestBinding;
 }
 
 export interface SepoliaTargetSelectionDocument {
@@ -40,6 +50,13 @@ export interface SepoliaTargetSelectionDocument {
     readonly primary: {
       readonly handshakeStatus: string;
       readonly resourceUrl: string;
+      readonly method: "POST";
+      readonly requestEndpoint: string;
+      readonly requestInputStatus: "known";
+      readonly requestQuery: ThinSettlementRequestBinding["query"];
+      readonly requestBody: ThinSettlementRequestBinding["body"];
+      readonly requestInputProvenance: "policy_generated_request_binding";
+      readonly requestBindingSha256: string;
       readonly quoteUsdc: string;
       readonly quoteAtomic: string;
       readonly selectedPayTo: string;
@@ -59,15 +76,27 @@ export function buildSepoliaLocalSellerCandidate(
   sellerBaseUrl: string,
   quoteAtomic: string = PAYMENT_AMOUNT_ATOMIC,
   payTo: string,
+  requestBody: unknown = SEPOLIA_LOCAL_REQUEST_BODY,
 ): TargetCandidate {
   const base = normalizeBaseUrl(sellerBaseUrl);
+  const endpoint = `${base}${SEPOLIA_LOCAL_ROUTE}`;
+  const requestBinding = createThinSettlementRequestBinding({
+    endpoint,
+    method: "POST",
+    input_status: "known",
+    query: [],
+    body: requestBody,
+  });
   return {
     candidateId: SEPOLIA_LOCAL_SERVICE_ID,
-    resourceUrl: `${base}${SEPOLIA_LOCAL_ROUTE}`,
+    resourceUrl: endpoint,
     method: "POST",
     x402Version: 2,
     freshness: { lastUpdated: new Date().toISOString(), sortKey: new Date().toISOString() },
     registrationMetadata: {},
+    requestBinding,
+    requestInputProvenance: "policy_generated_request_binding",
+    requestBindingError: null,
     accepts: [
       {
         scheme: "exact",
@@ -87,6 +116,7 @@ export function parseSepoliaSeller402Response(input: {
   readonly paymentRequiredHeader: string | null;
   readonly wwwAuthenticate?: string | null;
   readonly maxTargetPriceAtomic?: string;
+  readonly requestBinding?: ThinSettlementRequestBinding;
 }): SepoliaSellerHandshakeResult {
   const base = normalizeBaseUrl(input.sellerBaseUrl);
   const endpoint = `${base}${SEPOLIA_LOCAL_ROUTE}`;
@@ -94,7 +124,9 @@ export function parseSepoliaSeller402Response(input: {
     base,
     PAYMENT_AMOUNT_ATOMIC,
     "0x0000000000000000000000000000000000000000",
+    input.requestBinding?.body ?? SEPOLIA_LOCAL_REQUEST_BODY,
   );
+  const requestBinding = input.requestBinding ?? candidate.requestBinding!;
   const headers: Record<string, string> = {};
   if (input.paymentRequiredHeader) {
     headers["payment-required"] = input.paymentRequiredHeader;
@@ -131,6 +163,7 @@ export function parseSepoliaSeller402Response(input: {
     statusCode: input.statusCode,
     outcome,
     accept,
+    requestBinding,
   };
 }
 
@@ -157,6 +190,13 @@ export function buildSepoliaTargetSelectionFromHandshake(
       primary: {
         handshakeStatus: handshake.outcome.status,
         resourceUrl: handshake.endpoint,
+        method: "POST",
+        requestEndpoint: handshake.requestBinding.endpoint,
+        requestInputStatus: handshake.requestBinding.input_status,
+        requestQuery: handshake.requestBinding.query,
+        requestBody: handshake.requestBinding.body,
+        requestInputProvenance: "policy_generated_request_binding",
+        requestBindingSha256: handshake.requestBinding.binding_sha256,
         quoteUsdc: PAYMENT_AMOUNT_USD,
         quoteAtomic: handshake.accept.amountAtomic,
         selectedPayTo: handshake.accept.payTo,
@@ -181,15 +221,20 @@ export async function probeSepoliaLocalSeller(input: {
   const base = normalizeBaseUrl(input.sellerBaseUrl);
   const endpoint = `${base}${SEPOLIA_LOCAL_ROUTE}`;
   const fetchImpl = input.fetchImpl ?? fetch;
-  const response = await fetchImpl(endpoint, {
+  const requestBody = input.requestBody ?? SEPOLIA_LOCAL_REQUEST_BODY;
+  const requestBinding = createThinSettlementRequestBinding({
+    endpoint,
     method: "POST",
+    input_status: "known",
+    query: [],
+    body: requestBody,
+  });
+  const plan = planThinSettleRequest({ requestBinding });
+  if (!plan.supported) throw new Error(plan.reason);
+  const response = await fetchImpl(plan.endpoint, {
+    method: plan.method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
-      input.requestBody ?? {
-        text: "TrustForge Sepolia settlement proof handshake.",
-        mode: "full",
-      },
-    ),
+    body: JSON.stringify(plan.body),
   });
   const header =
     response.headers.get("payment-required") ??
@@ -199,5 +244,6 @@ export async function probeSepoliaLocalSeller(input: {
     statusCode: response.status,
     paymentRequiredHeader: header,
     wwwAuthenticate: response.headers.get("www-authenticate"),
+    requestBinding,
   });
 }

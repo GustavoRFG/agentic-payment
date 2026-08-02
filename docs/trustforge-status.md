@@ -119,3 +119,15 @@ prose quality yet. It requires a registry unpaid handshake and a separate
 explicit paid authorization. To raise confidence on the existing services,
 repeat probes on the same `service_id` to grow `sample_size` and exercise the
 temporal regression/consistency detection.
+
+## A.3 request-shape binding (2026-08-02)
+
+The thin settlement pipeline now treats the discovered invocation shape as a
+fail-closed authorization boundary. Discovery persists canonical endpoint,
+method, query, body, provenance, and SHA-256 binding; adapt probes consume that
+same shape; the selected candidate and authorization draft preserve it; and the
+planner, settlement intent, and actual outbound request must all reproduce the
+same hash before any key guard or network request can run. Legacy artifacts
+without a persisted binding are rejected instead of receiving an implicit `{}`
+input. This corrective was implemented and tested without live operations or
+payment-bearing requests.

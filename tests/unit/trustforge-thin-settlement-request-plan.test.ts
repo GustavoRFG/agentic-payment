@@ -5,7 +5,7 @@ import {
   planThinSettleRequest,
   THIN_RUNNER_SETTLEABLE_METHODS,
 } from "../../tools/trustforge/thin-settlement-request-plan";
-import { REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER } from "../../tools/trustforge/thin-settlement-method-contract";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const ENDPOINT = "https://seller.example/api/upload";
 const BODY = { tx: "0xabc", chain: "base" };
@@ -22,24 +22,29 @@ describe("isThinRunnerSettleableMethod", () => {
 });
 
 describe("planThinSettleRequest", () => {
-  it("defaults to POST when no catalog method (preserves today's behavior exactly)", () => {
-    const plan = planThinSettleRequest({ endpoint: ENDPOINT, body: BODY });
-    expect(plan).toEqual({
-      supported: true,
-      method: "POST",
+  function binding(method: "GET" | "POST", query: unknown, body: unknown) {
+    return createThinSettlementRequestBinding({
       endpoint: ENDPOINT,
-      body: BODY,
-      sendBody: true,
+      method,
+      input_status: "known",
+      query,
+      body,
     });
+  }
+
+  it("fails closed when no persisted request binding is provided", () => {
+    expect(() => planThinSettleRequest({} as never)).toThrow(
+      "REJECTED_REQUEST_BINDING_NOT_PERSISTED",
+    );
   });
 
   it("POST carries the JSON body at the endpoint unchanged", () => {
-    const plan = planThinSettleRequest({ method: " post ", endpoint: ENDPOINT, body: BODY });
+    const plan = planThinSettleRequest({ requestBinding: binding("POST", [], BODY) });
     expect(plan).toMatchObject({ supported: true, method: "POST", endpoint: ENDPOINT, body: BODY, sendBody: true });
   });
 
   it("GET carries no body and moves params to the query string", () => {
-    const plan = planThinSettleRequest({ method: "GET", endpoint: ENDPOINT, body: BODY });
+    const plan = planThinSettleRequest({ requestBinding: binding("GET", BODY, null) });
     expect(plan.supported).toBe(true);
     if (!plan.supported) return;
     expect(plan.method).toBe("GET");
@@ -52,9 +57,13 @@ describe("planThinSettleRequest", () => {
 
   it("GET merges into an endpoint that already has a query string", () => {
     const plan = planThinSettleRequest({
-      method: "get",
-      endpoint: "https://seller.example/api?v=1",
-      body: { tx: "0xabc" },
+      requestBinding: createThinSettlementRequestBinding({
+        method: "GET",
+        endpoint: "https://seller.example/api?v=1",
+        input_status: "known",
+        query: { tx: "0xabc" },
+        body: null,
+      }),
     });
     expect(plan.supported).toBe(true);
     if (!plan.supported) return;
@@ -64,19 +73,10 @@ describe("planThinSettleRequest", () => {
   });
 
   it("GET with no body params leaves the endpoint unchanged", () => {
-    const plan = planThinSettleRequest({ method: "GET", endpoint: ENDPOINT, body: {} });
+    const plan = planThinSettleRequest({ requestBinding: binding("GET", [], null) });
     expect(plan.supported).toBe(true);
     if (!plan.supported) return;
     expect(plan.endpoint).toBe(ENDPOINT);
   });
 
-  for (const method of ["PUT", "PATCH", "DELETE", "HEAD"]) {
-    it(`gates ${method} as not settleable (no payment)`, () => {
-      const plan = planThinSettleRequest({ method, endpoint: ENDPOINT, body: BODY });
-      expect(plan.supported).toBe(false);
-      if (plan.supported) return;
-      expect(plan.method).toBe(method);
-      expect(plan.reason).toContain(REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER);
-    });
-  }
 });

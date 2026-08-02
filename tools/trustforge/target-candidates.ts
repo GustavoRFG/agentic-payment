@@ -5,6 +5,12 @@
 import { createHash } from "node:crypto";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import type { BazaarAccept, BazaarResource } from "./bazaar-client";
+import {
+  createThinSettlementRequestBinding,
+  REJECTED_REQUEST_BINDING_NOT_PERSISTED,
+  type RequestInputProvenance,
+  type ThinSettlementRequestBinding,
+} from "./thin-settlement-request-binding";
 
 export const DEFAULT_MAX_TARGET_PRICE_ATOMIC = "10000" as const;
 export const TRUSTFORGE_MAX_TARGET_PRICE_ATOMIC_ENV =
@@ -37,6 +43,9 @@ export interface TargetCandidate {
     readonly sortKey: string;
   };
   readonly registrationMetadata: Record<string, unknown>;
+  readonly requestBinding: ThinSettlementRequestBinding | null;
+  readonly requestInputProvenance: RequestInputProvenance | null;
+  readonly requestBindingError: string | null;
 }
 
 export interface RejectedTargetCandidate {
@@ -63,6 +72,60 @@ function candidateId(resourceUrl: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function bazaarHttpInput(
+  extensions: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const bazaar = extensions.bazaar;
+  if (!isRecord(bazaar)) return null;
+  const info = bazaar.info;
+  if (!isRecord(info)) return null;
+  return isRecord(info.input) ? info.input : null;
+}
+
+export function resolveTargetRequestBinding(input: {
+  readonly resourceUrl: string;
+  readonly method: TargetCandidate["method"];
+  readonly extensions: Record<string, unknown>;
+}): {
+  readonly requestBinding: ThinSettlementRequestBinding | null;
+  readonly requestInputProvenance: RequestInputProvenance | null;
+  readonly requestBindingError: string | null;
+} {
+  const catalogInput = bazaarHttpInput(input.extensions);
+  if (!catalogInput) {
+    return {
+      requestBinding: null,
+      requestInputProvenance: null,
+      requestBindingError: `${REJECTED_REQUEST_BINDING_NOT_PERSISTED}: Bazaar extensions.bazaar.info.input missing`,
+    };
+  }
+  try {
+    const requestBinding = createThinSettlementRequestBinding({
+      endpoint: input.resourceUrl,
+      method: input.method,
+      input_status: "known",
+      query: "queryParams" in catalogInput ? catalogInput.queryParams : [],
+      body:
+        input.method === "GET"
+          ? null
+          : "body" in catalogInput
+            ? catalogInput.body
+            : null,
+    });
+    return {
+      requestBinding,
+      requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+      requestBindingError: null,
+    };
+  } catch (error) {
+    return {
+      requestBinding: null,
+      requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+      requestBindingError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function nestedRecords(value: unknown): Record<string, unknown>[] {
@@ -143,10 +206,16 @@ function cheapest(accepts: readonly TargetAccept[]): TargetAccept {
 }
 
 export function normalizeTargetCandidate(resource: BazaarResource): TargetCandidate {
+  const method = inferHttpMethod(resource.extensions);
+  const request = resolveTargetRequestBinding({
+    resourceUrl: resource.resourceUrl,
+    method,
+    extensions: resource.extensions,
+  });
   return {
     candidateId: candidateId(resource.resourceUrl),
     resourceUrl: resource.resourceUrl,
-    method: inferHttpMethod(resource.extensions),
+    method,
     accepts: resource.accepts.map((accept) => normalizeAccept(accept)),
     x402Version: resource.x402Version,
     freshness: {
@@ -154,6 +223,7 @@ export function normalizeTargetCandidate(resource: BazaarResource): TargetCandid
       sortKey: resource.lastUpdated ?? "",
     },
     registrationMetadata: resource.extensions,
+    ...request,
   };
 }
 

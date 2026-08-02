@@ -114,6 +114,15 @@ describe("TARGET RESOLUTION dry-run stage", () => {
       });
 
       expect(report.chosenTarget?.resourceUrl).toBe("https://primary.example/x402");
+      expect(report.schema_version).toBe("trustforge_target_resolution.v2");
+      expect(report.selection.schema_version).toBe("trustforge_target_selection.v2");
+      expect(report.chosenTarget).toMatchObject({
+        requestInputStatus: "known",
+        requestQuery: [],
+        requestBody: null,
+        requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+      });
+      expect(report.chosenTarget?.requestBindingSha256).toMatch(/^[0-9a-f]{64}$/);
       expect(report.orderedFallbacks.map((entry) => entry.resourceUrl)).toEqual([
         "https://fallback.example/x402",
       ]);
@@ -131,6 +140,13 @@ describe("TARGET RESOLUTION dry-run stage", () => {
       expect(readFileSync(targetResolutionEvidencePath(outputPath), "utf8")).toContain(
         '"handshakeOutcomes"',
       );
+      const evidence = JSON.parse(
+        readFileSync(targetResolutionEvidencePath(outputPath), "utf8"),
+      );
+      expect(evidence.schema_version).toBe("trustforge_target_resolution_evidence.v2");
+      expect(evidence.candidateRequestBindings[0]).toMatchObject({
+        requestInputProvenance: "bazaar.extensions.bazaar.info.input",
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -207,6 +223,55 @@ describe("TARGET RESOLUTION dry-run stage", () => {
     expect(JSON.stringify(first, null, 2)).toBe(JSON.stringify(second, null, 2));
   });
 
+  it("persists OneSource network=ethereum request binding in selection and evidence", async () => {
+    const endpoint = "https://api.onesource.io/api/chain/network-info";
+    const base = resource({
+      url: endpoint,
+      amount: "1000",
+      lastUpdated: "2026-08-02T00:59:27.948Z",
+    });
+    const onesource: BazaarResource = {
+      ...base,
+      extensions: {
+        bazaar: {
+          info: {
+            input: {
+              type: "http",
+              method: "GET",
+              queryParams: { network: "ethereum" },
+              body: { network: "ethereum" },
+            },
+          },
+        },
+      },
+    };
+    const root = mkdtempSync(join(tmpdir(), "trustforge-onesource-binding-"));
+    try {
+      const outputPath = join(root, "target_selection.json");
+      const report = await runTargetResolution({
+        bazaarResources: [onesource],
+        outputPath,
+        maxTargetPriceAtomic: "10000",
+        env: {},
+        probeTarget: async (candidate) => liveOutcome(candidate, "1000"),
+      });
+      expect(report.selection.primary).toMatchObject({
+        resourceUrl: endpoint,
+        method: "GET",
+        requestQuery: [["network", "ethereum"]],
+        requestBody: null,
+      });
+      const evidence = JSON.parse(
+        readFileSync(targetResolutionEvidencePath(outputPath), "utf8"),
+      );
+      expect(evidence.candidateRequestBindings[0].requestBinding.query).toEqual([
+        ["network", "ethereum"],
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("blocks before discovery when payment env flags are armed", async () => {
     await expect(
       runTargetResolution({
@@ -214,5 +279,47 @@ describe("TARGET RESOLUTION dry-run stage", () => {
         env: { BUYER_PRIVATE_KEY: "0x" + "a".repeat(64) },
       }),
     ).rejects.toThrow("BLOCKED_TARGET_RESOLUTION_PAYMENT_ENV: BUYER_PRIVATE_KEY");
+  });
+
+  it("never persists catalog credentials or authorization headers in request-binding artifacts", async () => {
+    const root = mkdtempSync(join(tmpdir(), "trustforge-target-sensitive-"));
+    try {
+      const outputPath = join(root, "target_selection.json");
+      const sensitive = resource({
+        url: "https://sensitive.example/x402",
+        amount: "1000",
+        lastUpdated: "2026-06-20T00:00:00.000Z",
+      });
+      const withSecret: BazaarResource = {
+        ...sensitive,
+        extensions: {
+          bazaar: {
+            info: {
+              input: {
+                type: "http",
+                method: "POST",
+                body: { password: "DO_NOT_PERSIST_ME" },
+                headers: { authorization: "Bearer DO_NOT_PERSIST_ME" },
+              },
+            },
+          },
+        },
+      };
+      const report = await runTargetResolution({
+        bazaarResources: [withSecret],
+        outputPath,
+        maxTargetPriceAtomic: "10000",
+        env: {},
+        probeTarget: async (candidate) => liveOutcome(candidate, "1000"),
+      });
+      expect(report.selection.primary).toBeNull();
+      const artifacts =
+        readFileSync(outputPath, "utf8") +
+        readFileSync(targetResolutionEvidencePath(outputPath), "utf8");
+      expect(artifacts).not.toContain("DO_NOT_PERSIST_ME");
+      expect(artifacts.toLowerCase()).not.toContain("bearer ");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

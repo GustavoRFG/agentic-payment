@@ -26,6 +26,26 @@ import {
   TESTNET_USDC_ADDRESS,
 } from "../../shared/payment-safety";
 import { SEPOLIA_TESTNET_BUYER_WALLET } from "../../tools/trustforge/network-config";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+
+function requestFields(endpoint: string, method: "GET" | "POST", body: unknown = {}) {
+  const binding = createThinSettlementRequestBinding({
+    endpoint,
+    method,
+    input_status: "known",
+    query: [],
+    body: method === "GET" ? null : body,
+  });
+  return {
+    method,
+    requestEndpoint: binding.endpoint,
+    requestInputStatus: "known" as const,
+    requestQuery: binding.query,
+    requestBody: binding.body,
+    requestInputProvenance: "policy_generated_request_binding" as const,
+    requestBindingSha256: binding.binding_sha256,
+  };
+}
 
 describe("Sepolia settlement proof pipeline", () => {
   it("builds target_selection from seller 402 handshake", () => {
@@ -58,6 +78,10 @@ describe("Sepolia settlement proof pipeline", () => {
         primary: {
           handshakeStatus: "live_402_ok",
           resourceUrl: "http://localhost:4021/paid/analyze-text",
+          ...requestFields("http://localhost:4021/paid/analyze-text", "POST", {
+            text: "TrustForge Sepolia settlement proof handshake.",
+            mode: "full",
+          }),
           quoteUsdc: "0.001",
           quoteAtomic: "1000",
           selectedPayTo: SEPOLIA_TESTNET_BUYER_WALLET,
@@ -81,6 +105,7 @@ describe("Sepolia settlement proof pipeline", () => {
         primary: {
           handshakeStatus: "live_402_ok",
           resourceUrl: "https://api.zapper.xyz/v2/x402/token-balances",
+          ...requestFields("https://api.zapper.xyz/v2/x402/token-balances", "GET"),
           quoteUsdc: "0.001125",
           quoteAtomic: "1125",
           selectedPayTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",

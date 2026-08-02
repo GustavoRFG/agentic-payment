@@ -33,7 +33,10 @@ import {
   type AuthorizedPaymentQuote,
   type PaidQuoteFreshnessPreflightResult,
 } from "./paid-quote-freshness-preflight";
-import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
+import {
+  requestBindingFromSelectedCandidate,
+  type DiscoveredSelectedCandidate,
+} from "./discovered-target-to-selected-candidate";
 
 export type X402PreflightBlocker =
   | "BLOCKED_WRONG_CHAIN"
@@ -482,6 +485,7 @@ export async function runX402SettlementPreflight(
     pay_to: candidate.authorized_pay_to,
     network: candidate.network,
     asset: candidate.asset,
+    request_binding: requestBindingFromSelectedCandidate(candidate),
   };
   const freshnessFn =
     options.freshness ??

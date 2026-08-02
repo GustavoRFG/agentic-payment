@@ -9,6 +9,17 @@ import {
   REJECTED_QUOTE_EXTRACTION_FAILED,
   REJECTED_QUOTE_UNSTABLE,
 } from "../../tools/trustforge/quote-stability-probe";
+import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+
+function postBinding(endpoint: string) {
+  return createThinSettlementRequestBinding({
+    endpoint,
+    method: "POST",
+    input_status: "known",
+    query: [],
+    body: {},
+  });
+}
 
 function paymentRequiredBody(amount: string): string {
   return JSON.stringify({
@@ -70,7 +81,7 @@ describe("quote stability probe", () => {
     }) as unknown as typeof fetch;
 
     const result = await probeQuoteStability({
-      endpoint: "https://unstable.example/x402",
+      requestBinding: postBinding("https://unstable.example/x402"),
       firstMaxAmountRequiredAtomic: "1000",
       fetchImpl,
     });
@@ -104,7 +115,7 @@ describe("quote stability probe", () => {
     }) as unknown as typeof fetch;
 
     const result = await probeQuoteStability({
-      endpoint: "https://missing-quote.example/x402",
+      requestBinding: postBinding("https://missing-quote.example/x402"),
       firstMaxAmountRequiredAtomic: "1000",
       fetchImpl,
     });

@@ -1,7 +1,12 @@
 /**
  * Neutral method/request-shaping contract shared by the thin executor planner
- * and keyless probes. This module is pure and intentionally imports nothing.
+ * and keyless probes.
  */
+
+import {
+  requireThinSettlementRequestBinding,
+  type ThinSettlementRequestBinding,
+} from "./thin-settlement-request-binding";
 
 export const REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER =
   "REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER";
@@ -43,6 +48,8 @@ export type ThinSettleRequestPlan =
       /** Request body to send, or undefined for verbs that carry no body (GET). */
       readonly body: unknown;
       readonly sendBody: boolean;
+      readonly requestBinding: ThinSettlementRequestBinding;
+      readonly requestBindingSha256: string;
     }
   | {
       readonly supported: false;
@@ -50,31 +57,15 @@ export type ThinSettleRequestPlan =
       readonly reason: string;
     };
 
-function appendQueryParams(endpoint: string, body: unknown): string {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return endpoint;
-  const entries = Object.entries(body as Record<string, unknown>).filter(
-    ([, value]) => value !== undefined && value !== null,
-  );
-  if (entries.length === 0) return endpoint;
-  try {
-    const url = new URL(endpoint);
-    for (const [key, value] of entries) url.searchParams.set(key, String(value));
-    return url.toString();
-  } catch {
-    return endpoint;
-  }
-}
-
 /**
- * Defaults an absent catalog method to POST for backward compatibility. Explicit
- * unsupported methods fail closed. GET carries parameters in the query and no body.
+ * Plans only from a persisted, internally valid binding. There is deliberately no
+ * implicit request body (including `{}`) when catalog input is absent.
  */
 export function planThinSettleRequest(input: {
-  readonly method?: string | null;
-  readonly endpoint: string;
-  readonly body: unknown;
+  readonly requestBinding: ThinSettlementRequestBinding;
 }): ThinSettleRequestPlan {
-  const method = resolveEffectiveThinSettlementMethod(input.method);
+  const binding = requireThinSettlementRequestBinding(input.requestBinding);
+  const method = binding.method;
 
   if (!isThinRunnerSettleableMethod(method)) {
     return {
@@ -84,21 +75,28 @@ export function planThinSettleRequest(input: {
     };
   }
 
+  const url = new URL(binding.endpoint);
+  for (const [key, value] of binding.query) url.searchParams.append(key, value);
+
   if (method === "GET") {
     return {
       supported: true,
       method: "GET",
-      endpoint: appendQueryParams(input.endpoint, input.body),
+      endpoint: url.toString(),
       body: undefined,
       sendBody: false,
+      requestBinding: binding,
+      requestBindingSha256: binding.binding_sha256,
     };
   }
 
   return {
     supported: true,
     method: "POST",
-    endpoint: input.endpoint,
-    body: input.body,
+    endpoint: url.toString(),
+    body: binding.body,
     sendBody: true,
+    requestBinding: binding,
+    requestBindingSha256: binding.binding_sha256,
   };
 }

@@ -6,6 +6,19 @@ import { compareUsdcDecimal } from "./external-x402-get-policy";
 import { MAINNET_NETWORK, TESTNET_NETWORK } from "../../shared/payment-safety";
 import { MAINNET_BUYER_WALLET, SEPOLIA_TESTNET_BUYER_WALLET } from "./network-config";
 import { checkAuthorizationMethodBinding } from "./authorization-method-binding";
+import {
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
+  createThinSettlementRequestBinding,
+  thinSettlementRequestSummary,
+  type CanonicalJsonValue,
+  type CanonicalQuery,
+  type ThinSettlementRequestSummary,
+} from "./thin-settlement-request-binding";
+export {
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
+} from "./thin-settlement-request-binding";
 
 export interface TargetSelectionAuditMetadata {
   readonly selected_resource_url: string;
@@ -25,6 +38,8 @@ export interface HumanPaymentAuthorization {
    * method, the planned method, and the intent method before any payment.
    */
   readonly method?: string | null;
+  readonly request_binding_sha256?: string | null;
+  readonly request_summary?: ThinSettlementRequestSummary | null;
   readonly network?: string;
   readonly asset?: string;
   readonly buyer_wallet?: string;
@@ -44,12 +59,64 @@ export interface SelectedCandidateRef {
   readonly service_id: string;
   readonly endpoint: string;
   readonly method?: string | null;
+  readonly request_input_status?: "known";
+  readonly request_query?: CanonicalQuery;
+  readonly request_body?: CanonicalJsonValue | null;
+  readonly request_binding_sha256?: string | null;
   readonly quote_amount_usdc?: string;
   readonly recommended_max_usdc?: string;
   readonly network?: string;
   readonly asset?: string;
   readonly buyer_wallet?: string;
   readonly target_selection_audit?: TargetSelectionAuditMetadata | null;
+}
+
+function validateRequestBinding(
+  auth: HumanPaymentAuthorization,
+  selected: SelectedCandidateRef,
+  reasons: string[],
+): void {
+  const authorizedHash = auth.request_binding_sha256?.trim().toLowerCase();
+  if (!authorizedHash) {
+    reasons.push(`${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: authorization hash absent`);
+  }
+  if (
+    selected.request_input_status !== "known" ||
+    !Array.isArray(selected.request_query) ||
+    !Object.prototype.hasOwnProperty.call(selected, "request_body") ||
+    !selected.request_binding_sha256
+  ) {
+    reasons.push("REJECTED_REQUEST_BINDING_NOT_PERSISTED: selected_candidate request shape absent");
+    return;
+  }
+  try {
+    const binding = createThinSettlementRequestBinding({
+      endpoint: selected.endpoint,
+      method: String(selected.method ?? ""),
+      input_status: "known",
+      query: selected.request_query,
+      body: selected.request_body,
+    });
+    if (binding.binding_sha256 !== selected.request_binding_sha256.toLowerCase()) {
+      reasons.push("BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH: selected_candidate hash is not canonical");
+      return;
+    }
+    if (authorizedHash && authorizedHash !== binding.binding_sha256) {
+      reasons.push(
+        `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: authorization differs from selected_candidate`,
+      );
+    }
+    const expectedSummary = thinSettlementRequestSummary(binding);
+    if (!auth.request_summary) {
+      reasons.push(`${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: request_summary absent`);
+    } else if (JSON.stringify(auth.request_summary) !== JSON.stringify(expectedSummary)) {
+      reasons.push(
+        `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: request_summary differs from selected_candidate`,
+      );
+    }
+  } catch (error) {
+    reasons.push(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function validateTargetSelectionAudit(
@@ -116,6 +183,7 @@ export function validateHumanPaymentAuthorization(
       candidateMethod: selected.method,
     }).reasons,
   );
+  validateRequestBinding(auth, selected, reasons);
   if (auth.network && selected.network && auth.network !== selected.network) {
     reasons.push("network mismatch vs selected_candidate");
   }
