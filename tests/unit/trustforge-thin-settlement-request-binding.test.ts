@@ -24,6 +24,9 @@ describe("thin settlement canonical request binding", () => {
     const first = bind({ query: { network: "ethereum", mode: "full" } });
     const second = bind({ query: { mode: "full", network: "ethereum" } });
     expect(first.binding_sha256).toBe(second.binding_sha256);
+    expect(bind({ query: { b: 2, a: 1 } }).binding_sha256).toBe(
+      bind({ query: { a: 1, b: 2 } }).binding_sha256,
+    );
   });
 
   it("changes for a value, endpoint, or method change", () => {
@@ -62,6 +65,33 @@ describe("thin settlement canonical request binding", () => {
       body: null,
     });
     expect(outbound.binding_sha256).toBe(binding.binding_sha256);
+  });
+
+  it("preserves repeated-value order and multiplicity as request semantics", () => {
+    const firstSecond = bind({ query: { tag: ["first", "second"] } });
+    const secondFirst = bind({ query: { tag: ["second", "first"] } });
+    expect(firstSecond.binding_sha256).not.toBe(secondFirst.binding_sha256);
+    expect(firstSecond.query).toEqual([
+      ["tag", "first"],
+      ["tag", "second"],
+    ]);
+
+    const explicitPairs = bind({
+      query: [
+        ["tag", "first"],
+        ["tag", "second"],
+      ],
+    });
+    expect(explicitPairs.query).toEqual(firstSecond.query);
+    expect(explicitPairs.binding_sha256).toBe(firstSecond.binding_sha256);
+
+    const duplicate = bind({ query: [["tag", "same"], ["tag", "same"]] });
+    const single = bind({ query: [["tag", "same"]] });
+    expect(duplicate.query).toEqual([["tag", "same"], ["tag", "same"]]);
+    expect(duplicate.binding_sha256).not.toBe(single.binding_sha256);
+    expect(bind({ query: { tag: ["first", "changed"] } }).binding_sha256).not.toBe(
+      firstSecond.binding_sha256,
+    );
   });
 
   it.each([

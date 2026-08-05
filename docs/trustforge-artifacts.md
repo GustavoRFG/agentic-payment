@@ -66,3 +66,9 @@ body, input provenance, and `request_binding_sha256`. A
 from older schemas that do not persist the request binding fail closed with
 `REJECTED_REQUEST_BINDING_NOT_PERSISTED`; absence is never interpreted as an
 empty request input.
+
+Rich Phase 5 `selected_candidate.json` and
+`human_payment_authorization_template.json` artifacts also carry the canonical
+method, query, body, `request_binding_sha256`, and auditable request summary.
+Phase 6 reads the authorized hash from the human artifact; the paid rich planner
+must independently reproduce it before any wallet environment is loaded.

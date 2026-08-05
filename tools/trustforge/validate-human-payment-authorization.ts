@@ -10,7 +10,6 @@ import {
   BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
   BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
   createThinSettlementRequestBinding,
-  thinSettlementRequestSummary,
   type CanonicalJsonValue,
   type CanonicalQuery,
   type ThinSettlementRequestSummary,
@@ -106,13 +105,27 @@ function validateRequestBinding(
         `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: authorization differs from selected_candidate`,
       );
     }
-    const expectedSummary = thinSettlementRequestSummary(binding);
     if (!auth.request_summary) {
       reasons.push(`${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: request_summary absent`);
-    } else if (JSON.stringify(auth.request_summary) !== JSON.stringify(expectedSummary)) {
-      reasons.push(
-        `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: request_summary differs from selected_candidate`,
-      );
+    } else {
+      try {
+        const summaryBinding = createThinSettlementRequestBinding({
+          endpoint: auth.request_summary.endpoint,
+          method: auth.request_summary.method,
+          input_status: "known",
+          query: auth.request_summary.query,
+          body: auth.request_summary.body,
+        });
+        if (summaryBinding.binding_sha256 !== binding.binding_sha256) {
+          reasons.push(
+            `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: request_summary differs from selected_candidate`,
+          );
+        }
+      } catch (error) {
+        reasons.push(
+          `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: invalid request_summary: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
   } catch (error) {
     reasons.push(error instanceof Error ? error.message : String(error));

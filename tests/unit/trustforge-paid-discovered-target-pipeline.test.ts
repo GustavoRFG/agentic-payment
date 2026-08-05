@@ -11,7 +11,10 @@ import {
 import { evaluateFresh402AgainstAuthorizedQuote } from "../../tools/trustforge/paid-quote-freshness-preflight";
 import { runPhase6SinglePaidRichProbe } from "../../tools/run-trustforge-phase6-single-paid-rich-probe";
 import { validateHumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
-import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
+import {
+  PHASE2_FIXTURE_TX,
+  ZAPPER_TX_EXPLAINER_POLICY,
+} from "../../tools/trustforge/rich-tx-explainer-policy";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
@@ -20,7 +23,10 @@ const requestBinding = createThinSettlementRequestBinding({
   method: "POST",
   input_status: "known",
   query: [],
-  body: { hash: "0xabc", chainId: 1 },
+  body: ZAPPER_TX_EXPLAINER_POLICY.buildRequestBody(
+    PHASE2_FIXTURE_TX,
+    ZAPPER_TX_EXPLAINER_POLICY.targetChainId,
+  ),
 });
 
 describe("paid discovered target pipeline (offline/testnet-safe)", () => {

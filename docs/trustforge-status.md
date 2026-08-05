@@ -131,3 +131,10 @@ same hash before any key guard or network request can run. Legacy artifacts
 without a persisted binding are rejected instead of receiving an implicit `{}`
 input. This corrective was implemented and tested without live operations or
 payment-bearing requests.
+
+The A.3 corrective completed the same boundary for the legacy rich caller: its
+runtime planner now receives the authorized hash and summary from the persisted
+Phase 5/6 human artifact and compares them before wallet loading. Query
+canonicalization sorts distinct keys while preserving repeated-value order and
+multiplicity, and authorization summaries are compared by their canonical
+semantic hash rather than textual property order.

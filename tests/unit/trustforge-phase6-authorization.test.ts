@@ -137,6 +137,43 @@ describe("validateHumanPaymentAuthorization", () => {
     ).toContain("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH");
   });
 
+  it("compares request_summary semantically instead of by property order", () => {
+    const reorderedSummary: HumanPaymentAuthorization["request_summary"] = {
+      body: { hash: "0xabc", chainId: 1 },
+      query: [],
+      endpoint: POST_BINDING.endpoint,
+      method: "POST",
+    };
+    expect(
+      validateHumanPaymentAuthorization(
+        { ...validAuth, request_summary: reorderedSummary },
+        selected,
+      ),
+    ).toEqual({ valid: true, reasons: [] });
+  });
+
+  it("rejects absent or semantically divergent request_summary", () => {
+    expect(
+      validateHumanPaymentAuthorization(
+        { ...validAuth, request_summary: null },
+        selected,
+      ).reasons.join(" "),
+    ).toContain("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING");
+
+    expect(
+      validateHumanPaymentAuthorization(
+        {
+          ...validAuth,
+          request_summary: {
+            ...thinSettlementRequestSummary(POST_BINDING),
+            body: { hash: "0xdef", chainId: 1 },
+          },
+        },
+        selected,
+      ).reasons.join(" "),
+    ).toContain("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH");
+  });
+
   it("detects removed GET query and altered POST body", () => {
     const getAuth: HumanPaymentAuthorization = {
       ...validAuth,

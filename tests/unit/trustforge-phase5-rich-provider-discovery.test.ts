@@ -8,6 +8,10 @@ import {
 } from "../../tools/trustforge/rich-provider-discovery";
 import type { DiscoveryReport } from "../../tools/trustforge/rich-tx-explainer-discovery";
 import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-explainer-policy";
+import {
+  createThinSettlementRequestBinding,
+  thinSettlementRequestSummary,
+} from "../../tools/trustforge/thin-settlement-request-binding";
 
 const mockDiscovery: DiscoveryReport = {
   discovery_status: "FOUND_EQUIVALENT",
@@ -70,6 +74,13 @@ describe("Phase 5 rich provider discovery", () => {
     expect(selected).not.toBeNull();
     expect(selected?.service_id).toBe("zapper_tx_explainer");
     expect(selected?.provider).toBe("Zapper");
+    expect(selected).toMatchObject({
+      method: "POST",
+      request_input_status: "known",
+      request_query: [],
+      request_input_provenance: "policy_generated_request_binding",
+    });
+    expect(selected?.request_binding_sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("returns null when no candidate meets criteria", () => {
@@ -96,5 +107,19 @@ describe("Phase 5 rich provider discovery", () => {
     expect(template.allow_retry).toBe(false);
     expect(template.require_settlement_evidence).toBe(true);
     expect(template.provider).toBe("Zapper");
+    expect(template.method).toBe(selected!.method);
+    expect(template.request_binding_sha256).toBe(selected!.request_binding_sha256);
+    expect(template.request_summary).toEqual({
+      method: selected!.method,
+      endpoint: selected!.endpoint,
+      query: selected!.request_query,
+      body: selected!.request_body,
+    });
+    const copiedBinding = createThinSettlementRequestBinding({
+      ...template.request_summary,
+      input_status: "known",
+    });
+    expect(copiedBinding.binding_sha256).toBe(template.request_binding_sha256);
+    expect(thinSettlementRequestSummary(copiedBinding)).toEqual(template.request_summary);
   });
 });

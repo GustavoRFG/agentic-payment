@@ -25,8 +25,10 @@ import {
 import {
   createRichPaidGuards,
   loadRichBuyerWallet,
+  planAuthorizedRichTxExplainerRequest,
   performRichTxExplainerPaidRequest,
 } from "./trustforge/rich-tx-explainer-live-bindings";
+import type { ThinSettlementRequestSummary } from "./trustforge/thin-settlement-request-binding";
 import {
   PaidRequest402Error,
   formatPaid402CaptureMarkdown,
@@ -156,6 +158,9 @@ function gitHash(): string {
 export async function runRichTxExplainerPhase3(options: {
   readonly runDir?: string;
   readonly executePaid?: boolean;
+  readonly authorizedMethod?: "GET" | "POST" | null;
+  readonly authorizedRequestBindingSha256?: string | null;
+  readonly authorizedRequestSummary?: ThinSettlementRequestSummary | null;
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => Date;
@@ -392,6 +397,20 @@ export async function runRichTxExplainerPhase3(options: {
   let guards: ReturnType<typeof createRichPaidGuards> | null = null;
   let onchainPayment = await verifyBaseUsdcPayment({ transactionHash: null });
 
+  // Reproduce and compare the runtime plan before the wallet loader can inspect a
+  // private key. Authorization comes only from the persisted human artifact passed
+  // by the Phase 6 caller; it is never inferred from policy or plan here.
+  planAuthorizedRichTxExplainerRequest({
+    policy,
+    endpoint: handshake.endpointUrl,
+    txHash: targetTx,
+    authorization: {
+      authorizedMethod: options.authorizedMethod ?? null,
+      authorizedRequestBindingSha256: options.authorizedRequestBindingSha256 ?? null,
+      authorizedRequestSummary: options.authorizedRequestSummary ?? null,
+    },
+  });
+
   try {
     guards = createRichPaidGuards();
     const wallet = await loadRichBuyerWallet(env);
@@ -399,7 +418,9 @@ export async function runRichTxExplainerPhase3(options: {
     paidResponse = await performRichTxExplainerPaidRequest({
       policy,
       handshake,
-      authorizedMethod: policy.method,
+      authorizedMethod: options.authorizedMethod ?? null,
+      authorizedRequestBindingSha256: options.authorizedRequestBindingSha256 ?? null,
+      authorizedRequestSummary: options.authorizedRequestSummary ?? null,
       txHash: targetTx,
       wallet,
       paidInvocationGuard: guards.paidInvocationGuard,

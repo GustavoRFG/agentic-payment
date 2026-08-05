@@ -37,3 +37,8 @@ Any future human payment authorization must copy both
 candidate. A missing or changed endpoint, method, query, or body requires a new
 candidate and a new human decision; agents must not reconstruct, default, or
 silently amend the authorized invocation shape.
+
+For the rich flow, the Phase 5 template is the source of the request-binding
+decision. Phase 6 must read the approved hash and summary from the resulting
+human artifact; it may canonicalize them for validation, but it must never use
+the runtime planner's own hash as the authorized value.

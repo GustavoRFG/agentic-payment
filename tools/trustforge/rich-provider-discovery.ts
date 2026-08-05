@@ -4,7 +4,19 @@
 
 import type { DiscoveryCandidate, DiscoveryReport } from "./rich-tx-explainer-discovery";
 import type { RichTxExplainerHandshake } from "./rich-tx-explainer-handshake";
-import { ZAPPER_TX_EXPLAINER_POLICY } from "./rich-tx-explainer-policy";
+import {
+  PHASE2_FIXTURE_TX,
+  ZAPPER_TX_EXPLAINER_POLICY,
+} from "./rich-tx-explainer-policy";
+import {
+  createThinSettlementRequestBinding,
+  REJECTED_REQUEST_BINDING_NOT_PERSISTED,
+  type CanonicalJsonValue,
+  type CanonicalQuery,
+  type RequestInputProvenance,
+  type ThinSettlementRequestBinding,
+  type ThinSettlementRequestSummary,
+} from "./thin-settlement-request-binding";
 
 export interface CandidateProviderRecord {
   readonly provider: string;
@@ -28,6 +40,12 @@ export interface SelectedCandidate {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  readonly method: "GET" | "POST";
+  readonly request_input_status: "known";
+  readonly request_query: CanonicalQuery;
+  readonly request_body: CanonicalJsonValue | null;
+  readonly request_input_provenance: RequestInputProvenance;
+  readonly request_binding_sha256: string;
   readonly quote_amount_usdc: string;
   readonly recommended_max_usdc: string;
   readonly selection_rationale: readonly string[];
@@ -42,6 +60,9 @@ export interface HumanPaymentAuthorizationTemplate {
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
+  readonly method: "GET" | "POST";
+  readonly request_binding_sha256: string;
+  readonly request_summary: ThinSettlementRequestSummary;
   readonly max_usdc: string;
   readonly max_payment_attempts: 1;
   readonly allow_retry: false;
@@ -206,10 +227,24 @@ export function selectBestCandidate(
     const allMet = Object.values(criteria).every(Boolean);
     if (!allMet) continue;
 
+    const policy = ZAPPER_TX_EXPLAINER_POLICY;
+    const requestBinding = createThinSettlementRequestBinding({
+      endpoint: best.endpoint,
+      method: policy.method,
+      input_status: "known",
+      query: [],
+      body: policy.buildRequestBody(PHASE2_FIXTURE_TX, policy.targetChainId),
+    });
     return {
       provider: best.provider,
       service_id: best.service_id,
       endpoint: best.endpoint,
+      method: requestBinding.method,
+      request_input_status: requestBinding.input_status,
+      request_query: requestBinding.query,
+      request_body: requestBinding.body,
+      request_input_provenance: "policy_generated_request_binding",
+      request_binding_sha256: requestBinding.binding_sha256,
       quote_amount_usdc: best.quote_amount_usdc ?? "0.001125",
       recommended_max_usdc: "0.10",
       selection_rationale: [
@@ -237,6 +272,14 @@ export function buildHumanAuthorizationTemplate(
     provider: selected.provider,
     service_id: selected.service_id,
     endpoint: selected.endpoint,
+    method: selected.method,
+    request_binding_sha256: selected.request_binding_sha256,
+    request_summary: {
+      method: selected.method,
+      endpoint: selected.endpoint,
+      query: selected.request_query,
+      body: selected.request_body,
+    },
     max_usdc: selected.recommended_max_usdc,
     max_payment_attempts: 1,
     allow_retry: false,
@@ -254,6 +297,35 @@ export function buildHumanAuthorizationTemplate(
     decided_at: null,
     rationale: "",
   };
+}
+
+export function requestBindingFromRichSelectedCandidate(
+  selected: SelectedCandidate,
+): ThinSettlementRequestBinding {
+  if (
+    selected.request_input_status !== "known" ||
+    !Array.isArray(selected.request_query) ||
+    !Object.prototype.hasOwnProperty.call(selected, "request_body") ||
+    !selected.request_input_provenance ||
+    !selected.request_binding_sha256
+  ) {
+    throw new Error(
+      `${REJECTED_REQUEST_BINDING_NOT_PERSISTED}: rich selected_candidate lacks canonical request input`,
+    );
+  }
+  const binding = createThinSettlementRequestBinding({
+    endpoint: selected.endpoint,
+    method: selected.method,
+    input_status: selected.request_input_status,
+    query: selected.request_query,
+    body: selected.request_body,
+  });
+  if (binding.binding_sha256 !== selected.request_binding_sha256.toLowerCase()) {
+    throw new Error(
+      "REJECTED_REQUEST_BINDING_INVALID: rich selected_candidate request binding hash mismatch",
+    );
+  }
+  return binding;
 }
 
 export function discoveryCandidateToRecord(

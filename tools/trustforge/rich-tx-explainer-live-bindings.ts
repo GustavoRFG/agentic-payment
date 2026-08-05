@@ -26,8 +26,18 @@ import {
   MAINNET_BUYER_WALLET,
 } from "./network-config";
 import { executeSingleX402Settlement } from "./x402-single-settlement-executor";
-import { createThinSettlementRequestBinding } from "./thin-settlement-request-binding";
-import { planThinSettleRequest } from "./thin-settlement-method-contract";
+import {
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
+  BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
+  createThinSettlementRequestBinding,
+  type ThinSettlementRequestBinding,
+  type ThinSettlementRequestSummary,
+} from "./thin-settlement-request-binding";
+import {
+  planThinSettleRequest,
+  type ThinSettleRequestPlan,
+} from "./thin-settlement-method-contract";
+import { assertAuthorizationMethodBinding } from "./authorization-method-binding";
 
 export interface RichPaidResponse {
   readonly httpStatus: number;
@@ -52,6 +62,77 @@ export interface RichPaidResponse {
 export interface RichWalletHandle {
   readonly walletFingerprint: string;
   readonly publicAddress?: string;
+}
+
+export interface RichRequestAuthorization {
+  readonly authorizedMethod: "GET" | "POST" | null;
+  readonly authorizedRequestBindingSha256: string | null;
+  readonly authorizedRequestSummary: ThinSettlementRequestSummary | null;
+}
+
+export function planAuthorizedRichTxExplainerRequest(input: {
+  readonly policy: RichTxExplainerPolicy;
+  readonly endpoint: string;
+  readonly txHash: string;
+  readonly authorization: RichRequestAuthorization;
+}): Extract<ThinSettleRequestPlan, { readonly supported: true }> {
+  assertAuthorizationMethodBinding({
+    authorizationMethod: input.authorization.authorizedMethod,
+    candidateMethod: input.policy.method,
+    plannedMethod: input.policy.method,
+  });
+
+  const authorizedHash = input.authorization.authorizedRequestBindingSha256
+    ?.trim()
+    .toLowerCase();
+  if (!authorizedHash) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: rich authorization hash absent`,
+    );
+  }
+  const authorizedSummary = input.authorization.authorizedRequestSummary;
+  if (!authorizedSummary) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: rich authorization request_summary absent`,
+    );
+  }
+  let summaryBinding: ThinSettlementRequestBinding;
+  try {
+    summaryBinding = createThinSettlementRequestBinding({
+      endpoint: authorizedSummary.endpoint,
+      method: authorizedSummary.method,
+      input_status: "known",
+      query: authorizedSummary.query,
+      body: authorizedSummary.body,
+    });
+  } catch (error) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: invalid rich authorization summary: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (summaryBinding.binding_sha256 !== authorizedHash) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: rich authorization summary differs from authorized hash`,
+    );
+  }
+
+  // This is the runtime plan. It is intentionally recalculated from the live
+  // endpoint and policy input, independently of the persisted human authorization.
+  const plannedRequestBinding = createThinSettlementRequestBinding({
+    endpoint: input.endpoint,
+    method: input.policy.method,
+    input_status: "known",
+    query: [],
+    body: input.policy.buildRequestBody(input.txHash, input.policy.targetChainId),
+  });
+  if (plannedRequestBinding.binding_sha256 !== authorizedHash) {
+    throw new Error(
+      `${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH}: rich authorization differs from planned request`,
+    );
+  }
+  const plan = planThinSettleRequest({ requestBinding: plannedRequestBinding });
+  if (!plan.supported) throw new Error(plan.reason);
+  return plan;
 }
 
 function sha256(value: string): string {
@@ -79,7 +160,9 @@ export async function loadRichBuyerWallet(
 export async function performRichTxExplainerPaidRequest(options: {
   readonly policy: RichTxExplainerPolicy;
   readonly handshake: RichTxExplainerHandshake;
-  readonly authorizedMethod: "GET" | "POST";
+  readonly authorizedMethod: "GET" | "POST" | null;
+  readonly authorizedRequestBindingSha256: string | null;
+  readonly authorizedRequestSummary: ThinSettlementRequestSummary | null;
   readonly txHash: string;
   readonly wallet: RichWalletHandle;
   readonly paidInvocationGuard: PaidInvocationGuard;
@@ -107,19 +190,16 @@ export async function performRichTxExplainerPaidRequest(options: {
     throw new Error("handshake asset is not Base USDC");
   }
 
-  const requestBody = options.policy.buildRequestBody(
-    options.txHash,
-    options.policy.targetChainId,
-  );
-  const requestBinding = createThinSettlementRequestBinding({
+  const requestPlan = planAuthorizedRichTxExplainerRequest({
+    policy: options.policy,
     endpoint: options.handshake.endpointUrl,
-    method: options.policy.method,
-    input_status: "known",
-    query: [],
-    body: requestBody,
+    txHash: options.txHash,
+    authorization: {
+      authorizedMethod: options.authorizedMethod,
+      authorizedRequestBindingSha256: options.authorizedRequestBindingSha256,
+      authorizedRequestSummary: options.authorizedRequestSummary,
+    },
   });
-  const requestPlan = planThinSettleRequest({ requestBinding });
-  if (!requestPlan.supported) throw new Error(requestPlan.reason);
   const maxAmountAtomic = parseUsdcDecimalToAtomic(options.policy.maxTotalSpendUsdc).toString();
 
   const settlement = await executeSingleX402Settlement({
@@ -130,8 +210,8 @@ export async function performRichTxExplainerPaidRequest(options: {
       endpoint: requestPlan.endpoint,
       method: requestPlan.method,
       authorizedMethod: options.authorizedMethod,
-      authorizedRequestBindingSha256: requestBinding.binding_sha256,
-      plannedRequestBinding: requestBinding,
+      authorizedRequestBindingSha256: options.authorizedRequestBindingSha256,
+      plannedRequestBinding: requestPlan.requestBinding,
       body: requestPlan.body,
       asset,
       payTo: options.handshake.payTo,

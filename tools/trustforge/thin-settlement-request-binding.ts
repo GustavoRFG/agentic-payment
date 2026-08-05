@@ -137,9 +137,17 @@ export function canonicalizeThinSettlementQuery(input: unknown): CanonicalQuery 
   } else {
     fail("query must be an object or [string,string][]");
   }
-  // Sort keys for object-order independence while preserving the declared order of
-  // repeated values for the same key (Array#sort is stable in supported runtimes).
-  return pairs.sort(([ak], [bk]) => (ak < bk ? -1 : ak > bk ? 1 : 0));
+  // Normalize distinct keys deterministically, but keep every value for a repeated
+  // key in its original sequence. The sequence and multiplicity are request semantics.
+  const valuesByKey = new Map<string, string[]>();
+  for (const [key, value] of pairs) {
+    const values = valuesByKey.get(key) ?? [];
+    values.push(value);
+    valuesByKey.set(key, values);
+  }
+  return [...valuesByKey.keys()]
+    .sort()
+    .flatMap((key) => valuesByKey.get(key)!.map((value) => [key, value] as const));
 }
 
 function normalizeEndpointAndEmbeddedQuery(endpoint: string): {

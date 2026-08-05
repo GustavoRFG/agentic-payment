@@ -22,6 +22,7 @@ import {
   TRUSTFORGE_RICH_TX_EXPLAINER_RUN_ID_ENV,
   TRUSTFORGE_RICH_TX_EXPLAINER_MAX_USDC_ENV,
   TRUSTFORGE_AUTHORIZATION_HASH_ENV,
+  PHASE2_FIXTURE_TX,
 } from "./trustforge/rich-tx-explainer-policy";
 import {
   settlementEvidenceFromSavedHeader,
@@ -49,9 +50,13 @@ import {
 } from "./trustforge/authorization-consumption-ledger";
 import { runPaidQuoteFreshnessPreflight } from "./trustforge/paid-quote-freshness-preflight";
 import { ZAPPER_TX_EXPLAINER_POLICY } from "./trustforge/rich-tx-explainer-policy";
+import { planAuthorizedRichTxExplainerRequest } from "./trustforge/rich-tx-explainer-live-bindings";
 import { verifyBaseUsdcPayment } from "./trustforge/verify-base-usdc-payment";
 import { parseUsdcDecimalToAtomic } from "./trustforge/external-x402-get-policy";
-import { requestBindingFromSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
+import {
+  requestBindingFromRichSelectedCandidate,
+  type SelectedCandidate,
+} from "./trustforge/rich-provider-discovery";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -146,10 +151,7 @@ export async function runPhase6SinglePaidRichProbe(
   }
 
   const auth = await readJson<HumanPaymentAuthorization>(authPath);
-  const selected = await readJson<{
-    provider: string;
-    service_id: string;
-    endpoint: string;
+  const selected = await readJson<SelectedCandidate & {
     quote_amount_usdc?: string;
     quote_atomic?: string;
     authorized_pay_to?: string;
@@ -167,6 +169,23 @@ export async function runPhase6SinglePaidRichProbe(
   if (auth.decision === "reject") {
     throw new Error("COMPLETED_HUMAN_REJECTED_PAID_PROBE");
   }
+
+  const selectedRequestBinding = requestBindingFromRichSelectedCandidate(selected);
+  const authorizedMethod =
+    auth.method === "GET" || auth.method === "POST" ? auth.method : null;
+
+  // Compare the persisted human authorization with the independently reproduced
+  // rich runtime plan before loadEnvForPaidProbe can read any wallet .env file.
+  planAuthorizedRichTxExplainerRequest({
+    policy: ZAPPER_TX_EXPLAINER_POLICY,
+    endpoint: ZAPPER_TX_EXPLAINER_POLICY.endpointUrl,
+    txHash: PHASE2_FIXTURE_TX,
+    authorization: {
+      authorizedMethod,
+      authorizedRequestBindingSha256: auth.request_binding_sha256 ?? null,
+      authorizedRequestSummary: auth.request_summary ?? null,
+    },
+  });
 
   const authorizationHash = await hashAuthorizationFile(authPath);
   const ledgerPath = authorizationLedgerPath(phase5RunDir);
@@ -202,7 +221,7 @@ export async function runPhase6SinglePaidRichProbe(
         quote_atomic: quoteAtomic,
         authorized_max_usdc: auth.max_usdc,
         pay_to: payTo,
-        request_binding: requestBindingFromSelectedCandidate(selected),
+        request_binding: selectedRequestBinding,
       },
       fetchImpl: options.fetchImpl,
       now: options.now,
@@ -277,6 +296,9 @@ export async function runPhase6SinglePaidRichProbe(
     await runRichTxExplainerPhase3({
       runDir: richRunDir,
       executePaid: true,
+      authorizedMethod,
+      authorizedRequestBindingSha256: auth.request_binding_sha256 ?? null,
+      authorizedRequestSummary: auth.request_summary ?? null,
       env: armedEnv,
     });
   }
