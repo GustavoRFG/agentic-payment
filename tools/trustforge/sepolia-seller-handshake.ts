@@ -15,6 +15,7 @@ import {
   type ThinSettlementRequestBinding,
 } from "./thin-settlement-request-binding";
 import { planThinSettleRequest } from "./thin-settlement-method-contract";
+import type { SellerRequirementsObservation } from "./x402-seller-requirements-binding";
 
 export const SEPOLIA_LOCAL_PROVIDER = "TrustForgeLocalSeller" as const;
 export const SEPOLIA_LOCAL_SERVICE_ID = "local_analyze_text" as const;
@@ -43,7 +44,7 @@ export interface SepoliaSellerHandshakeResult {
 
 export interface SepoliaTargetSelectionDocument {
   readonly schema_name: "trustforge_target_selection";
-  readonly schema_version: "1.0.0";
+  readonly schema_version: "2.0.0";
   readonly network: typeof TESTNET_NETWORK;
   readonly asset: typeof TESTNET_USDC_ADDRESS;
   readonly selection: {
@@ -57,6 +58,7 @@ export interface SepoliaTargetSelectionDocument {
       readonly requestBody: ThinSettlementRequestBinding["body"];
       readonly requestInputProvenance: "policy_generated_request_binding";
       readonly requestBindingSha256: string;
+      readonly sellerRequirements: SellerRequirementsObservation;
       readonly quoteUsdc: string;
       readonly quoteAtomic: string;
       readonly selectedPayTo: string;
@@ -131,9 +133,7 @@ export function parseSepoliaSeller402Response(input: {
   if (input.paymentRequiredHeader) {
     headers["payment-required"] = input.paymentRequiredHeader;
   }
-  headers["www-authenticate"] =
-    input.wwwAuthenticate ??
-    'Bearer nonce="sepolia-handshake-nonce", expires="2099-01-01T00:00:00.000Z"';
+  if (input.wwwAuthenticate) headers["www-authenticate"] = input.wwwAuthenticate;
   const outcome = classifyTargetProbeResponse(
     candidate,
     {
@@ -170,7 +170,11 @@ export function parseSepoliaSeller402Response(input: {
 export function buildSepoliaTargetSelectionFromHandshake(
   handshake: SepoliaSellerHandshakeResult,
 ): SepoliaTargetSelectionDocument {
-  if (handshake.outcome.status !== "live_402_ok" || !handshake.accept) {
+  if (
+    handshake.outcome.status !== "live_402_ok" ||
+    !handshake.accept ||
+    !handshake.outcome.sellerRequirements
+  ) {
     throw new Error(
       `BLOCKED_SELLER_HANDSHAKE: expected live_402_ok, got ${handshake.outcome.status}`,
     );
@@ -183,7 +187,7 @@ export function buildSepoliaTargetSelectionFromHandshake(
   }
   return {
     schema_name: "trustforge_target_selection",
-    schema_version: "1.0.0",
+    schema_version: "2.0.0",
     network: TESTNET_NETWORK,
     asset: TESTNET_USDC_ADDRESS,
     selection: {
@@ -197,6 +201,7 @@ export function buildSepoliaTargetSelectionFromHandshake(
         requestBody: handshake.requestBinding.body,
         requestInputProvenance: "policy_generated_request_binding",
         requestBindingSha256: handshake.requestBinding.binding_sha256,
+        sellerRequirements: handshake.outcome.sellerRequirements,
         quoteUsdc: PAYMENT_AMOUNT_USD,
         quoteAtomic: handshake.accept.amountAtomic,
         selectedPayTo: handshake.accept.payTo,

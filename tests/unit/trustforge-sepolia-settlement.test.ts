@@ -27,8 +27,14 @@ import {
 } from "../../shared/payment-safety";
 import { SEPOLIA_TESTNET_BUYER_WALLET } from "../../tools/trustforge/network-config";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
-function requestFields(endpoint: string, method: "GET" | "POST", body: unknown = {}) {
+function requestFields(
+  endpoint: string,
+  method: "GET" | "POST",
+  body: unknown,
+  seller: { network: string; asset: string; payTo: string; amountAtomic: string },
+) {
   const binding = createThinSettlementRequestBinding({
     endpoint,
     method,
@@ -44,6 +50,14 @@ function requestFields(endpoint: string, method: "GET" | "POST", body: unknown =
     requestBody: binding.body,
     requestInputProvenance: "policy_generated_request_binding" as const,
     requestBindingSha256: binding.binding_sha256,
+    sellerRequirements: sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: seller.network,
+      asset: seller.asset,
+      payTo: seller.payTo,
+      amountAtomic: seller.amountAtomic,
+      endpoint,
+    }),
   };
 }
 
@@ -55,6 +69,11 @@ describe("Sepolia settlement proof pipeline", () => {
       paymentRequiredHeader: Buffer.from(
         JSON.stringify({
           x402Version: 2,
+          resource: {
+            url: "http://localhost:4021/paid/analyze-text",
+            description: "local Sepolia seller",
+            mimeType: "application/json",
+          },
           accepts: [
             {
               scheme: "exact",
@@ -62,6 +81,7 @@ describe("Sepolia settlement proof pipeline", () => {
               asset: TESTNET_USDC_ADDRESS,
               amount: PAYMENT_AMOUNT_ATOMIC,
               payTo: SEPOLIA_TESTNET_BUYER_WALLET,
+              maxTimeoutSeconds: 300,
             },
           ],
         }),
@@ -81,6 +101,11 @@ describe("Sepolia settlement proof pipeline", () => {
           ...requestFields("http://localhost:4021/paid/analyze-text", "POST", {
             text: "TrustForge Sepolia settlement proof handshake.",
             mode: "full",
+          }, {
+            network: TESTNET_NETWORK,
+            asset: TESTNET_USDC_ADDRESS,
+            payTo: SEPOLIA_TESTNET_BUYER_WALLET,
+            amountAtomic: "1000",
           }),
           quoteUsdc: "0.001",
           quoteAtomic: "1000",
@@ -105,7 +130,17 @@ describe("Sepolia settlement proof pipeline", () => {
         primary: {
           handshakeStatus: "live_402_ok",
           resourceUrl: "https://api.zapper.xyz/v2/x402/token-balances",
-          ...requestFields("https://api.zapper.xyz/v2/x402/token-balances", "GET"),
+          ...requestFields(
+            "https://api.zapper.xyz/v2/x402/token-balances",
+            "GET",
+            null,
+            {
+              network: MAINNET_NETWORK,
+              asset: MAINNET_USDC_ADDRESS,
+              payTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",
+              amountAtomic: "1125",
+            },
+          ),
           quoteUsdc: "0.001125",
           quoteAtomic: "1125",
           selectedPayTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",
@@ -171,9 +206,28 @@ describe("Sepolia settlement proof pipeline", () => {
   });
 
   it("freshness accepts Sepolia network params", () => {
+    const endpoint = "http://localhost:4021/paid/analyze-text";
+    const requestBinding = createThinSettlementRequestBinding({
+      endpoint,
+      method: "POST",
+      input_status: "known",
+      query: [],
+      body: {},
+    });
+    const sellerRequirements = sellerRequirementsFixture({
+      requestBindingSha256: requestBinding.binding_sha256,
+      network: TESTNET_NETWORK,
+      asset: TESTNET_USDC_ADDRESS,
+      payTo: SEPOLIA_TESTNET_BUYER_WALLET,
+      amountAtomic: "1000",
+      endpoint,
+    });
     const result = evaluateFresh402AgainstAuthorizedQuote(
       {
+        candidateId: "local_analyze_text",
+        resourceUrl: endpoint,
         status: "live_402_ok",
+        httpStatus: 402,
         quoteAtomic: "1000",
         quoteUsdc: "0.001",
         selectedAccept: {
@@ -182,11 +236,23 @@ describe("Sepolia settlement proof pipeline", () => {
           asset: TESTNET_USDC_ADDRESS,
           amountAtomic: "1000",
           payTo: SEPOLIA_TESTNET_BUYER_WALLET,
+          maxTimeoutSeconds: 300,
         },
-        challenge: { expiresAt: new Date(Date.now() + 60_000).toISOString(), nonce: "n1" },
+        sellerRequirements,
+        challenge: { expiresAt: null, nonce: null },
+        rawResponse: { httpStatus: 402, headers: {}, body: {}, bodySha256: null },
+        detail: null,
+        walletUsed: false,
+        paymentAttempted: false,
+        paymentBearingHttpRequestCount: 0,
       },
       {
-        endpoint: "http://localhost:4021/paid/analyze-text",
+        endpoint,
+        request_binding: requestBinding,
+        seller_requirements: sellerRequirements,
+        canonical_requirements_sha256:
+          sellerRequirements.binding.canonical_requirements_sha256,
+        canonical_envelope_sha256: sellerRequirements.binding.canonical_envelope_sha256,
         quote_amount_usdc: "0.001",
         quote_atomic: "1000",
         authorized_max_usdc: "0.002",
@@ -281,6 +347,10 @@ describe("Sepolia settlement proof pipeline", () => {
       attemptId: "attempt_1",
       runId: "run_1",
       authorizationHash: "hash",
+      canonicalRequirementsSha256: "b".repeat(64),
+      canonicalEnvelopeSha256: "c".repeat(64),
+      selectionRequirementsObservedAt: "2026-06-21T04:53:00.000Z",
+      requestBindingSha256: "d".repeat(64),
       network: TESTNET_NETWORK,
       buyer: SEPOLIA_TESTNET_BUYER_WALLET,
       payTo: "0x29865d0e41a75470c5d8aa9f0e0b373518f7fe71",

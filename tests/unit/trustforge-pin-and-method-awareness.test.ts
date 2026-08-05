@@ -14,6 +14,7 @@ import { SKIPPED_BLOCKLISTED, type ProviderBlocklist } from "../../tools/trustfo
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 const EMPTY_BLOCKLIST: ProviderBlocklist = { entries: [] };
 
@@ -49,25 +50,35 @@ function candidate(
     requestBody: binding.body,
     requestInputProvenance: "bazaar.extensions.bazaar.info.input",
     requestBindingSha256: binding.binding_sha256,
+    sellerRequirements: sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: MAINNET_NETWORK,
+      asset: MAINNET_USDC_ADDRESS,
+      payTo: "0x2222222222222222222222222222222222222222",
+      amountAtomic: "1125",
+      endpoint: base.resourceUrl,
+    }),
   } as DiscoveredTargetSelectionPrimary;
 }
 
-function paymentRequiredBody(amount: string): string {
-  return JSON.stringify({
-    x402Version: 2,
-    accepts: [
-      {
-        scheme: "exact",
-        network: MAINNET_NETWORK,
-        asset: MAINNET_USDC_ADDRESS,
-        maxAmountRequired: amount,
-        payTo: "0x2222222222222222222222222222222222222222",
-        maxTimeoutSeconds: 300,
-      },
-    ],
-    nonce: "probe-nonce",
-    expiresAt: "2099-01-01T00:00:00.000Z",
+function paymentRequiredBody(endpoint: string, amount: string): string {
+  const binding = createThinSettlementRequestBinding({
+    endpoint,
+    method: "POST",
+    input_status: "known",
+    query: [],
+    body: {},
   });
+  return JSON.stringify(
+    sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: MAINNET_NETWORK,
+      asset: MAINNET_USDC_ADDRESS,
+      payTo: "0x2222222222222222222222222222222222222222",
+      amountAtomic: amount,
+      endpoint,
+    }).payment_required_envelope,
+  );
 }
 
 describe("resolvePinnedCandidate — honest causes against the fresh selection", () => {
@@ -156,7 +167,7 @@ describe("adapt — pin honored strictly vs --pin-with-fallback (B)", () => {
       const url = String(input);
       expect(containsX402PaymentHeader(init?.headers)).toBe(false);
       expect(url).toBe(fallbackUrl);
-      return new Response(paymentRequiredBody("1125"), {
+      return new Response(paymentRequiredBody(fallbackUrl, "1125"), {
         status: 402,
         headers: { "content-type": "application/json" },
       });
@@ -188,7 +199,7 @@ describe("adapt — pin honored strictly vs --pin-with-fallback (B)", () => {
     };
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe(validPin);
-      return new Response(paymentRequiredBody("1125"), {
+      return new Response(paymentRequiredBody(validPin, "1125"), {
         status: 402,
         headers: { "content-type": "application/json" },
       });

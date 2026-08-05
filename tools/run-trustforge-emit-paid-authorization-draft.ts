@@ -7,8 +7,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   requestBindingFromSelectedCandidate,
+  sellerRequirementsFromSelectedCandidate,
   type DiscoveredSelectedCandidate,
 } from "./trustforge/discovered-target-to-selected-candidate";
+import { parseUsdcDecimalToAtomic } from "./trustforge/external-x402-get-policy";
+import {
+  BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS,
+  HUMAN_AUTHORIZATION_DEFAULT_TTL_SECONDS,
+  SIGNED_BUT_NOT_SENT_POLICY,
+} from "./trustforge/x402-seller-requirements-binding";
 import {
   thinSettlementRequestSummary,
   type ThinSettlementRequestSummary,
@@ -19,7 +26,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const PENDING_HUMAN_DECISION = "PENDING_HUMAN" as const;
 
 export interface HumanPaymentAuthorizationDraft {
-  readonly authorization_schema_version: "trustforge_paid_probe_authorization.v1";
+  readonly authorization_schema_version: "trustforge_paid_probe_authorization.v2";
   readonly decision: typeof PENDING_HUMAN_DECISION;
   readonly allowed_values: readonly ["reject", "authorize_one_payment"];
   readonly provider: string;
@@ -29,8 +36,15 @@ export interface HumanPaymentAuthorizationDraft {
   readonly method: string;
   readonly request_binding_sha256: string;
   readonly request_summary: ThinSettlementRequestSummary;
+  readonly canonical_requirements_sha256: string;
+  readonly canonical_envelope_sha256: string;
+  readonly x402_version: 1 | 2;
+  readonly scheme: string;
   readonly network: string;
   readonly asset: string;
+  readonly pay_to: string;
+  readonly amount_atomic: string;
+  readonly maximum_authorized_amount_atomic: string;
   readonly buyer_wallet: string;
   readonly max_usdc: string;
   readonly max_payment_attempts: 1;
@@ -38,6 +52,15 @@ export interface HumanPaymentAuthorizationDraft {
   readonly require_dedicated_wallet: true;
   readonly rationale: string;
   readonly decided_at: null;
+  readonly authorization_ttl_seconds: typeof HUMAN_AUTHORIZATION_DEFAULT_TTL_SECONDS;
+  readonly authorization_expires_at: null;
+  readonly buyer_nonce_policy: "cryptographic_random_32_bytes_per_attempt";
+  readonly buyer_validity_policy: {
+    readonly valid_after_clock_skew_seconds: typeof BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS;
+    readonly valid_before_must_not_exceed: "effective_signing_deadline";
+    readonly signed_but_not_sent: typeof SIGNED_BUT_NOT_SENT_POLICY;
+  };
+  readonly requirements_refresh_policy: "exact_hash_match_before_signing";
   readonly target_selection_audit: DiscoveredSelectedCandidate["target_selection_audit"];
 }
 
@@ -45,8 +68,9 @@ export function buildHumanPaymentAuthorizationDraft(
   candidate: DiscoveredSelectedCandidate,
 ): HumanPaymentAuthorizationDraft {
   const requestBinding = requestBindingFromSelectedCandidate(candidate);
+  const requirements = sellerRequirementsFromSelectedCandidate(candidate).binding;
   return {
-    authorization_schema_version: "trustforge_paid_probe_authorization.v1",
+    authorization_schema_version: "trustforge_paid_probe_authorization.v2",
     decision: PENDING_HUMAN_DECISION,
     allowed_values: ["reject", "authorize_one_payment"],
     provider: candidate.provider,
@@ -55,8 +79,17 @@ export function buildHumanPaymentAuthorizationDraft(
     method: requestBinding.method,
     request_binding_sha256: requestBinding.binding_sha256,
     request_summary: thinSettlementRequestSummary(requestBinding),
-    network: candidate.network,
-    asset: candidate.asset,
+    canonical_requirements_sha256: requirements.canonical_requirements_sha256,
+    canonical_envelope_sha256: requirements.canonical_envelope_sha256,
+    x402_version: requirements.protocol_version,
+    scheme: requirements.scheme,
+    network: requirements.network,
+    asset: requirements.asset,
+    pay_to: requirements.pay_to,
+    amount_atomic: requirements.amount_atomic,
+    maximum_authorized_amount_atomic: parseUsdcDecimalToAtomic(
+      candidate.recommended_max_usdc,
+    ).toString(),
     buyer_wallet: candidate.buyer_wallet,
     max_usdc: candidate.recommended_max_usdc,
     max_payment_attempts: 1,
@@ -64,6 +97,15 @@ export function buildHumanPaymentAuthorizationDraft(
     require_dedicated_wallet: true,
     rationale: "",
     decided_at: null,
+    authorization_ttl_seconds: HUMAN_AUTHORIZATION_DEFAULT_TTL_SECONDS,
+    authorization_expires_at: null,
+    buyer_nonce_policy: "cryptographic_random_32_bytes_per_attempt",
+    buyer_validity_policy: {
+      valid_after_clock_skew_seconds: BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS,
+      valid_before_must_not_exceed: "effective_signing_deadline",
+      signed_but_not_sent: SIGNED_BUT_NOT_SENT_POLICY,
+    },
+    requirements_refresh_policy: "exact_hash_match_before_signing",
     target_selection_audit: candidate.target_selection_audit,
   };
 }

@@ -42,7 +42,7 @@ export interface TargetResolutionSafety {
 }
 
 export interface TargetResolutionReport {
-  readonly schema_version: "trustforge_target_resolution.v2";
+  readonly schema_version: "trustforge_target_resolution.v3";
   readonly stage: "TARGET RESOLUTION";
   readonly mode: "dry_run_no_payment";
   readonly discovery: {
@@ -87,12 +87,19 @@ export interface CanonicalTargetHandshakeSummary {
   readonly status: TargetHandshakeOutcome["status"];
   readonly quoteAtomic: string | null;
   readonly quoteUsdc: string | null;
+  readonly protocolVersion: 1 | 2 | null;
+  readonly requirementsObservedAt: string | null;
+  readonly canonicalRequirementsSha256: string | null;
+  readonly canonicalEnvelopeSha256: string | null;
+  readonly ancillaryTempoEvidencePresent: boolean;
+  /** @deprecated Ancillary proprietary evidence presence only. */
   readonly challengeNoncePresent: boolean;
+  /** @deprecated Ancillary proprietary evidence presence only. */
   readonly challengeExpiryPresent: boolean;
 }
 
 export interface CanonicalTargetResolution {
-  readonly schema_version: "trustforge_target_resolution.v2";
+  readonly schema_version: "trustforge_target_resolution.v3";
   readonly stage: TargetResolutionReport["stage"];
   readonly mode: TargetResolutionReport["mode"];
   readonly discovery: TargetResolutionReport["discovery"];
@@ -113,7 +120,7 @@ export interface CanonicalTargetResolution {
 }
 
 export interface TargetResolutionEvidence {
-  readonly schema_version: "trustforge_target_resolution_evidence.v2";
+  readonly schema_version: "trustforge_target_resolution_evidence.v3";
   readonly candidateRequestBindings: TargetResolutionReport["candidates"];
   readonly handshakeOutcomes: readonly TargetHandshakeOutcome[];
 }
@@ -216,6 +223,15 @@ export function canonicalTargetResolution(
       status: outcome.status,
       quoteAtomic: outcome.quoteAtomic,
       quoteUsdc: outcome.quoteUsdc,
+      protocolVersion: outcome.sellerRequirements?.binding.protocol_version ?? null,
+      requirementsObservedAt: outcome.sellerRequirements?.requirements_observed_at ?? null,
+      canonicalRequirementsSha256:
+        outcome.sellerRequirements?.binding.canonical_requirements_sha256 ?? null,
+      canonicalEnvelopeSha256:
+        outcome.sellerRequirements?.binding.canonical_envelope_sha256 ?? null,
+      ancillaryTempoEvidencePresent: Boolean(
+        outcome.sellerRequirements?.ancillary_tempo_evidence,
+      ),
       challengeNoncePresent: Boolean(outcome.challenge.nonce),
       challengeExpiryPresent: Boolean(outcome.challenge.expiresAt),
     })),
@@ -230,7 +246,7 @@ export function targetResolutionEvidence(
   report: TargetResolutionReport,
 ): TargetResolutionEvidence {
   return {
-    schema_version: "trustforge_target_resolution_evidence.v2",
+    schema_version: "trustforge_target_resolution_evidence.v3",
     candidateRequestBindings: report.candidates,
     handshakeOutcomes: report.handshakeOutcomes,
   };
@@ -304,7 +320,7 @@ export async function runTargetResolution(
   });
 
   const report: TargetResolutionReport = {
-    schema_version: "trustforge_target_resolution.v2",
+    schema_version: "trustforge_target_resolution.v3",
     stage: "TARGET RESOLUTION",
     mode: "dry_run_no_payment",
     discovery: {

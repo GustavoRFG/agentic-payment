@@ -8,6 +8,11 @@ import {
   createThinSettlementRequestBinding,
   thinSettlementRequestSummary,
 } from "../../tools/trustforge/thin-settlement-request-binding";
+import {
+  humanAuthorizationSellerFields,
+  selectedCandidateSellerFields,
+  sellerRequirementsFixture,
+} from "./_trustforge-seller-requirements-fixture";
 
 const POST_BINDING = createThinSettlementRequestBinding({
   endpoint: "https://public.zapper.xyz/x402/transaction-details",
@@ -23,8 +28,24 @@ const GET_BINDING = createThinSettlementRequestBinding({
   query: { network: "ethereum" },
   body: null,
 });
+const SELLER_INPUT = {
+  network: "eip155:8453",
+  asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  payTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+  amountAtomic: "1125",
+  endpoint: POST_BINDING.endpoint,
+} as const;
+const POST_REQUIREMENTS = sellerRequirementsFixture({
+  ...SELLER_INPUT,
+  requestBindingSha256: POST_BINDING.binding_sha256,
+});
+const GET_REQUIREMENTS = sellerRequirementsFixture({
+  ...SELLER_INPUT,
+  requestBindingSha256: GET_BINDING.binding_sha256,
+});
 
 const selected = {
+  ...selectedCandidateSellerFields(POST_REQUIREMENTS),
   provider: "Zapper",
   service_id: "zapper_tx_explainer",
   endpoint: "https://public.zapper.xyz/x402/transaction-details",
@@ -36,7 +57,10 @@ const selected = {
 };
 
 const validAuth: HumanPaymentAuthorization = {
-  authorization_schema_version: "trustforge_paid_probe_authorization.v1",
+  ...humanAuthorizationSellerFields(POST_REQUIREMENTS, {
+    maximumAuthorizedAmountAtomic: "100000",
+    decidedAt: "2026-06-15T06:30:00.000Z",
+  }),
   decision: "authorize_one_payment",
   provider: "Zapper",
   service_id: "zapper_tx_explainer",
@@ -48,8 +72,27 @@ const validAuth: HumanPaymentAuthorization = {
   max_payment_attempts: 1,
   allow_retry: false,
   require_dedicated_wallet: true,
-  decided_at: "2026-06-15T03:30:00-03:00",
   rationale: "authorized once",
+};
+
+const getSelected = {
+  ...selected,
+  ...selectedCandidateSellerFields(GET_REQUIREMENTS),
+  method: "GET",
+  request_query: GET_BINDING.query,
+  request_body: GET_BINDING.body,
+  request_binding_sha256: GET_BINDING.binding_sha256,
+};
+
+const validGetAuth: HumanPaymentAuthorization = {
+  ...validAuth,
+  ...humanAuthorizationSellerFields(GET_REQUIREMENTS, {
+    maximumAuthorizedAmountAtomic: "100000",
+    decidedAt: "2026-06-15T06:30:00.000Z",
+  }),
+  method: "GET",
+  request_binding_sha256: GET_BINDING.binding_sha256,
+  request_summary: thinSettlementRequestSummary(GET_BINDING),
 };
 
 const audit: TargetSelectionAuditMetadata = {
@@ -93,33 +136,66 @@ describe("validateHumanPaymentAuthorization", () => {
   it("accepts a GET authorization for a GET candidate", () => {
     const result = validateHumanPaymentAuthorization(
       { ...validAuth, method: "GET" },
-      {
-        ...selected,
-        method: "GET",
-        request_query: GET_BINDING.query,
-        request_body: GET_BINDING.body,
-        request_binding_sha256: GET_BINDING.binding_sha256,
-      },
+      getSelected,
     );
     expect(result.valid).toBe(false);
     expect(result.reasons.join(" ")).toContain("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH");
   });
 
-  it("accepts a GET authorization whose request binding matches the GET candidate", () => {
+  it("rejects missing or divergent seller requirements hashes", () => {
+    const { canonical_requirements_sha256: _missing, ...withoutRequirementsHash } = validAuth;
+    expect(
+      validateHumanPaymentAuthorization(
+        withoutRequirementsHash as HumanPaymentAuthorization,
+        selected,
+      ).reasons.join(" "),
+    ).toContain("BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH");
+    expect(
+      validateHumanPaymentAuthorization(
+        { ...validAuth, canonical_envelope_sha256: "0".repeat(64) },
+        selected,
+      ).reasons.join(" "),
+    ).toContain("BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH");
+  });
+
+  it("fails closed on a legacy selected_candidate without persisted requirements", () => {
+    const { schema_version: _schema, seller_requirements: _requirements, ...legacy } = selected;
+    const result = validateHumanPaymentAuthorization(validAuth, legacy);
+    expect(result.valid).toBe(false);
+    expect(result.reasons.join(" ")).toContain(
+      "REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED",
+    );
+  });
+
+  it("rejects authorization TTL above 1800 seconds", () => {
     const result = validateHumanPaymentAuthorization(
       {
         ...validAuth,
-        method: "GET",
-        request_binding_sha256: GET_BINDING.binding_sha256,
-        request_summary: thinSettlementRequestSummary(GET_BINDING),
+        authorization_ttl_seconds: 1801,
+        authorization_expires_at: "2026-06-15T07:00:01.000Z",
       },
-      {
-        ...selected,
-        method: "GET",
-        request_query: GET_BINDING.query,
-        request_body: GET_BINDING.body,
-        request_binding_sha256: GET_BINDING.binding_sha256,
-      },
+      selected,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reasons.join(" ")).toContain("must not exceed 1800 seconds");
+  });
+
+  it.each(["nonce", "signature", "validAfter", "validBefore"])(
+    "rejects buyer-owned field %s in human authorization",
+    (field) => {
+      const result = validateHumanPaymentAuthorization(
+        { ...validAuth, [field]: "not-allowed-at-B.1" } as HumanPaymentAuthorization,
+        selected,
+      );
+      expect(result.valid).toBe(false);
+      expect(result.reasons.join(" ")).toContain(`buyer field ${field}`);
+    },
+  );
+
+  it("accepts a GET authorization whose request binding matches the GET candidate", () => {
+    const result = validateHumanPaymentAuthorization(
+      validGetAuth,
+      getSelected,
     );
     expect(result).toEqual({ valid: true, reasons: [] });
   });
@@ -175,20 +251,13 @@ describe("validateHumanPaymentAuthorization", () => {
   });
 
   it("detects removed GET query and altered POST body", () => {
-    const getAuth: HumanPaymentAuthorization = {
-      ...validAuth,
-      method: "GET",
-      request_binding_sha256: GET_BINDING.binding_sha256,
-      request_summary: thinSettlementRequestSummary(GET_BINDING),
-    };
-    const getSelected = {
-      ...selected,
-      method: "GET",
+    const getAuth: HumanPaymentAuthorization = validGetAuth;
+    const tamperedGetSelected = {
+      ...getSelected,
       request_query: [],
       request_body: null,
-      request_binding_sha256: GET_BINDING.binding_sha256,
     };
-    expect(validateHumanPaymentAuthorization(getAuth, getSelected).reasons.join(" ")).toContain(
+    expect(validateHumanPaymentAuthorization(getAuth, tamperedGetSelected).reasons.join(" ")).toContain(
       "BLOCKED_PLANNED_REQUEST_BINDING_MISMATCH",
     );
 

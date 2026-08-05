@@ -11,6 +11,10 @@ import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_AD
 import { startAbortDeadline } from "./abort-deadline";
 import { planThinSettleRequest } from "./thin-settlement-method-contract";
 import type { ThinSettlementRequestBinding } from "./thin-settlement-request-binding";
+import {
+  parseAndBindSellerPaymentRequirements,
+  type SellerRequirementsObservation,
+} from "./x402-seller-requirements-binding";
 
 export const REJECTED_QUOTE_UNSTABLE = "REJECTED_QUOTE_UNSTABLE";
 /** One or both 402 responses did not yield a valid unsigned integer atomic quote. */
@@ -19,7 +23,7 @@ export const REJECTED_QUOTE_EXTRACTION_FAILED = "REJECTED_QUOTE_EXTRACTION_FAILE
 export const REJECTED_NON_POSITIVE_QUOTE = "REJECTED_NON_POSITIVE_QUOTE";
 /** The live 402 the stability probe read disagrees with the catalog/census quote. */
 export const REJECTED_QUOTE_SOURCE_DISAGREEMENT = "REJECTED_QUOTE_SOURCE_DISAGREEMENT";
-/** The 402 challenge is missing nonce and/or expiresAt. */
+/** @deprecated Reserved for explicitly typed proprietary adapters only. */
 export const REJECTED_INCOMPLETE_402_CHALLENGE = "REJECTED_INCOMPLETE_402_CHALLENGE";
 
 export interface QuoteStabilityEvidence {
@@ -28,13 +32,17 @@ export interface QuoteStabilityEvidence {
 }
 
 /**
- * The quote read from a single live 402 response: the atomic amount bound to that
- * exact challenge, plus the challenge's nonce/expiresAt. Adapt binds the persisted
+ * The quote read from a single live 402 response: the atomic amount and canonical
+ * seller requirements binding. Adapt binds the persisted
  * quote_atomic to this — never to catalog/census/cache.
  */
 export interface BoundQuote {
   readonly atomic: string | null;
+  readonly sellerRequirements: SellerRequirementsObservation | null;
+  readonly sellerRequirementsError: string | null;
+  /** @deprecated Seller requirements do not own the EIP-3009 nonce. */
   readonly nonce: string | null;
+  /** @deprecated Seller requirements do not define expiresAt in x402 v1/v2. */
   readonly expiresAt: string | null;
   readonly rawSourceField: "maxAmountRequired" | "amount" | null;
   readonly rawSourceValue: string | null;
@@ -71,6 +79,8 @@ interface PaymentEnvelope {
 
 const EMPTY_BOUND_QUOTE: BoundQuote = {
   atomic: null,
+  sellerRequirements: null,
+  sellerRequirementsError: null,
   nonce: null,
   expiresAt: null,
   rawSourceField: null,
@@ -178,10 +188,6 @@ function isUsdc(entry: AcceptEntry, expectedNetwork: string): boolean {
   );
 }
 
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
 /** Cheapest USDC accept on the expected network, with its parsed atomic amount. */
 function selectCheapestUsdcAccept(
   envelope: PaymentEnvelope,
@@ -222,14 +228,17 @@ export function extractMaxAmountRequiredAtomic(
 }
 
 /**
- * Extract the full bound quote from a single 402 response: the atomic amount and
- * the challenge's nonce/expiresAt, all from the SAME chosen accept (nonce/expiresAt
- * fall back to the accept's extra, then the envelope top level). This is the object
- * adapt binds the persisted quote to.
+ * Extract the full bound quote from one 402 response. When request binding is
+ * supplied, the quote carries the validated seller requirements observation from
+ * the same response. Seller nonce/expiresAt are deliberately not inferred.
  */
 export function extractBoundQuote(
   response: { readonly headers: Record<string, string>; readonly body: unknown },
-  options: { readonly expectedNetwork?: string } = {},
+  options: {
+    readonly expectedNetwork?: string;
+    readonly requestBindingSha256?: string;
+    readonly requirementsObservedAt?: Date | string;
+  } = {},
 ): BoundQuote {
   const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
   const envelope = envelopeFromHeaders(response.headers) ?? envelopeFromBody(response.body);
@@ -244,14 +253,26 @@ export function extractBoundQuote(
       rawSourceValue: displayRawSourceValue(rawSource),
     };
   }
-  const extra = best.entry.extra ?? {};
+  const expectedAsset =
+    expectedNetwork === TESTNET_NETWORK ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS;
+  const parsedRequirements = options.requestBindingSha256
+    ? parseAndBindSellerPaymentRequirements({
+        headers: response.headers,
+        body: response.body,
+        requestBindingSha256: options.requestBindingSha256,
+        expectedNetwork,
+        expectedAsset,
+        expectedScheme: "exact",
+        requirementsObservedAt: options.requirementsObservedAt,
+      })
+    : null;
   return {
     atomic: best.atomic,
-    nonce: nonEmptyString(best.entry.nonce) ?? nonEmptyString(extra.nonce) ?? nonEmptyString(envelope.nonce),
-    expiresAt:
-      nonEmptyString(best.entry.expiresAt) ??
-      nonEmptyString(extra.expiresAt) ??
-      nonEmptyString(envelope.expiresAt),
+    sellerRequirements: parsedRequirements?.ok ? parsedRequirements.observation : null,
+    sellerRequirementsError:
+      parsedRequirements && !parsedRequirements.ok ? parsedRequirements.reason : null,
+    nonce: null,
+    expiresAt: null,
     rawSourceField: best.rawSource.field,
     rawSourceValue: displayRawSourceValue(best.rawSource),
   };
@@ -319,6 +340,7 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  readonly now?: Date;
 }): Promise<{
   readonly httpStatus: number | null;
   readonly maxAmountRequiredAtomic: string | null;
@@ -376,7 +398,11 @@ export async function fetchSettleMethod402MaxAmountRequiredAtomic(options: {
     }
     const bound = extractBoundQuote(
       { headers: headerMap, body },
-      { expectedNetwork: options.expectedNetwork },
+      {
+        expectedNetwork: options.expectedNetwork,
+        requestBindingSha256: options.requestBinding.binding_sha256,
+        requirementsObservedAt: options.now ?? new Date(),
+      },
     );
     return {
       httpStatus: response.status,
@@ -403,12 +429,14 @@ export async function probeQuoteStability(options: {
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  readonly now?: Date;
 }): Promise<QuoteStabilityResult> {
   const second = await fetchSettleMethod402MaxAmountRequiredAtomic({
     requestBinding: options.requestBinding,
     expectedNetwork: options.expectedNetwork,
     fetchImpl: options.fetchImpl,
     timeoutMs: options.timeoutMs,
+    now: options.now,
   });
   const evaluated = evaluateQuoteStability(
     options.firstMaxAmountRequiredAtomic,

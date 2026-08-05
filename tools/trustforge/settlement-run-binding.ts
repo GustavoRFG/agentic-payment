@@ -21,9 +21,18 @@ export function resolveBindingUpperBoundUtc(input: {
 }
 
 export interface SettlementIntent {
+  readonly schema_version: "trustforge_settlement_intent.v2";
   readonly attempt_id: string;
   readonly run_id: string;
   readonly authorization_hash: string;
+  readonly human_authorization_hash: string;
+  readonly canonical_requirements_sha256: string;
+  readonly canonical_envelope_sha256: string;
+  readonly selection_requirements_observed_at: string;
+  readonly paytime_requirements_observed_at: string | null;
+  readonly effective_signing_deadline: string | null;
+  readonly buyer_signed_authorization: null;
+  readonly attempt_state: "PREPARED_NO_BUYER_SIGNATURE";
   readonly network: string;
   readonly buyer: string;
   readonly pay_to: string;
@@ -31,7 +40,7 @@ export interface SettlementIntent {
   readonly amount_atomic: string;
   /** HTTP method bound to this attempt; must equal the authorized method. */
   readonly method?: string;
-  readonly request_binding_sha256?: string;
+  readonly request_binding_sha256: string;
   readonly request_summary?: ThinSettlementRequestSummary;
   readonly request_started_at_utc: string;
 }
@@ -105,29 +114,69 @@ export function buildSettlementIntent(input: {
   readonly attemptId: string;
   readonly runId: string;
   readonly authorizationHash: string;
+  readonly canonicalRequirementsSha256: string;
+  readonly canonicalEnvelopeSha256: string;
+  readonly selectionRequirementsObservedAt: string;
+  readonly paytimeRequirementsObservedAt?: string | null;
+  readonly effectiveSigningDeadline?: string | null;
   readonly network: string;
   readonly buyer: string;
   readonly payTo: string;
   readonly asset: string;
   readonly amountAtomic: string;
   readonly method?: string;
-  readonly requestBindingSha256?: string;
+  readonly requestBindingSha256: string;
   readonly requestSummary?: ThinSettlementRequestSummary;
   readonly now?: Date;
 }): SettlementIntent {
+  if (!/^[0-9a-f]{64}$/.test(input.canonicalRequirementsSha256)) {
+    throw new Error("REJECTED_PAYMENT_REQUIREMENTS_HASH_INVALID: requirements hash invalid");
+  }
+  if (!/^[0-9a-f]{64}$/.test(input.canonicalEnvelopeSha256)) {
+    throw new Error("REJECTED_PAYMENT_REQUIREMENTS_HASH_INVALID: envelope hash invalid");
+  }
+  if (!Number.isFinite(Date.parse(input.selectionRequirementsObservedAt))) {
+    throw new Error(
+      "REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED: selection observation invalid",
+    );
+  }
+  if (!/^[0-9a-f]{64}$/.test(input.requestBindingSha256)) {
+    throw new Error("REJECTED_REQUEST_BINDING_INVALID: settlement intent binding hash invalid");
+  }
+  if (
+    input.paytimeRequirementsObservedAt &&
+    !Number.isFinite(Date.parse(input.paytimeRequirementsObservedAt))
+  ) {
+    throw new Error("BLOCKED_PAYMENT_REQUIREMENTS_STALE: pay-time observation invalid");
+  }
+  if (input.effectiveSigningDeadline && !Number.isFinite(Date.parse(input.effectiveSigningDeadline))) {
+    throw new Error("BLOCKED_PAYMENT_REQUIREMENTS_STALE: effective signing deadline invalid");
+  }
+  if (Boolean(input.paytimeRequirementsObservedAt) !== Boolean(input.effectiveSigningDeadline)) {
+    throw new Error(
+      "BLOCKED_PAYMENT_REQUIREMENTS_STALE: pay-time observation and effective deadline must be persisted together",
+    );
+  }
   return {
+    schema_version: "trustforge_settlement_intent.v2",
     attempt_id: input.attemptId,
     run_id: input.runId,
     authorization_hash: input.authorizationHash,
+    human_authorization_hash: input.authorizationHash,
+    canonical_requirements_sha256: input.canonicalRequirementsSha256,
+    canonical_envelope_sha256: input.canonicalEnvelopeSha256,
+    selection_requirements_observed_at: input.selectionRequirementsObservedAt,
+    paytime_requirements_observed_at: input.paytimeRequirementsObservedAt ?? null,
+    effective_signing_deadline: input.effectiveSigningDeadline ?? null,
+    buyer_signed_authorization: null,
+    attempt_state: "PREPARED_NO_BUYER_SIGNATURE",
     network: input.network,
     buyer: input.buyer.toLowerCase(),
     pay_to: input.payTo.toLowerCase(),
     asset: input.asset.toLowerCase(),
     amount_atomic: input.amountAtomic,
     ...(input.method ? { method: input.method } : {}),
-    ...(input.requestBindingSha256
-      ? { request_binding_sha256: input.requestBindingSha256 }
-      : {}),
+    request_binding_sha256: input.requestBindingSha256,
     ...(input.requestSummary ? { request_summary: input.requestSummary } : {}),
     request_started_at_utc: (input.now ?? new Date()).toISOString(),
   };

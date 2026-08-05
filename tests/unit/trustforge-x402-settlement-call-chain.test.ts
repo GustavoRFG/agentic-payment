@@ -48,6 +48,11 @@ import {
   createThinSettlementRequestBinding,
   thinSettlementRequestSummary,
 } from "../../tools/trustforge/thin-settlement-request-binding";
+import {
+  humanAuthorizationSellerFields,
+  selectedCandidateSellerFields,
+  sellerRequirementsFixture,
+} from "./_trustforge-seller-requirements-fixture";
 
 const thinSpy = vi.mocked(executeThinX402Settlement);
 const coreMock = vi.mocked(executeSingleX402Settlement);
@@ -76,7 +81,7 @@ function cannedCoreResult(profile: X402SettlementProfile): unknown {
   };
 }
 
-async function makeRunDir(network: string): Promise<string> {
+async function makeRunDir(profile: X402SettlementProfile): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "x402-callchain-"));
   const binding = createThinSettlementRequestBinding({
     endpoint: "https://seller.example/x402",
@@ -93,13 +98,31 @@ async function makeRunDir(network: string): Promise<string> {
       method: "POST",
       request_binding_sha256: binding.binding_sha256,
       request_summary: thinSettlementRequestSummary(binding),
+      ...humanAuthorizationSellerFields(
+        sellerRequirementsFixture({
+          requestBindingSha256: binding.binding_sha256,
+          network: profile.caip2,
+          asset: profile.usdcContract,
+          payTo: "0xSeLLeR",
+          amountAtomic: "1000",
+          endpoint: binding.endpoint,
+        }),
+      ),
     }),
     "utf8",
   );
+  const sellerRequirements = sellerRequirementsFixture({
+    requestBindingSha256: binding.binding_sha256,
+    network: profile.caip2,
+    asset: profile.usdcContract,
+    payTo: "0xSeLLeR",
+    amountAtomic: "1000",
+    endpoint: binding.endpoint,
+  });
   await writeFile(
     join(dir, "selected_candidate.json"),
     JSON.stringify({
-      network,
+      network: profile.caip2,
       endpoint: "https://seller.example/x402",
       method: "POST",
       request_input_status: "known",
@@ -110,16 +133,17 @@ async function makeRunDir(network: string): Promise<string> {
       quote_amount_usdc: "0.001",
       quote_atomic: "1000",
       authorized_pay_to: "0xSeLLeR",
-      asset: "0xUsDc",
+      asset: profile.usdcContract,
+      ...selectedCandidateSellerFields(sellerRequirements),
     }),
     "utf8",
   );
   return dir;
 }
 
-async function runChain(profile: X402SettlementProfile, network: string) {
+async function runChain(profile: X402SettlementProfile, _network: string) {
   coreMock.mockResolvedValue(cannedCoreResult(profile) as never);
-  const runDir = await makeRunDir(network);
+  const runDir = await makeRunDir(profile);
   try {
     await runX402PaidSettlement({ runDir, profile });
   } finally {

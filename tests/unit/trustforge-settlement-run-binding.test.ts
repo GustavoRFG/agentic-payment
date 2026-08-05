@@ -22,6 +22,12 @@ function phase62Intent() {
     attemptId: "attempt_8e1a854c-c841-47b9-937c-5549857484a5",
     runId: "run_20260621_212429",
     authorizationHash: "a6ab2d6b518734e807515e99fb816c1c6669759a1f030693b6ec87cc4d6a1a03",
+    canonicalRequirementsSha256: "b".repeat(64),
+    canonicalEnvelopeSha256: "c".repeat(64),
+    selectionRequirementsObservedAt: "2026-06-22T00:25:00.000Z",
+    requestBindingSha256: "d".repeat(64),
+    paytimeRequirementsObservedAt: "2026-06-22T00:26:00.000Z",
+    effectiveSigningDeadline: "2026-06-22T00:27:00.000Z",
     network: TESTNET_NETWORK,
     buyer: SEPOLIA_TESTNET_BUYER_WALLET,
     payTo: PAY_TO,
@@ -48,6 +54,23 @@ const currentTransfer = {
 };
 
 describe("settlement-run-binding temporal repair", () => {
+  it("reserves B.2 fields without a buyer signature", () => {
+    const intent = phase62Intent();
+    expect(intent).toMatchObject({
+      schema_version: "trustforge_settlement_intent.v2",
+      human_authorization_hash:
+        "a6ab2d6b518734e807515e99fb816c1c6669759a1f030693b6ec87cc4d6a1a03",
+      canonical_requirements_sha256: "b".repeat(64),
+      canonical_envelope_sha256: "c".repeat(64),
+      request_binding_sha256: "d".repeat(64),
+      selection_requirements_observed_at: "2026-06-22T00:25:00.000Z",
+      paytime_requirements_observed_at: "2026-06-22T00:26:00.000Z",
+      effective_signing_deadline: "2026-06-22T00:27:00.000Z",
+      buyer_signed_authorization: null,
+      attempt_state: "PREPARED_NO_BUYER_SIGNATURE",
+    });
+  });
+
   it("6.1 selects current transfer and rejects historical before_intent_window", () => {
     const intent = phase62Intent();
     const { eligible, rejected } = findEligibleSettlementCandidates({

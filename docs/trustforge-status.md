@@ -6,6 +6,12 @@ consumed by autonomous agents. The core value is semantic correctness
 verification of purchased third-party artifacts over time.
 
 ## Current Phase
+Seller requirements binding B.1 is implemented in no-payment mode. x402 v1/v2
+seller requirements are now version-validated and canonically bound without
+requiring seller `nonce`/`expiresAt`; buyer nonce generation/signing remains
+deferred to B.2. Selection-time observations may age during human review, but a
+fresh exact-hash unsigned 402 is required immediately before future signing.
+
 Phase 3B (rich `tx_explainer` settlement reconciliation) is **complete (no-payment)**.
 Phase 4 (settlement-first architecture) is **complete (no-payment)** — rich probes
 require settlement evidence or chain reconciliation before TrustScore eligibility.

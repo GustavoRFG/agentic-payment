@@ -14,6 +14,10 @@ import {
   type X402PreflightResult,
 } from "../../tools/trustforge/x402-settlement-preflight";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import {
+  selectedCandidateSellerFields,
+  sellerRequirementsFixture,
+} from "./_trustforge-seller-requirements-fixture";
 
 const NOW = new Date("2026-07-06T00:00:00.000Z");
 const MAINNET_PAY_TO = "0x43a2a720cd0911690c248075f4a29a5e7716f758";
@@ -26,7 +30,10 @@ function makeRunDir(): string {
   return mkdtempSync(join(tmpdir(), "x402-preflight-"));
 }
 
-function mainnetCandidate(overrides: Record<string, unknown> = {}) {
+function mainnetCandidate(
+  overrides: Record<string, unknown> = {},
+  requirementsObservedAt = NOW.toISOString(),
+) {
   const candidate = {
     provider: "zapper",
     service_id: "zapper_tx_explainer",
@@ -55,8 +62,18 @@ function mainnetCandidate(overrides: Record<string, unknown> = {}) {
     query: [],
     body: candidate.method === "GET" ? null : {},
   });
+  const sellerRequirements = sellerRequirementsFixture({
+    requestBindingSha256: binding.binding_sha256,
+    network: String(candidate.network),
+    asset: String(candidate.asset),
+    payTo: String(candidate.authorized_pay_to),
+    amountAtomic: String(candidate.quote_atomic),
+    endpoint: String(candidate.endpoint),
+    observedAt: requirementsObservedAt,
+  });
   return {
     ...candidate,
+    ...selectedCandidateSellerFields(sellerRequirements),
     request_input_status: "known" as const,
     request_query: binding.query,
     request_body: binding.body,
@@ -94,8 +111,18 @@ function sepoliaCandidate(overrides: Record<string, unknown> = {}) {
     query: [],
     body: { text: "TrustForge Sepolia freshness probe.", mode: "full" },
   });
+  const sellerRequirements = sellerRequirementsFixture({
+    requestBindingSha256: binding.binding_sha256,
+    network: String(candidate.network),
+    asset: String(candidate.asset),
+    payTo: String(candidate.authorized_pay_to),
+    amountAtomic: String(candidate.quote_atomic),
+    endpoint: String(candidate.endpoint),
+    observedAt: NOW.toISOString(),
+  });
   return {
     ...candidate,
+    ...selectedCandidateSellerFields(sellerRequirements),
     request_input_status: "known" as const,
     request_query: binding.query,
     request_body: binding.body,
@@ -108,14 +135,23 @@ function writeCandidate(runDir: string, candidate: unknown): void {
   writeFileSync(join(runDir, "selected_candidate.json"), `${JSON.stringify(candidate, null, 2)}\n`, "utf8");
 }
 
-function writeTargetSelection(runDir: string, primaryUrl: string, fallbackUrls: readonly string[] = []): void {
+function writeTargetSelection(
+  runDir: string,
+  candidate: ReturnType<typeof mainnetCandidate>,
+  primaryUrl: string,
+): void {
   writeFileSync(
     join(runDir, "target_selection.json"),
     `${JSON.stringify(
       {
         selection: {
           primary: { resourceUrl: primaryUrl },
-          fallbacks: fallbackUrls.map((resourceUrl) => ({ resourceUrl })),
+          fallbacks: [
+            {
+              resourceUrl: candidate.endpoint,
+              sellerRequirements: candidate.seller_requirements,
+            },
+          ],
         },
       },
       null,
@@ -138,12 +174,22 @@ const timeoutReader: ChainStateReader = async () => {
   throw new X402PreflightRpcTimeoutError("all configured RPC urls failed");
 };
 
-const freshGo = async (): Promise<PaidQuoteFreshnessPreflightResult> => ({ go: true, reasons: [], outcome: null });
+const freshGo = async (): Promise<PaidQuoteFreshnessPreflightResult> => ({
+  go: true,
+  reasons: [],
+  outcome: null,
+  paytime_requirements_observed_at: NOW.toISOString(),
+  effective_signing_deadline: null,
+  fresh_unsigned_402_required_before_signing: false,
+});
 function freshNoGo(reasons: string[]) {
   return async (_quote: AuthorizedPaymentQuote): Promise<PaidQuoteFreshnessPreflightResult> => ({
     go: false,
     reasons,
     outcome: null,
+    paytime_requirements_observed_at: null,
+    effective_signing_deadline: null,
+    fresh_unsigned_402_required_before_signing: true,
   });
 }
 
@@ -167,7 +213,7 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
       chainStateReader: readerReturning(8453),
       freshness: freshGo,
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result.blocker).toBeNull();
     expect(result.network_profile).toBe("mainnet");
     expect(result.caip2).toBe("eip155:8453");
@@ -185,9 +231,7 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
   it("mainnet preflight accepts a valid non-Zapper selected_candidate endpoint", async () => {
     const runDir = makeRunDir();
     const endpoint = "https://valid-provider.example/x402/tx-details";
-    writeCandidate(
-      runDir,
-      mainnetCandidate({
+    const candidate = mainnetCandidate({
         provider: "discovered_x402",
         service_id: "valid_provider_example_x402_tx_details",
         endpoint,
@@ -198,28 +242,23 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
           fallback_resource_urls: [],
           scoring_rationale: ["price_atomic=1125"],
         },
-      }),
-    );
+      });
+    writeCandidate(runDir, candidate);
     const fetchImpl = vi.fn(async (input, init) => {
       expect(String(input)).toBe(endpoint);
       expect(init?.method).toBe("GET");
       return new Response(
-        JSON.stringify({
-          x402Version: 2,
-          accepts: [
-            {
-              scheme: "exact",
-              network: "eip155:8453",
-              asset: MAINNET_USDC_ADDRESS,
-              amount: "1125",
-              payTo: MAINNET_PAY_TO,
-              maxTimeoutSeconds: 300,
-            },
-          ],
-          nonce: "fresh-nonce",
-          expiresAt: "2099-01-01T00:00:00.000Z",
-        }),
-        { status: 402, headers: { "content-type": "application/json" } },
+        JSON.stringify({ error: "Payment Required" }),
+        {
+          status: 402,
+          headers: {
+            "content-type": "application/json",
+            "payment-required": Buffer.from(
+              JSON.stringify(candidate.seller_requirements.payment_required_envelope),
+              "utf8",
+            ).toString("base64"),
+          },
+        },
       );
     }) as unknown as typeof fetch;
 
@@ -231,7 +270,7 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
       chainStateReader: readerReturning(8453),
       fetchImpl,
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result.endpoint).toBe(endpoint);
     expect(result.fresh_402_go).toBe(true);
     expectNoPayment(result);
@@ -240,8 +279,9 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
   it("selected_candidate may come from target_selection fallback after explicit adapt selector", async () => {
     const runDir = makeRunDir();
     const autonomousEndpoint = "https://autonomous.example/x402/tx-details";
-    writeTargetSelection(runDir, autonomousEndpoint, [ZAPPER_TX_EXPLAINER_POLICY.endpointUrl]);
-    writeCandidate(runDir, mainnetCandidate());
+    const candidate = mainnetCandidate();
+    writeTargetSelection(runDir, candidate, autonomousEndpoint);
+    writeCandidate(runDir, candidate);
     const result = await runX402SettlementPreflight({
       runDir,
       network: "mainnet",
@@ -373,6 +413,62 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
       freshness: freshGo,
     });
     expect(result.blocker).toBe("BLOCKED_STALE_CANDIDATE");
+    expectNoPayment(result);
+  });
+
+  it("allows human review when selection requirements expired but requires pay-time refresh", async () => {
+    const runDir = makeRunDir();
+    writeCandidate(runDir, mainnetCandidate({}, "2026-07-05T00:00:00.000Z"));
+    const result = await runX402SettlementPreflight({
+      runDir,
+      network: "mainnet",
+      env: {},
+      now: NOW,
+      chainStateReader: readerReturning(8453),
+      freshness: freshGo,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.selection_requirements_currently_expired).toBe(true);
+    expect(result.fresh_unsigned_402_required_before_signing).toBe(true);
+    expectNoPayment(result);
+  });
+
+  it("fails closed on a legacy selected_candidate without persisted requirements", async () => {
+    const runDir = makeRunDir();
+    const candidate = mainnetCandidate();
+    const { schema_version: _schema, seller_requirements: _requirements, ...legacy } = candidate;
+    writeCandidate(runDir, legacy);
+    const reader = vi.fn(readerReturning(8453));
+    const result = await runX402SettlementPreflight({
+      runDir,
+      network: "mainnet",
+      env: {},
+      now: NOW,
+      chainStateReader: reader,
+      freshness: freshGo,
+    });
+    expect(result.blocker).toBe("REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED");
+    expect(reader).not.toHaveBeenCalled();
+    expectNoPayment(result);
+  });
+
+  it("blocks a selected candidate that already contains signed-buyer material", async () => {
+    const runDir = makeRunDir();
+    writeCandidate(runDir, {
+      ...mainnetCandidate(),
+      buyer_signed_authorization: { nonce: "forbidden", signature: "0xforbidden" },
+    });
+    const reader = vi.fn(readerReturning(8453));
+    const result = await runX402SettlementPreflight({
+      runDir,
+      network: "mainnet",
+      env: {},
+      now: NOW,
+      chainStateReader: reader,
+      freshness: freshGo,
+    });
+    expect(result.blocker).toBe("BLOCKED_BUYER_AUTHORIZATION_VALIDITY_INVALID");
+    expect(reader).not.toHaveBeenCalled();
     expectNoPayment(result);
   });
 

@@ -6,7 +6,6 @@ import {
 } from "../../tools/trustforge/discovered-target-to-selected-candidate";
 import {
   extractBoundQuote,
-  REJECTED_INCOMPLETE_402_CHALLENGE,
   REJECTED_NON_POSITIVE_QUOTE,
   REJECTED_QUOTE_EXTRACTION_FAILED,
   REJECTED_QUOTE_SOURCE_DISAGREEMENT,
@@ -15,43 +14,26 @@ import type { ProviderBlocklist } from "../../tools/trustforge/provider-blocklis
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 const EMPTY_BLOCKLIST: ProviderBlocklist = { entries: [] };
 const PAY_TO = "0x2222222222222222222222222222222222222222";
 
-function body(
-  amount: string,
-  opts: { nonce?: string | null; expiresAt?: string | null } = {},
-): string {
-  const out: Record<string, unknown> = {
+function body(amount: string): string {
+  return JSON.stringify({
     x402Version: 2,
+    resource: { url: "https://quote.example/api/upload" },
     accepts: [
       {
         scheme: "exact",
         network: MAINNET_NETWORK,
         asset: MAINNET_USDC_ADDRESS,
-        maxAmountRequired: amount,
+        amount,
         payTo: PAY_TO,
         maxTimeoutSeconds: 300,
       },
     ],
-  };
-  if (opts.nonce !== null) out.nonce = opts.nonce ?? "probe-nonce";
-  if (opts.expiresAt !== null) out.expiresAt = opts.expiresAt ?? "2099-01-01T00:00:00.000Z";
-  return JSON.stringify(out);
-}
-
-function bodyUsingAmountField(
-  amount: string,
-  opts: { nonce?: string | null; expiresAt?: string | null } = {},
-): string {
-  const parsed = JSON.parse(body(amount, opts)) as {
-    accepts: Array<Record<string, unknown>>;
-  };
-  const accept = parsed.accepts[0]!;
-  delete accept.maxAmountRequired;
-  accept.amount = amount;
-  return JSON.stringify(parsed);
+  });
 }
 
 function response(bodyText: string): Response {
@@ -77,6 +59,14 @@ function candidate(quoteAtomic: string, quoteUsdc: string): DiscoveredTargetSele
     requestBody: binding.body,
     requestInputProvenance: "bazaar.extensions.bazaar.info.input",
     requestBindingSha256: binding.binding_sha256,
+    sellerRequirements: sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: MAINNET_NETWORK,
+      asset: MAINNET_USDC_ADDRESS,
+      payTo: PAY_TO,
+      amountAtomic: quoteAtomic,
+      endpoint,
+    }),
     quoteUsdc,
     quoteAtomic,
     selectedPayTo: PAY_TO,
@@ -110,48 +100,16 @@ async function adaptOne(primary: DiscoveredTargetSelectionPrimary, fetchImpl: ty
 }
 
 describe("extractBoundQuote", () => {
-  it("binds atomic + nonce + expiresAt from the same 402 (top-level challenge)", () => {
+  it("extracts the atomic amount without inventing seller nonce or expiresAt", () => {
     const parsed = JSON.parse(body("2000000"));
     expect(extractBoundQuote({ headers: {}, body: parsed })).toEqual({
       atomic: "2000000",
-      nonce: "probe-nonce",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-      rawSourceField: "maxAmountRequired",
-      rawSourceValue: "2000000",
-    });
-  });
-
-  it("reads nonce/expiresAt from the chosen accept's extra when not top-level", () => {
-    const parsed = {
-      x402Version: 2,
-      accepts: [
-        {
-          scheme: "exact",
-          network: MAINNET_NETWORK,
-          asset: MAINNET_USDC_ADDRESS,
-          maxAmountRequired: "1125",
-          payTo: PAY_TO,
-          extra: { nonce: "n-extra", expiresAt: "2099-02-02T00:00:00.000Z" },
-        },
-      ],
-    };
-    expect(extractBoundQuote({ headers: {}, body: parsed })).toEqual({
-      atomic: "1125",
-      nonce: "n-extra",
-      expiresAt: "2099-02-02T00:00:00.000Z",
-      rawSourceField: "maxAmountRequired",
-      rawSourceValue: "1125",
-    });
-  });
-
-  it("reports missing challenge fields as null", () => {
-    const parsed = JSON.parse(body("1125", { nonce: null, expiresAt: null }));
-    expect(extractBoundQuote({ headers: {}, body: parsed })).toEqual({
-      atomic: "1125",
+      sellerRequirements: null,
+      sellerRequirementsError: null,
       nonce: null,
       expiresAt: null,
-      rawSourceField: "maxAmountRequired",
-      rawSourceValue: "1125",
+      rawSourceField: "amount",
+      rawSourceValue: "2000000",
     });
   });
 
@@ -159,9 +117,11 @@ describe("extractBoundQuote", () => {
     const parsed = JSON.parse(body("-1"));
     expect(extractBoundQuote({ headers: {}, body: parsed })).toEqual({
       atomic: null,
+      sellerRequirements: null,
+      sellerRequirementsError: null,
       nonce: null,
       expiresAt: null,
-      rawSourceField: "maxAmountRequired",
+      rawSourceField: "amount",
       rawSourceValue: "-1",
     });
   });
@@ -169,7 +129,7 @@ describe("extractBoundQuote", () => {
 
 describe("adapt quote classification", () => {
   it("rejects an equal zero quote as non-positive without false instability or materialization", async () => {
-    const fetchImpl = fetchReturning(bodyUsingAmountField("0"));
+    const fetchImpl = fetchReturning(body("0"));
     const result = await adaptOne(candidate("0", "0"), fetchImpl);
 
     expect(result.ok).toBe(false);
@@ -200,16 +160,16 @@ describe("adapt quote classification", () => {
   it("rejects absent amounts as extraction failure, never as instability", async () => {
     const missingAmount = JSON.stringify({
       x402Version: 2,
+      resource: { url: "https://quote.example/api/upload" },
       accepts: [
         {
           scheme: "exact",
           network: MAINNET_NETWORK,
           asset: MAINNET_USDC_ADDRESS,
           payTo: PAY_TO,
+          maxTimeoutSeconds: 300,
         },
       ],
-      nonce: "probe-nonce",
-      expiresAt: "2099-01-01T00:00:00.000Z",
     });
     const result = await adaptOne(candidate("1125", "0.001125"), fetchReturning(missingAmount));
 
@@ -251,38 +211,27 @@ describe("adapt quote binding — REJECTED_QUOTE_SOURCE_DISAGREEMENT", () => {
   });
 });
 
-describe("adapt quote binding — REJECTED_INCOMPLETE_402_CHALLENGE", () => {
-  it("rejects a 402 with no nonce", async () => {
-    const result = await adaptOne(candidate("1125", "0.001125"), fetchReturning(body("1125", { nonce: null })));
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toContain(REJECTED_INCOMPLETE_402_CHALLENGE);
-    const rejection = result.rejectedCandidates.find((r) =>
-      r.reason.includes(REJECTED_INCOMPLETE_402_CHALLENGE),
-    );
-    expect(rejection?.evidence?.challenge).toEqual({ nonce_present: false, expires_at_present: true });
-  });
-
-  it("rejects a 402 with no expiresAt", async () => {
+describe("adapt quote binding — seller/buyer ownership regression", () => {
+  it("materializes valid x402 v2 without seller nonce or expiresAt", async () => {
     const result = await adaptOne(
       candidate("1125", "0.001125"),
-      fetchReturning(body("1125", { expiresAt: null })),
+      fetchReturning(body("1125")),
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toContain(REJECTED_INCOMPLETE_402_CHALLENGE);
-    const rejection = result.rejectedCandidates.find((r) =>
-      r.reason.includes(REJECTED_INCOMPLETE_402_CHALLENGE),
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.seller_requirements.selected_requirements).not.toHaveProperty("nonce");
+    expect(result.candidate.seller_requirements.selected_requirements).not.toHaveProperty(
+      "expiresAt",
     );
-    expect(rejection?.evidence?.challenge).toEqual({ nonce_present: true, expires_at_present: false });
+    expect(result.candidate.ancillary_tempo_evidence).toBeNull();
   });
 });
 
 describe("adapt quote binding — regression: stable, complete, agreeing quote materializes", () => {
   it("materializes with quote_atomic bound to the live 402 (identical to catalog) + binding evidence", async () => {
     const fetchImpl = fetchReturningSequence(
-      body("1125", { nonce: "first-probe-nonce" }),
-      body("1125", { nonce: "second-bound-nonce" }),
+      body("1125"),
+      body("1125"),
     );
     const result = await adaptOne(candidate("1125", "0.001125"), fetchImpl);
 
@@ -298,13 +247,15 @@ describe("adapt quote binding — regression: stable, complete, agreeing quote m
     expect(result.candidate.adapt_evidence?.quote_binding).toEqual({
       bound_atomic: "1125",
       catalog_atomic: "1125",
-      nonce: "second-bound-nonce",
-      expires_at: "2099-01-01T00:00:00.000Z",
+      canonical_requirements_sha256: result.candidate.canonical_requirements_sha256,
+      canonical_envelope_sha256: result.candidate.canonical_envelope_sha256,
+      requirements_observed_at: "2026-07-27T00:00:00.000Z",
     });
     expect(result.quoteStability?.bound).toMatchObject({
       atomic: "1125",
-      nonce: "second-bound-nonce",
-      rawSourceField: "maxAmountRequired",
+      nonce: null,
+      expiresAt: null,
+      rawSourceField: "amount",
       rawSourceValue: "1125",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);

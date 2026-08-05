@@ -164,7 +164,7 @@ describe("Target liveness handshake probe", () => {
     );
 
     expect(outcome.status).toBe("malformed");
-    expect(outcome.detail).toBe("HTTP 402 did not expose parseable accepts[]");
+    expect(outcome.detail).toContain("REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE");
   });
 
   it("classifies non-402 responses as no_402", () => {

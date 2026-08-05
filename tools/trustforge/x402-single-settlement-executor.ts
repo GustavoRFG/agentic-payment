@@ -67,6 +67,11 @@ export interface SingleSettlementRequest {
   readonly facilitatorUrl?: string;
   readonly runDir: string;
   readonly authorizationHash: string;
+  readonly canonicalRequirementsSha256?: string;
+  readonly canonicalEnvelopeSha256?: string;
+  readonly selectionRequirementsObservedAt?: string;
+  readonly paytimeRequirementsObservedAt?: string | null;
+  readonly effectiveSigningDeadline?: string | null;
   readonly attemptId?: string;
   readonly runId?: string;
   readonly requestId?: string;
@@ -217,6 +222,15 @@ export async function executeSingleX402Settlement(input: {
       `BLOCKED_QUOTE_EXCEEDS_MAX: quote ${req.quotedAmountAtomic} > max ${req.maxAmountAtomic}`,
     );
   }
+  if (
+    !req.canonicalRequirementsSha256 ||
+    !req.canonicalEnvelopeSha256 ||
+    !req.selectionRequirementsObservedAt
+  ) {
+    throw new Error(
+      "REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED: settlement request lacks seller requirements binding",
+    );
+  }
 
   const attemptId = req.attemptId ?? `attempt_${randomUUID()}`;
   const runId = req.runId ?? attemptId;
@@ -224,6 +238,11 @@ export async function executeSingleX402Settlement(input: {
     attemptId,
     runId,
     authorizationHash: req.authorizationHash,
+    canonicalRequirementsSha256: req.canonicalRequirementsSha256,
+    canonicalEnvelopeSha256: req.canonicalEnvelopeSha256,
+    selectionRequirementsObservedAt: req.selectionRequirementsObservedAt,
+    paytimeRequirementsObservedAt: req.paytimeRequirementsObservedAt,
+    effectiveSigningDeadline: req.effectiveSigningDeadline,
     network: req.network,
     buyer: req.expectedBuyerAddress,
     payTo: req.payTo,

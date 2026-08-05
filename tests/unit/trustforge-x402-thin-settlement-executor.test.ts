@@ -27,6 +27,10 @@ import {
   createThinSettlementRequestBinding,
   thinSettlementRequestSummary,
 } from "../../tools/trustforge/thin-settlement-request-binding";
+import {
+  selectedCandidateSellerFields,
+  sellerRequirementsFixture,
+} from "./_trustforge-seller-requirements-fixture";
 
 const ENDPOINT = "https://seller.example/x402";
 const REQUEST_BODY = { tx: "0xabc", chain: "base" };
@@ -59,7 +63,16 @@ function selected(method: DiscoveredSelectedCandidate["method"]): DiscoveredSele
     query: settleableMethod === "GET" ? REQUEST_BODY : [],
     body: settleableMethod === "GET" ? null : REQUEST_BODY,
   });
+  const sellerRequirements = sellerRequirementsFixture({
+    requestBindingSha256: requestBinding.binding_sha256,
+    network: MAINNET_NETWORK,
+    asset: MAINNET_USDC_ADDRESS,
+    payTo: "0x1111111111111111111111111111111111111111",
+    amountAtomic: "1000",
+    endpoint: ENDPOINT,
+  });
   return {
+    ...selectedCandidateSellerFields(sellerRequirements),
     provider: authorization.provider,
     service_id: authorization.service_id,
     endpoint: ENDPOINT,

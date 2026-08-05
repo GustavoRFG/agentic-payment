@@ -8,6 +8,10 @@ import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS, TESTNET_NETWORK, TESTNET_USDC_AD
 import { atomicUsdcToDecimal } from "./external-x402-get-policy";
 import type { TargetAccept, TargetCandidate } from "./target-candidates";
 import { planThinSettleRequest } from "./thin-settlement-method-contract";
+import {
+  parseAndBindSellerPaymentRequirements,
+  type SellerRequirementsObservation,
+} from "./x402-seller-requirements-binding";
 
 export type TargetHandshakeStatus =
   | "live_402_ok"
@@ -37,6 +41,11 @@ export interface TargetHandshakeOutcome {
   readonly status: TargetHandshakeStatus;
   readonly httpStatus: number | null;
   readonly selectedAccept: TargetAccept | null;
+  readonly sellerRequirements: SellerRequirementsObservation | null;
+  /**
+   * @deprecated Proprietary ancillary challenge evidence. These values are not
+   * x402 core validity and must never be used as an EIP-3009 nonce/expiry.
+   */
   readonly challenge: {
     readonly nonce: string | null;
     readonly expiresAt: string | null;
@@ -147,6 +156,7 @@ function envelopeFromBody(body: unknown): PaymentEnvelope | null {
   return null;
 }
 
+/** @deprecated Use sellerRequirements.ancillary_tempo_evidence for typed evidence. */
 function parseWwwAuthenticateChallenge(
   headers: Record<string, string>,
 ): { nonce: string | null; expiresAt: string | null } {
@@ -178,6 +188,7 @@ function nestedRecords(value: unknown): Record<string, unknown>[] {
   return out;
 }
 
+/** @deprecated Legacy proprietary body aliases; never authoritative for x402 core. */
 function bodyChallenge(body: unknown): { nonce: string | null; expiresAt: string | null } {
   for (const record of nestedRecords(body)) {
     const nonce = record.nonce ?? record.id;
@@ -246,7 +257,11 @@ function cheapest(entries: readonly AcceptEntry[]): AcceptEntry | null {
 export function classifyTargetProbeResponse(
   candidate: TargetCandidate,
   response: RecordedProbeResponse,
-  options: { readonly maxTargetPriceAtomic: string; readonly expectedNetwork?: string },
+  options: {
+    readonly maxTargetPriceAtomic: string;
+    readonly expectedNetwork?: string;
+    readonly requirementsObservedAt?: Date | string;
+  },
 ): TargetHandshakeOutcome {
   const expectedNetwork = options.expectedNetwork ?? MAINNET_NETWORK;
   const text = bodyToText(response.body, response.bodyText);
@@ -262,6 +277,7 @@ export function classifyTargetProbeResponse(
     resourceUrl: candidate.resourceUrl,
     httpStatus: response.httpStatus,
     rawResponse,
+    sellerRequirements: null,
     walletUsed: false as const,
     paymentAttempted: false as const,
     paymentBearingHttpRequestCount: 0 as const,
@@ -279,89 +295,47 @@ export function classifyTargetProbeResponse(
     };
   }
 
-  const envelope = envelopeFromHeaders(response.headers) ?? envelopeFromBody(body);
-  if (!envelope?.accepts?.length) {
+  const requestBindingSha256 = candidate.requestBinding?.binding_sha256 ?? "";
+  const expectedUsdc =
+    expectedNetwork === TESTNET_NETWORK ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS;
+  const parsedRequirements = parseAndBindSellerPaymentRequirements({
+    headers: response.headers,
+    body,
+    requestBindingSha256,
+    expectedNetwork,
+    expectedAsset: expectedUsdc,
+    expectedScheme: "exact",
+    requirementsObservedAt: options.requirementsObservedAt,
+  });
+  if (!parsedRequirements.ok) {
     return {
       ...base,
-      status: "malformed",
+      status: parsedRequirements.category === "asset" ? "wrong_asset" : "malformed",
       selectedAccept: null,
       challenge: { nonce: null, expiresAt: null },
       quoteAtomic: null,
       quoteUsdc: null,
-      detail: "HTTP 402 did not expose parseable accepts[]",
+      detail: parsedRequirements.reason,
     };
   }
 
-  const baseEntries = envelope.accepts.filter((entry) => entry.network === expectedNetwork);
-  if (baseEntries.length === 0) {
-    return {
-      ...base,
-      status: "malformed",
-      selectedAccept: null,
-      challenge: { nonce: null, expiresAt: null },
-      quoteAtomic: null,
-      quoteUsdc: null,
-      detail: `HTTP 402 accepts[] did not include ${expectedNetwork}`,
-    };
-  }
-
-  const usdcEntries = baseEntries.filter((entry) => isUsdc(entry, expectedNetwork));
-  if (usdcEntries.length === 0) {
-    const expectedUsdc =
-      expectedNetwork === TESTNET_NETWORK ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS;
-    return {
-      ...base,
-      status: "wrong_asset",
-      selectedAccept: null,
-      challenge: { nonce: null, expiresAt: null },
-      quoteAtomic: null,
-      quoteUsdc: null,
-      detail: `HTTP 402 accepts[] did not include Base USDC ${expectedUsdc}`,
-    };
-  }
-
-  const selected = cheapest(usdcEntries);
-  if (!selected) {
-    return {
-      ...base,
-      status: "malformed",
-      selectedAccept: null,
-      challenge: { nonce: null, expiresAt: null },
-      quoteAtomic: null,
-      quoteUsdc: null,
-      detail: "HTTP 402 Base USDC accepts[] did not include parseable amount",
-    };
-  }
-
-  const selectedAccept = toTargetAccept(selected);
-  if (selectedAccept.scheme !== "exact") {
-    return {
-      ...base,
-      status: "malformed",
-      selectedAccept,
-      challenge: { nonce: null, expiresAt: null },
-      quoteAtomic: selectedAccept.amountAtomic,
-      quoteUsdc: null,
-      detail: `unsupported x402 scheme ${selectedAccept.scheme}`,
-    };
-  }
-  if (!selectedAccept.payTo) {
-    return {
-      ...base,
-      status: "malformed",
-      selectedAccept,
-      challenge: { nonce: null, expiresAt: null },
-      quoteAtomic: selectedAccept.amountAtomic,
-      quoteUsdc: null,
-      detail: "HTTP 402 selected accept is missing payTo",
-    };
-  }
+  const observation = parsedRequirements.observation;
+  const binding = observation.binding;
+  const selectedAccept: TargetAccept = {
+    scheme: binding.scheme,
+    network: binding.network,
+    asset: binding.asset,
+    amountAtomic: binding.amount_atomic,
+    payTo: binding.pay_to,
+    maxTimeoutSeconds: binding.max_timeout_seconds,
+  };
 
   const amount = parseAtomic(selectedAccept.amountAtomic);
   const max = parseAtomic(options.maxTargetPriceAtomic);
   if (amount === null || max === null) {
     return {
       ...base,
+      sellerRequirements: observation,
       status: "malformed",
       selectedAccept,
       challenge: { nonce: null, expiresAt: null },
@@ -373,6 +347,7 @@ export function classifyTargetProbeResponse(
   if (amount > max) {
     return {
       ...base,
+      sellerRequirements: observation,
       status: "over_budget",
       selectedAccept,
       challenge: { nonce: null, expiresAt: null },
@@ -384,41 +359,13 @@ export function classifyTargetProbeResponse(
 
   const headerChallenge = parseWwwAuthenticateChallenge(response.headers);
   const fallbackChallenge = bodyChallenge(body);
-  let challenge = {
+  const challenge = {
     nonce: headerChallenge.nonce ?? fallbackChallenge.nonce,
     expiresAt: headerChallenge.expiresAt ?? fallbackChallenge.expiresAt,
   };
-  if (
-    (!challenge.nonce || !challenge.expiresAt) &&
-    expectedNetwork === TESTNET_NETWORK &&
-    selectedAccept.maxTimeoutSeconds
-  ) {
-    const timeoutSec = selectedAccept.maxTimeoutSeconds;
-    challenge = {
-      nonce:
-        challenge.nonce ??
-        sha256(
-          `${candidate.resourceUrl}:${selectedAccept.payTo}:${selectedAccept.amountAtomic}`,
-        ).slice(0, 32),
-      expiresAt:
-        challenge.expiresAt ??
-        new Date(Date.now() + timeoutSec * 1000).toISOString(),
-    };
-  }
-  if (!challenge.nonce || !challenge.expiresAt) {
-    return {
-      ...base,
-      status: "malformed",
-      selectedAccept,
-      challenge,
-      quoteAtomic: selectedAccept.amountAtomic,
-      quoteUsdc: atomicUsdcToDecimal(selectedAccept.amountAtomic),
-      detail: "HTTP 402 challenge is missing nonce/id or expiry",
-    };
-  }
-
   return {
     ...base,
+    sellerRequirements: observation,
     status: "live_402_ok",
     selectedAccept,
     challenge,
@@ -439,6 +386,7 @@ export async function probeTargetLiveness(
       status: "malformed",
       httpStatus: null,
       selectedAccept: null,
+      sellerRequirements: null,
       challenge: { nonce: null, expiresAt: null },
       quoteAtomic: null,
       quoteUsdc: null,
@@ -494,6 +442,7 @@ export async function probeTargetLiveness(
       status: message.toLowerCase().includes("abort") ? "timeout" : "malformed",
       httpStatus: null,
       selectedAccept: null,
+      sellerRequirements: null,
       challenge: { nonce: null, expiresAt: null },
       quoteAtomic: null,
       quoteUsdc: null,

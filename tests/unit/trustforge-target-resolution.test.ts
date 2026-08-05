@@ -13,6 +13,7 @@ import {
 } from "../../tools/trustforge/target-resolution";
 import type { TargetCandidate } from "../../tools/trustforge/target-candidates";
 import type { TargetHandshakeOutcome } from "../../tools/trustforge/target-liveness";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 function resource(input: {
   readonly url: string;
@@ -64,6 +65,16 @@ function liveOutcome(
       payTo: "0x1111111111111111111111111111111111111111",
       maxTimeoutSeconds: 300,
     },
+    sellerRequirements: candidate.requestBinding
+      ? sellerRequirementsFixture({
+          requestBindingSha256: candidate.requestBinding.binding_sha256,
+          network: "eip155:8453",
+          asset: MAINNET_USDC_ADDRESS,
+          payTo: "0x1111111111111111111111111111111111111111",
+          amountAtomic: quoteAtomic,
+          endpoint: candidate.resourceUrl,
+        })
+      : null,
     challenge,
     quoteAtomic,
     quoteUsdc: quoteAtomic === "1000" ? "0.001" : "0.002",
@@ -114,8 +125,8 @@ describe("TARGET RESOLUTION dry-run stage", () => {
       });
 
       expect(report.chosenTarget?.resourceUrl).toBe("https://primary.example/x402");
-      expect(report.schema_version).toBe("trustforge_target_resolution.v2");
-      expect(report.selection.schema_version).toBe("trustforge_target_selection.v2");
+      expect(report.schema_version).toBe("trustforge_target_resolution.v3");
+      expect(report.selection.schema_version).toBe("trustforge_target_selection.v3");
       expect(report.chosenTarget).toMatchObject({
         requestInputStatus: "known",
         requestQuery: [],
@@ -143,7 +154,7 @@ describe("TARGET RESOLUTION dry-run stage", () => {
       const evidence = JSON.parse(
         readFileSync(targetResolutionEvidencePath(outputPath), "utf8"),
       );
-      expect(evidence.schema_version).toBe("trustforge_target_resolution_evidence.v2");
+      expect(evidence.schema_version).toBe("trustforge_target_resolution_evidence.v3");
       expect(evidence.candidateRequestBindings[0]).toMatchObject({
         requestInputProvenance: "bazaar.extensions.bazaar.info.input",
       });

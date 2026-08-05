@@ -35,8 +35,15 @@ import {
 } from "./paid-quote-freshness-preflight";
 import {
   requestBindingFromSelectedCandidate,
+  sellerRequirementsFromSelectedCandidate,
   type DiscoveredSelectedCandidate,
 } from "./discovered-target-to-selected-candidate";
+import {
+  BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH,
+  SELLER_REQUIREMENTS_LOCAL_FRESHNESS_CAP_SECONDS,
+  validatePersistedSellerRequirementsObservation,
+  type SellerRequirementsObservation,
+} from "./x402-seller-requirements-binding";
 
 export type X402PreflightBlocker =
   | "BLOCKED_WRONG_CHAIN"
@@ -52,7 +59,17 @@ export type X402PreflightBlocker =
   | "BLOCKED_QUOTE_EXCEEDS_CAP"
   | "BLOCKED_RUN_ALREADY_CONSUMED"
   | "BLOCKED_RPC_TIMEOUT"
-  | "BLOCKED_OPPOSITE_NETWORK_KEY";
+  | "BLOCKED_OPPOSITE_NETWORK_KEY"
+  | "BLOCKED_PAYMENT_REQUIREMENTS_STALE"
+  | "BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH"
+  | "BLOCKED_BUYER_AUTHORIZATION_VALIDITY_INVALID"
+  | "REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED"
+  | "REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE"
+  | "REJECTED_PAYMENT_REQUIREMENTS_VERSION_UNSUPPORTED"
+  | "REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_MISSING"
+  | "REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_INVALID"
+  | "REJECTED_PAYMENT_REQUIREMENTS_HASH_INVALID"
+  | "REJECTED_PAYMENT_REQUIREMENTS_REQUEST_BINDING_MISMATCH";
 
 /** RPC read result — chain id + read-only balances of the expected wallet. */
 export interface ChainState {
@@ -101,6 +118,10 @@ export interface X402PreflightResult {
   readonly candidate_belongs_to_run: boolean;
   readonly run_already_consumed: boolean;
   readonly fresh_402_go: boolean | null;
+  readonly selection_requirements_currently_expired: boolean | null;
+  readonly fresh_unsigned_402_required_before_signing: boolean;
+  readonly paytime_requirements_observed_at: string | null;
+  readonly effective_signing_deadline: string | null;
   readonly rpc_request_timeout_seconds: number;
   readonly rpc_fallback_configured: boolean;
   readonly rpc_silent_fallback: false;
@@ -226,6 +247,37 @@ function readJsonFileSync<T>(path: string): T {
 
 function mapFreshnessReasonsToBlocker(reasons: readonly string[]): X402PreflightBlocker {
   const joined = reasons.join(" | ").toLowerCase();
+  if (joined.includes("blocked_payment_requirements_stale")) {
+    return "BLOCKED_PAYMENT_REQUIREMENTS_STALE";
+  }
+  if (joined.includes("rejected_payment_requirements_version_unsupported")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_VERSION_UNSUPPORTED";
+  }
+  if (joined.includes("rejected_payment_requirements_timeout_missing")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_MISSING";
+  }
+  if (joined.includes("rejected_payment_requirements_timeout_invalid")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_INVALID";
+  }
+  if (joined.includes("rejected_payment_requirements_hash_invalid")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_HASH_INVALID";
+  }
+  if (joined.includes("rejected_payment_requirements_request_binding_mismatch")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_REQUEST_BINDING_MISMATCH";
+  }
+  if (joined.includes("rejected_payment_requirements_incomplete")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE";
+  }
+  if (
+    joined.includes("blocked_payment_requirements_hash_mismatch") ||
+    joined.includes("requirements hash") ||
+    joined.includes("envelope hash")
+  ) {
+    return "BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH";
+  }
+  if (joined.includes("binding_not_persisted")) {
+    return "REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED";
+  }
   if (joined.includes("payto mismatch")) return "BLOCKED_402_PAY_TO_MISMATCH";
   if (joined.includes("wrong asset")) return "BLOCKED_402_ASSET_MISMATCH";
   if (
@@ -335,6 +387,10 @@ export async function runX402SettlementPreflight(
     candidate_belongs_to_run: false,
     run_already_consumed: false,
     fresh_402_go: null,
+    selection_requirements_currently_expired: null,
+    fresh_unsigned_402_required_before_signing: true,
+    paytime_requirements_observed_at: null,
+    effective_signing_deadline: null,
     rpc_request_timeout_seconds: timeoutSeconds,
     rpc_fallback_configured: rpc.fallbackConfigured,
     rpc_silent_fallback: false,
@@ -365,12 +421,57 @@ export async function runX402SettlementPreflight(
   if (!candidate) {
     return block(baseResult, "BLOCKED_STALE_CANDIDATE", "selected_candidate.json missing in run dir");
   }
+  const candidateRecord = candidate as unknown as Record<string, unknown>;
+  const unexpectedBuyerField = [
+    "nonce",
+    "signature",
+    "validAfter",
+    "validBefore",
+    "paymentPayload",
+    "buyer_signed_authorization",
+  ].find(
+    (field) =>
+      Object.prototype.hasOwnProperty.call(candidateRecord, field) &&
+      candidateRecord[field] !== null &&
+      candidateRecord[field] !== undefined,
+  );
+  if (unexpectedBuyerField) {
+    return block(
+      baseResult,
+      "BLOCKED_BUYER_AUTHORIZATION_VALIDITY_INVALID",
+      `selected_candidate unexpectedly contains buyer-owned field ${unexpectedBuyerField}`,
+    );
+  }
+  let sellerRequirements;
+  try {
+    sellerRequirements = sellerRequirementsFromSelectedCandidate(candidate);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const blocker = mapFreshnessReasonsToBlocker([detail]);
+    return block(baseResult, blocker, detail);
+  }
+  const selectionObservedMs = Date.parse(sellerRequirements.requirements_observed_at);
+  const selectionDeadlineMs =
+    selectionObservedMs +
+    Math.min(
+      sellerRequirements.binding.max_timeout_seconds,
+      SELLER_REQUIREMENTS_LOCAL_FRESHNESS_CAP_SECONDS,
+    ) *
+      1000;
+  const withRequirements = {
+    ...baseResult,
+    selection_requirements_currently_expired: now.getTime() >= selectionDeadlineMs,
+  };
   const targetSelectionPath = join(options.runDir, "target_selection.json");
   if (existsSync(targetSelectionPath)) {
+    type SelectionEntry = {
+      readonly resourceUrl?: string;
+      readonly sellerRequirements?: SellerRequirementsObservation;
+    };
     const selection = readJsonFileSync<{
       selection?: {
-        primary?: { resourceUrl?: string } | null;
-        fallbacks?: Array<{ resourceUrl?: string }>;
+        primary?: SelectionEntry | null;
+        fallbacks?: SelectionEntry[];
       };
     }>(
       targetSelectionPath,
@@ -381,13 +482,44 @@ export async function runX402SettlementPreflight(
     ].filter((value): value is string => Boolean(value));
     if (candidateUrls.length > 0 && !candidateUrls.includes(candidate.endpoint)) {
       return block(
-        baseResult,
+        withRequirements,
         "BLOCKED_STALE_CANDIDATE",
         `candidate endpoint ${candidate.endpoint} is not in run target_selection candidates`,
       );
     }
+    const matchingSelectionEntry = [
+      selection.selection?.primary ?? null,
+      ...(selection.selection?.fallbacks ?? []),
+    ].find((entry) => entry?.resourceUrl === candidate.endpoint);
+    if (matchingSelectionEntry) {
+      const provenance = validatePersistedSellerRequirementsObservation(
+        matchingSelectionEntry.sellerRequirements,
+        candidate.request_binding_sha256,
+      );
+      if (!provenance.valid) {
+        const detail = provenance.reasons.join("; ");
+        return block(
+          withRequirements,
+          mapFreshnessReasonsToBlocker([detail]),
+          `target_selection requirements provenance invalid: ${detail}`,
+        );
+      }
+      const provenanceBinding = matchingSelectionEntry.sellerRequirements!.binding;
+      if (
+        provenanceBinding.canonical_requirements_sha256 !==
+          sellerRequirements.binding.canonical_requirements_sha256 ||
+        provenanceBinding.canonical_envelope_sha256 !==
+          sellerRequirements.binding.canonical_envelope_sha256
+      ) {
+        return block(
+          withRequirements,
+          "BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH",
+          `${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: selected_candidate differs from target_selection provenance`,
+        );
+      }
+    }
   }
-  const belongs = { ...baseResult, candidate_belongs_to_run: true };
+  const belongs = { ...withRequirements, candidate_belongs_to_run: true };
 
   // (3) Run must not already contain an authorization/attempt/binding/receipt.
   const consumed = detectRunConsumed(options.runDir);
@@ -486,13 +618,24 @@ export async function runX402SettlementPreflight(
     network: candidate.network,
     asset: candidate.asset,
     request_binding: requestBindingFromSelectedCandidate(candidate),
+    seller_requirements: sellerRequirements,
+    canonical_requirements_sha256: sellerRequirements.binding.canonical_requirements_sha256,
+    canonical_envelope_sha256: sellerRequirements.binding.canonical_envelope_sha256,
   };
   const freshnessFn =
     options.freshness ??
     ((quote: AuthorizedPaymentQuote) =>
       runPaidQuoteFreshnessPreflight({ authorized: quote, fetchImpl: options.fetchImpl, now }));
   const fresh = await freshnessFn(authorizedQuote);
-  const withFresh = { ...withChain, fresh_402_go: fresh.go };
+  const withFresh = {
+    ...withChain,
+    fresh_402_go: fresh.go,
+    // This preflight creates a human-review bundle. B.2 must still perform a new
+    // unsigned 402 immediately before signing, even when this review-time probe matches.
+    fresh_unsigned_402_required_before_signing: true,
+    paytime_requirements_observed_at: null,
+    effective_signing_deadline: null,
+  };
   if (!fresh.go) {
     return block(withFresh, mapFreshnessReasonsToBlocker(fresh.reasons), `fresh 402 mismatch: ${fresh.reasons.join("; ")}`);
   }

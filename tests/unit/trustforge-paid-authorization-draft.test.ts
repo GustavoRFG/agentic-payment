@@ -10,6 +10,10 @@ import {
   createThinSettlementRequestBinding,
   thinSettlementRequestSummary,
 } from "../../tools/trustforge/thin-settlement-request-binding";
+import {
+  selectedCandidateSellerFields,
+  sellerRequirementsFixture,
+} from "./_trustforge-seller-requirements-fixture";
 
 const REQUEST_BINDING = createThinSettlementRequestBinding({
   endpoint: "https://public.zapper.xyz/x402/transaction-details",
@@ -18,8 +22,17 @@ const REQUEST_BINDING = createThinSettlementRequestBinding({
   query: [],
   body: { hash: "0xabc", chainId: 1 },
 });
+const SELLER_REQUIREMENTS = sellerRequirementsFixture({
+  requestBindingSha256: REQUEST_BINDING.binding_sha256,
+  network: "eip155:8453",
+  asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  payTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+  amountAtomic: "1125",
+  endpoint: REQUEST_BINDING.endpoint,
+});
 
 const candidate: DiscoveredSelectedCandidate = {
+  ...selectedCandidateSellerFields(SELLER_REQUIREMENTS),
   provider: "Zapper",
   service_id: "zapper_tx_explainer",
   endpoint: "https://public.zapper.xyz/x402/transaction-details",
@@ -49,6 +62,7 @@ describe("human payment authorization DRAFT generator", () => {
   it("writes a PENDING_HUMAN draft with single-shot constraints", () => {
     const draft = buildHumanPaymentAuthorizationDraft(candidate);
     expect(draft.decision).toBe(PENDING_HUMAN_DECISION);
+    expect(draft.authorization_schema_version).toBe("trustforge_paid_probe_authorization.v2");
     expect(draft.max_payment_attempts).toBe(1);
     expect(draft.allow_retry).toBe(false);
     expect(draft.require_dedicated_wallet).toBe(true);
@@ -57,6 +71,14 @@ describe("human payment authorization DRAFT generator", () => {
     expect(draft.request_binding_sha256).toBe(REQUEST_BINDING.binding_sha256);
     expect(draft.request_summary).toEqual(thinSettlementRequestSummary(REQUEST_BINDING));
     expect(draft.rationale).toBe("");
+    expect(draft.authorization_ttl_seconds).toBe(900);
+    expect(draft.authorization_expires_at).toBeNull();
+    expect(draft.canonical_requirements_sha256).toBe(
+      candidate.canonical_requirements_sha256,
+    );
+    expect(draft.canonical_envelope_sha256).toBe(candidate.canonical_envelope_sha256);
+    expect(draft.requirements_refresh_policy).toBe("exact_hash_match_before_signing");
+    expect(draft).not.toHaveProperty("nonce");
   });
 
   it("carries the candidate's explicit POST method", () => {
@@ -74,6 +96,16 @@ describe("human payment authorization DRAFT generator", () => {
     });
     const draft = buildHumanPaymentAuthorizationDraft({
       ...candidate,
+      ...selectedCandidateSellerFields(
+        sellerRequirementsFixture({
+          requestBindingSha256: getBinding.binding_sha256,
+          network: candidate.network,
+          asset: candidate.asset,
+          payTo: candidate.authorized_pay_to,
+          amountAtomic: candidate.quote_atomic,
+          endpoint: getBinding.endpoint,
+        }),
+      ),
       endpoint: getBinding.endpoint,
       method: "GET",
       request_query: getBinding.query,

@@ -4,6 +4,7 @@
 
 import type { TargetCandidate } from "./target-candidates";
 import type { TargetHandshakeOutcome } from "./target-liveness";
+import type { SellerRequirementsObservation } from "./x402-seller-requirements-binding";
 import type {
   CanonicalJsonValue,
   CanonicalQuery,
@@ -40,14 +41,17 @@ export interface TargetSelectionEntry {
   readonly quoteAtomic: string;
   readonly quoteUsdc: string;
   readonly selectedPayTo: string | null;
+  readonly sellerRequirements: SellerRequirementsObservation;
+  /** @deprecated Ancillary proprietary evidence presence only. */
   readonly challengeNoncePresent: boolean;
+  /** @deprecated Ancillary proprietary evidence presence only. */
   readonly challengeExpiryPresent: boolean;
   readonly score: TargetSelectionScore;
   readonly scoringRationale: readonly string[];
 }
 
 export interface TargetSelectionReport {
-  readonly schema_version: "trustforge_target_selection.v2";
+  readonly schema_version: "trustforge_target_selection.v3";
   readonly selection_mode: "dry_run_no_payment";
   readonly primary: TargetSelectionEntry | null;
   readonly fallbacks: readonly TargetSelectionEntry[];
@@ -100,6 +104,7 @@ function entryFromOutcome(
     outcome.status !== "live_402_ok" ||
     !outcome.quoteAtomic ||
     !outcome.quoteUsdc ||
+    !outcome.sellerRequirements ||
     !candidate.requestBinding ||
     !candidate.requestInputProvenance
   ) {
@@ -121,6 +126,7 @@ function entryFromOutcome(
     quoteAtomic: outcome.quoteAtomic,
     quoteUsdc: outcome.quoteUsdc,
     selectedPayTo: outcome.selectedAccept?.payTo ?? null,
+    sellerRequirements: outcome.sellerRequirements,
     challengeNoncePresent: Boolean(outcome.challenge.nonce),
     challengeExpiryPresent: Boolean(outcome.challenge.expiresAt),
     score: {
@@ -163,7 +169,7 @@ export function selectTargets(input: {
   const selectedIds = new Set(ranked.map((entry) => entry.candidateId));
 
   return {
-    schema_version: "trustforge_target_selection.v2",
+    schema_version: "trustforge_target_selection.v3",
     selection_mode: "dry_run_no_payment",
     primary: ranked[0] ?? null,
     fallbacks: ranked.slice(1),

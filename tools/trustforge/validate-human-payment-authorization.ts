@@ -2,7 +2,7 @@
  * validate-human-payment-authorization — Phase 6 paid probe gate validator.
  */
 
-import { compareUsdcDecimal } from "./external-x402-get-policy";
+import { compareUsdcDecimal, parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
 import { MAINNET_NETWORK, TESTNET_NETWORK } from "../../shared/payment-safety";
 import { MAINNET_BUYER_WALLET, SEPOLIA_TESTNET_BUYER_WALLET } from "./network-config";
 import { checkAuthorizationMethodBinding } from "./authorization-method-binding";
@@ -14,6 +14,15 @@ import {
   type CanonicalQuery,
   type ThinSettlementRequestSummary,
 } from "./thin-settlement-request-binding";
+import {
+  BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH,
+  BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS,
+  HUMAN_AUTHORIZATION_MAX_TTL_SECONDS,
+  REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED,
+  SIGNED_BUT_NOT_SENT_POLICY,
+  validatePersistedSellerRequirementsObservation,
+  type SellerRequirementsObservation,
+} from "./x402-seller-requirements-binding";
 export {
   BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
   BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
@@ -39,8 +48,15 @@ export interface HumanPaymentAuthorization {
   readonly method?: string | null;
   readonly request_binding_sha256?: string | null;
   readonly request_summary?: ThinSettlementRequestSummary | null;
+  readonly canonical_requirements_sha256?: string | null;
+  readonly canonical_envelope_sha256?: string | null;
+  readonly x402_version?: 1 | 2 | null;
+  readonly scheme?: string | null;
   readonly network?: string;
   readonly asset?: string;
+  readonly pay_to?: string | null;
+  readonly amount_atomic?: string | null;
+  readonly maximum_authorized_amount_atomic?: string | null;
   readonly buyer_wallet?: string;
   readonly max_usdc: string;
   readonly max_payment_attempts: number;
@@ -49,11 +65,21 @@ export interface HumanPaymentAuthorization {
   readonly allow_payment_header?: boolean;
   readonly require_dedicated_wallet?: boolean;
   readonly decided_at?: string | null;
+  readonly authorization_ttl_seconds?: number | null;
+  readonly authorization_expires_at?: string | null;
+  readonly buyer_nonce_policy?: string | null;
+  readonly buyer_validity_policy?: {
+    readonly valid_after_clock_skew_seconds?: number;
+    readonly valid_before_must_not_exceed?: string;
+    readonly signed_but_not_sent?: string;
+  } | null;
+  readonly requirements_refresh_policy?: string | null;
   readonly rationale?: string;
   readonly target_selection_audit?: TargetSelectionAuditMetadata | null;
 }
 
 export interface SelectedCandidateRef {
+  readonly schema_version?: string;
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
@@ -62,6 +88,7 @@ export interface SelectedCandidateRef {
   readonly request_query?: CanonicalQuery;
   readonly request_body?: CanonicalJsonValue | null;
   readonly request_binding_sha256?: string | null;
+  readonly seller_requirements?: SellerRequirementsObservation | null;
   readonly quote_amount_usdc?: string;
   readonly recommended_max_usdc?: string;
   readonly network?: string;
@@ -132,6 +159,117 @@ function validateRequestBinding(
   }
 }
 
+function validateSellerRequirementsAuthorization(
+  auth: HumanPaymentAuthorization,
+  selected: SelectedCandidateRef,
+  reasons: string[],
+): void {
+  if (selected.schema_version !== "trustforge_selected_candidate.v2" || !selected.seller_requirements) {
+    reasons.push(
+      `${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: selected_candidate seller requirements absent`,
+    );
+    return;
+  }
+  const requestHash = selected.request_binding_sha256?.trim().toLowerCase() ?? "";
+  const persisted = validatePersistedSellerRequirementsObservation(
+    selected.seller_requirements,
+    requestHash,
+  );
+  reasons.push(...persisted.reasons);
+  if (!persisted.valid) return;
+  const binding = selected.seller_requirements.binding;
+  if (!auth.canonical_requirements_sha256) {
+    reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: authorization requirements hash absent`);
+  } else if (auth.canonical_requirements_sha256 !== binding.canonical_requirements_sha256) {
+    reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: authorization requirements hash mismatch`);
+  }
+  if (!auth.canonical_envelope_sha256) {
+    reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: authorization envelope hash absent`);
+  } else if (auth.canonical_envelope_sha256 !== binding.canonical_envelope_sha256) {
+    reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: authorization envelope hash mismatch`);
+  }
+  if (auth.x402_version !== binding.protocol_version) reasons.push("x402_version mismatch vs selected_candidate");
+  if (auth.scheme !== binding.scheme) reasons.push("scheme mismatch vs selected_candidate");
+  if (auth.network !== binding.network) reasons.push("network mismatch vs seller requirements");
+  if (auth.asset?.toLowerCase() !== binding.asset.toLowerCase()) {
+    reasons.push("asset mismatch vs seller requirements");
+  }
+  if (auth.pay_to?.toLowerCase() !== binding.pay_to.toLowerCase()) {
+    reasons.push("pay_to mismatch vs seller requirements");
+  }
+  if (auth.amount_atomic !== binding.amount_atomic) {
+    reasons.push("amount_atomic mismatch vs seller requirements");
+  }
+  let maxAtomic: string | null = null;
+  try {
+    maxAtomic = parseUsdcDecimalToAtomic(auth.max_usdc).toString();
+  } catch {
+    // Existing max_usdc validation reports the primary error.
+  }
+  if (maxAtomic && auth.maximum_authorized_amount_atomic !== maxAtomic) {
+    reasons.push("maximum_authorized_amount_atomic mismatch vs max_usdc");
+  }
+  if (maxAtomic && BigInt(maxAtomic) < BigInt(binding.amount_atomic)) {
+    reasons.push("maximum authorized amount is below seller amount");
+  }
+  if (auth.buyer_nonce_policy !== "cryptographic_random_32_bytes_per_attempt") {
+    reasons.push("buyer_nonce_policy must require cryptographic random 32 bytes per attempt");
+  }
+  if (
+    auth.buyer_validity_policy?.valid_after_clock_skew_seconds !==
+    BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS
+  ) {
+    reasons.push(`buyer validAfter clock skew must be ${BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS}s`);
+  }
+  if (auth.buyer_validity_policy?.valid_before_must_not_exceed !== "effective_signing_deadline") {
+    reasons.push("buyer validBefore must not exceed effective_signing_deadline");
+  }
+  if (auth.buyer_validity_policy?.signed_but_not_sent !== SIGNED_BUT_NOT_SENT_POLICY) {
+    reasons.push(`signed-but-not-sent policy must be ${SIGNED_BUT_NOT_SENT_POLICY}`);
+  }
+  if (auth.requirements_refresh_policy !== "exact_hash_match_before_signing") {
+    reasons.push("requirements_refresh_policy must be exact_hash_match_before_signing");
+  }
+  for (const buyerOwnedField of [
+    "nonce",
+    "signature",
+    "validAfter",
+    "validBefore",
+    "paymentPayload",
+    "buyer_signed_authorization",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(auth, buyerOwnedField)) {
+      reasons.push(`human authorization must not contain buyer field ${buyerOwnedField}`);
+    }
+  }
+}
+
+function validateAuthorizationExpiry(
+  auth: HumanPaymentAuthorization,
+  reasons: string[],
+): void {
+  const decidedMs = Date.parse(auth.decided_at ?? "");
+  const expiresMs = Date.parse(auth.authorization_expires_at ?? "");
+  if (!Number.isFinite(decidedMs)) {
+    reasons.push("decided_at is required and must be valid");
+    return;
+  }
+  if (!Number.isFinite(expiresMs)) {
+    reasons.push("authorization_expires_at is required and must be valid");
+    return;
+  }
+  const ttlSeconds = (expiresMs - decidedMs) / 1000;
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+    reasons.push("authorization TTL must be a positive integer number of seconds");
+  }
+  if (ttlSeconds > HUMAN_AUTHORIZATION_MAX_TTL_SECONDS) {
+    reasons.push(`authorization TTL must not exceed ${HUMAN_AUTHORIZATION_MAX_TTL_SECONDS} seconds`);
+  }
+  if (auth.authorization_ttl_seconds !== ttlSeconds) {
+    reasons.push("authorization_ttl_seconds mismatch vs decided_at/expires_at");
+  }
+}
+
 function validateTargetSelectionAudit(
   audit: TargetSelectionAuditMetadata | null | undefined,
   selected: SelectedCandidateRef,
@@ -159,7 +297,7 @@ export function validateHumanPaymentAuthorization(
 ): { readonly valid: boolean; readonly reasons: readonly string[] } {
   const reasons: string[] = [];
 
-  if (auth.authorization_schema_version !== "trustforge_paid_probe_authorization.v1") {
+  if (auth.authorization_schema_version !== "trustforge_paid_probe_authorization.v2") {
     reasons.push("invalid authorization_schema_version");
   }
   if (auth.decision !== "authorize_one_payment") {
@@ -197,6 +335,7 @@ export function validateHumanPaymentAuthorization(
     }).reasons,
   );
   validateRequestBinding(auth, selected, reasons);
+  validateSellerRequirementsAuthorization(auth, selected, reasons);
   if (auth.network && selected.network && auth.network !== selected.network) {
     reasons.push("network mismatch vs selected_candidate");
   }
@@ -215,9 +354,7 @@ export function validateHumanPaymentAuthorization(
       reasons.push("mainnet buyer wallet refused for testnet authorization");
     }
   }
-  if (!auth.decided_at) {
-    reasons.push("decided_at is required");
-  }
+  validateAuthorizationExpiry(auth, reasons);
   if (!auth.rationale?.trim()) {
     reasons.push("rationale is required");
   }

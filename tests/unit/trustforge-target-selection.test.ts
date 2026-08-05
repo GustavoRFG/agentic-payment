@@ -8,6 +8,7 @@ import {
   stableStringifyTargetSelection,
 } from "../../tools/trustforge/target-selection";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 function candidate(input: {
   readonly id: string;
@@ -53,6 +54,24 @@ function outcome(input: {
   readonly quoteAtomic?: string;
 }): TargetHandshakeOutcome {
   const status = input.status ?? "live_402_ok";
+  const requestBinding = createThinSettlementRequestBinding({
+    endpoint: input.url,
+    method: "GET",
+    input_status: "known",
+    query: [],
+    body: null,
+  });
+  const sellerRequirements =
+    status === "live_402_ok"
+      ? sellerRequirementsFixture({
+          requestBindingSha256: requestBinding.binding_sha256,
+          network: "eip155:8453",
+          asset: MAINNET_USDC_ADDRESS,
+          payTo: "0x1111111111111111111111111111111111111111",
+          amountAtomic: input.quoteAtomic ?? "1000",
+          endpoint: input.url,
+        })
+      : null;
   return {
     candidateId: input.id,
     resourceUrl: input.url,
@@ -69,9 +88,10 @@ function outcome(input: {
             maxTimeoutSeconds: 300,
           }
         : null,
+    sellerRequirements,
     challenge: {
-      nonce: status === "live_402_ok" ? "nonce" : null,
-      expiresAt: status === "live_402_ok" ? "2026-06-20T00:00:00.000Z" : null,
+      nonce: null,
+      expiresAt: null,
     },
     quoteAtomic: status === "live_402_ok" ? input.quoteAtomic ?? "1000" : null,
     quoteUsdc: status === "live_402_ok" ? "0.001" : null,

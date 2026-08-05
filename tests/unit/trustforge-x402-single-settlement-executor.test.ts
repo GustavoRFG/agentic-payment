@@ -81,6 +81,9 @@ function requestBindingFields(endpoint: string, method: "GET" | "POST", body: un
   return {
     authorizedRequestBindingSha256: plannedRequestBinding.binding_sha256,
     plannedRequestBinding,
+    canonicalRequirementsSha256: "b".repeat(64),
+    canonicalEnvelopeSha256: "c".repeat(64),
+    selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
   };
 }
 
@@ -163,6 +166,10 @@ describe("x402-single-settlement-executor pre-live method binding", () => {
         attemptId: "attempt_method",
         runId: "run_method",
         authorizationHash: "hash_method",
+        canonicalRequirementsSha256: "b".repeat(64),
+        canonicalEnvelopeSha256: "c".repeat(64),
+        selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
+        requestBindingSha256: "d".repeat(64),
         network: TESTNET_NETWORK,
         buyer: SEPOLIA_TESTNET_BUYER_WALLET,
         payTo: AUTHORIZED_PAY_TO,
@@ -295,6 +302,9 @@ describe("x402-single-settlement-executor", () => {
           maxAmountAtomic: "2000",
           runDir: dir,
           authorizationHash: "hash",
+          canonicalRequirementsSha256: "b".repeat(64),
+          canonicalEnvelopeSha256: "c".repeat(64),
+          selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
           require402BeforePayment: false,
         },
         env: { [SEPOLIA_BUYER_PRIVATE_KEY_ENV]: TEST_SIGNING_KEY_A },
@@ -320,6 +330,10 @@ describe("x402-single-settlement-executor", () => {
         attemptId: "attempt_test",
         runId: "run_test",
         authorizationHash: "hash_test",
+        canonicalRequirementsSha256: "b".repeat(64),
+        canonicalEnvelopeSha256: "c".repeat(64),
+        selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
+        requestBindingSha256: "d".repeat(64),
         network: TESTNET_NETWORK,
         buyer: SEPOLIA_TESTNET_BUYER_WALLET,
         payTo: AUTHORIZED_PAY_TO,

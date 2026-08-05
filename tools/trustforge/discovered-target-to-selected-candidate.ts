@@ -35,7 +35,6 @@ import {
 } from "./thin-settlement-request-binding";
 import {
   probeQuoteStability,
-  REJECTED_INCOMPLETE_402_CHALLENGE,
   REJECTED_NON_POSITIVE_QUOTE,
   REJECTED_QUOTE_EXTRACTION_FAILED,
   REJECTED_QUOTE_SOURCE_DISAGREEMENT,
@@ -50,6 +49,17 @@ import {
   type ProviderBlocklist,
   type ProviderBlocklistEntry,
 } from "./provider-blocklist";
+import {
+  BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH,
+  REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED,
+  canonicalJson,
+  validatePersistedSellerRequirementsObservation,
+  type AncillaryTempoEvidence,
+  type SellerAmountField,
+  type SellerRequirementsObservation,
+  type SellerRequirementsTransport,
+  type X402ProtocolVersion,
+} from "./x402-seller-requirements-binding";
 
 const AUTHORIZATION_HEADROOM_USDC = "0.001";
 const AUTHORIZATION_MAX_CEILING_USDC = "0.01";
@@ -70,6 +80,7 @@ export interface DiscoveredTargetSelectionPrimary {
   readonly quoteUsdc: string;
   readonly quoteAtomic: string;
   readonly selectedPayTo: string | null;
+  readonly sellerRequirements?: SellerRequirementsObservation;
   readonly network?: string;
   readonly asset?: string;
   readonly scoringRationale: readonly string[];
@@ -87,6 +98,7 @@ export interface DiscoveredTargetSelectionInput {
 }
 
 export interface DiscoveredSelectedCandidate {
+  readonly schema_version: "trustforge_selected_candidate.v2";
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
@@ -96,6 +108,18 @@ export interface DiscoveredSelectedCandidate {
   readonly request_body: CanonicalJsonValue | null;
   readonly request_input_provenance: RequestInputProvenance;
   readonly request_binding_sha256: string;
+  readonly protocol_version: X402ProtocolVersion;
+  readonly transport: SellerRequirementsTransport;
+  readonly scheme: string;
+  readonly amount_field: SellerAmountField;
+  readonly max_timeout_seconds: number;
+  readonly resource: unknown;
+  readonly extra: unknown;
+  readonly canonical_requirements_sha256: string;
+  readonly canonical_envelope_sha256: string;
+  readonly selection_requirements_observed_at: string;
+  readonly ancillary_tempo_evidence: AncillaryTempoEvidence | null;
+  readonly seller_requirements: SellerRequirementsObservation;
   readonly quote_amount_usdc: string;
   readonly quote_atomic: string;
   readonly authorized_pay_to: string;
@@ -115,8 +139,9 @@ export interface DiscoveredSelectedCandidate {
 export interface QuoteBindingEvidence {
   readonly bound_atomic: string;
   readonly catalog_atomic: string;
-  readonly nonce: string;
-  readonly expires_at: string;
+  readonly canonical_requirements_sha256: string;
+  readonly canonical_envelope_sha256: string;
+  readonly requirements_observed_at: string;
 }
 
 export type DiscoveredTargetAdaptResult =
@@ -168,7 +193,9 @@ export interface DiscoveredTargetAdaptRejection {
     readonly blocklist?: ProviderBlocklistEntry;
     readonly method?: MethodMismatchEvidence;
     readonly quote_source?: { readonly bound_atomic: string | null; readonly catalog_atomic: string };
+    /** @deprecated Proprietary challenge diagnostics only. */
     readonly challenge?: { readonly nonce_present: boolean; readonly expires_at_present: boolean };
+    readonly seller_requirements?: { readonly first_hash: string | null; readonly second_hash: string | null };
     readonly quote_validation?: QuoteValidationEvidence;
   };
 }
@@ -212,6 +239,78 @@ function bindingFromSelectionEntry(
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function sellerRequirementsFromSelectionEntry(
+  entry: DiscoveredTargetSelectionFallback,
+  requestBindingSha256: string,
+):
+  | { readonly ok: true; readonly observation: SellerRequirementsObservation }
+  | { readonly ok: false; readonly reason: string } {
+  if (!entry.sellerRequirements) {
+    return {
+      ok: false,
+      reason: `${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: ${entry.resourceUrl} lacks seller requirements binding`,
+    };
+  }
+  const validation = validatePersistedSellerRequirementsObservation(
+    entry.sellerRequirements,
+    requestBindingSha256,
+  );
+  if (!validation.valid) return { ok: false, reason: validation.reasons.join("; ") };
+  const binding = entry.sellerRequirements.binding;
+  if (
+    binding.amount_atomic !== entry.quoteAtomic ||
+    binding.pay_to.toLowerCase() !== (entry.selectedPayTo ?? "").toLowerCase() ||
+    (entry.network && binding.network !== entry.network) ||
+    (entry.asset && binding.asset.toLowerCase() !== entry.asset.toLowerCase())
+  ) {
+    return {
+      ok: false,
+      reason: `${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: selection fields differ from bound seller requirements`,
+    };
+  }
+  return { ok: true, observation: entry.sellerRequirements };
+}
+
+export function sellerRequirementsFromSelectedCandidate(
+  candidate: DiscoveredSelectedCandidate,
+): SellerRequirementsObservation {
+  if (candidate.schema_version !== "trustforge_selected_candidate.v2" || !candidate.seller_requirements) {
+    throw new Error(
+      `${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: selected_candidate lacks seller requirements binding`,
+    );
+  }
+  const validation = validatePersistedSellerRequirementsObservation(
+    candidate.seller_requirements,
+    candidate.request_binding_sha256,
+  );
+  if (!validation.valid) throw new Error(validation.reasons.join("; "));
+  const binding = candidate.seller_requirements.binding;
+  const normalizedMatches =
+    candidate.protocol_version === binding.protocol_version &&
+    candidate.transport === binding.transport &&
+    candidate.scheme === binding.scheme &&
+    candidate.network === binding.network &&
+    candidate.asset.toLowerCase() === binding.asset.toLowerCase() &&
+    candidate.amount_field === binding.amount_field &&
+    candidate.quote_atomic === binding.amount_atomic &&
+    candidate.authorized_pay_to.toLowerCase() === binding.pay_to.toLowerCase() &&
+    candidate.max_timeout_seconds === binding.max_timeout_seconds &&
+    canonicalJson(candidate.resource) === canonicalJson(binding.resource) &&
+    canonicalJson(candidate.extra) === canonicalJson(binding.extra) &&
+    canonicalJson(candidate.ancillary_tempo_evidence) ===
+      canonicalJson(candidate.seller_requirements.ancillary_tempo_evidence) &&
+    candidate.canonical_requirements_sha256 === binding.canonical_requirements_sha256 &&
+    candidate.canonical_envelope_sha256 === binding.canonical_envelope_sha256 &&
+    candidate.selection_requirements_observed_at ===
+      candidate.seller_requirements.requirements_observed_at;
+  if (!normalizedMatches) {
+    throw new Error(
+      `${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: selected_candidate normalized fields differ from binding`,
+    );
+  }
+  return candidate.seller_requirements;
 }
 
 export function requestBindingFromSelectedCandidate(
@@ -439,6 +538,25 @@ export function recommendedAuthorizationMaxUsdc(quoteUsdc: string): string {
   return atomicUsdcToDecimal(capped.toString());
 }
 
+function selectedCandidateRequirementsFields(observation: SellerRequirementsObservation) {
+  const binding = observation.binding;
+  return {
+    schema_version: "trustforge_selected_candidate.v2" as const,
+    protocol_version: binding.protocol_version,
+    transport: binding.transport,
+    scheme: binding.scheme,
+    amount_field: binding.amount_field,
+    max_timeout_seconds: binding.max_timeout_seconds,
+    resource: binding.resource,
+    extra: binding.extra,
+    canonical_requirements_sha256: binding.canonical_requirements_sha256,
+    canonical_envelope_sha256: binding.canonical_envelope_sha256,
+    selection_requirements_observed_at: observation.requirements_observed_at,
+    ancillary_tempo_evidence: observation.ancillary_tempo_evidence,
+    seller_requirements: observation,
+  };
+}
+
 function resolveSepoliaLocalPolicy(resourceUrl: string) {
   if (!resourceUrl.includes("/paid/analyze-text")) return null;
   if (!resourceUrl.startsWith("http://localhost:") && !resourceUrl.startsWith("http://127.0.0.1:")) {
@@ -476,11 +594,16 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
   }
   const request = bindingFromSelectionEntry(primary);
   if (!request.ok) return request;
+  const requirements = sellerRequirementsFromSelectionEntry(
+    primary,
+    request.binding.binding_sha256,
+  );
+  if (!requirements.ok) return requirements;
 
   const sepoliaPolicy = resolveSepoliaLocalPolicy(primary.resourceUrl);
-  const network = primary.network ?? (sepoliaPolicy ? TESTNET_NETWORK : MAINNET_NETWORK);
+  const network = requirements.observation.binding.network;
   const isSepolia = network === TESTNET_NETWORK || network === "84532";
-  const asset = primary.asset ?? (isSepolia ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS);
+  const asset = requirements.observation.binding.asset;
   const buyerWallet = isSepolia ? SEPOLIA_TESTNET_BUYER_WALLET : MAINNET_BUYER_WALLET;
   const allowlisted = resolveAllowlistedPolicy(primary.resourceUrl);
   const provider = sepoliaPolicy?.provider ?? allowlisted?.provider ?? "discovered_x402";
@@ -492,6 +615,7 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
   return {
     ok: true,
     candidate: {
+      ...selectedCandidateRequirementsFields(requirements.observation),
       provider,
       service_id: serviceId,
       endpoint: request.binding.endpoint,
@@ -503,7 +627,7 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
       request_binding_sha256: request.binding.binding_sha256,
       quote_amount_usdc: primary.quoteUsdc,
       quote_atomic: primary.quoteAtomic,
-      authorized_pay_to: primary.selectedPayTo,
+      authorized_pay_to: requirements.observation.binding.pay_to,
       recommended_max_usdc: recommendedAuthorizationMaxUsdc(primary.quoteUsdc),
       network,
       asset,
@@ -541,6 +665,11 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
   }
   const request = bindingFromSelectionEntry(primary);
   if (!request.ok) return request;
+  const requirements = sellerRequirementsFromSelectionEntry(
+    primary,
+    request.binding.binding_sha256,
+  );
+  if (!requirements.ok) return requirements;
 
   const sepoliaPolicy = resolveSepoliaLocalPolicy(primary.resourceUrl);
   const policy = sepoliaPolicy ?? resolveAllowlistedPolicy(primary.resourceUrl);
@@ -552,13 +681,14 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
   }
 
   const isSepolia = Boolean(sepoliaPolicy);
-  const network = primary.network ?? (isSepolia ? TESTNET_NETWORK : MAINNET_NETWORK);
-  const asset = primary.asset ?? (isSepolia ? TESTNET_USDC_ADDRESS : MAINNET_USDC_ADDRESS);
+  const network = requirements.observation.binding.network;
+  const asset = requirements.observation.binding.asset;
   const buyerWallet = isSepolia ? SEPOLIA_TESTNET_BUYER_WALLET : MAINNET_BUYER_WALLET;
 
   return {
     ok: true,
     candidate: {
+      ...selectedCandidateRequirementsFields(requirements.observation),
       provider: policy.provider,
       service_id: policy.serviceId,
       endpoint: request.binding.endpoint,
@@ -570,7 +700,7 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
       request_binding_sha256: request.binding.binding_sha256,
       quote_amount_usdc: primary.quoteUsdc,
       quote_atomic: primary.quoteAtomic,
-      authorized_pay_to: primary.selectedPayTo,
+      authorized_pay_to: requirements.observation.binding.pay_to,
       recommended_max_usdc: recommendedAuthorizationMaxUsdc(primary.quoteUsdc),
       network,
       asset,
@@ -716,6 +846,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       requestBinding: requestBindingFromSelectedCandidate(adapted.candidate),
       expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,
+      now: options.now,
     });
     lastProbe = probe;
     if (!probe.honored) {
@@ -731,6 +862,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       firstMaxAmountRequiredAtomic: probe.maxAmountRequiredAtomic,
       expectedNetwork: adapted.candidate.network,
       fetchImpl: options.fetchImpl,
+      now: options.now,
     });
     lastStability = stability;
     if (!stability.stable) {
@@ -758,7 +890,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       continue;
     }
 
-    const { atomic: boundAtomic, nonce, expiresAt } = stability.bound;
+    const { atomic: boundAtomic } = stability.bound;
     if (boundAtomic === null) {
       const reason = `${REJECTED_QUOTE_EXTRACTION_FAILED}: stable comparison produced no bound atomic quote for ${adapted.candidate.endpoint}`;
       rejectedCandidates.push({
@@ -797,15 +929,43 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       continue;
     }
 
-    // Challenge completeness: a 402 missing nonce or expiresAt is not an acceptable
-    // challenge — do not materialize a candidate on it.
-    if (!nonce || !expiresAt) {
+    // Seller requirements completeness is protocol-versioned; buyer nonce and
+    // EIP-3009 validity are intentionally outside this unsigned 402 gate.
+    const firstRequirements = probe.sellerRequirements;
+    const secondRequirements = stability.bound.sellerRequirements;
+    if (!firstRequirements || !secondRequirements) {
+      const reason =
+        probe.sellerRequirementsError ??
+        stability.bound.sellerRequirementsError ??
+        `${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: live probes did not persist requirements binding`;
       rejectedCandidates.push({
         resourceUrl: entry.resourceUrl,
-        reason: `${REJECTED_INCOMPLETE_402_CHALLENGE}: nonce=${nonce ? "present" : "missing"} expiresAt=${expiresAt ? "present" : "missing"} for ${adapted.candidate.endpoint}`,
+        reason,
         evidence: {
           quote_stability: stability.evidence,
-          challenge: { nonce_present: Boolean(nonce), expires_at_present: Boolean(expiresAt) },
+          seller_requirements: {
+            first_hash: firstRequirements?.binding.canonical_requirements_sha256 ?? null,
+            second_hash: secondRequirements?.binding.canonical_requirements_sha256 ?? null,
+          },
+        },
+      });
+      continue;
+    }
+    if (
+      firstRequirements.binding.canonical_requirements_sha256 !==
+        secondRequirements.binding.canonical_requirements_sha256 ||
+      firstRequirements.binding.canonical_envelope_sha256 !==
+        secondRequirements.binding.canonical_envelope_sha256
+    ) {
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason: `${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: requirements changed between method and stability probes`,
+        evidence: {
+          quote_stability: stability.evidence,
+          seller_requirements: {
+            first_hash: firstRequirements.binding.canonical_requirements_sha256,
+            second_hash: secondRequirements.binding.canonical_requirements_sha256,
+          },
         },
       });
       continue;
@@ -831,6 +991,7 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       ok: true,
       candidate: {
         ...adapted.candidate,
+        ...selectedCandidateRequirementsFields(secondRequirements),
         // Bound to the live 402 (equals catalog here, since they must agree).
         quote_atomic: boundAtomic,
         adapt_evidence: {
@@ -838,8 +999,10 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
           quote_binding: {
             bound_atomic: boundAtomic,
             catalog_atomic: catalogAtomic,
-            nonce,
-            expires_at: expiresAt,
+            canonical_requirements_sha256:
+              secondRequirements.binding.canonical_requirements_sha256,
+            canonical_envelope_sha256: secondRequirements.binding.canonical_envelope_sha256,
+            requirements_observed_at: secondRequirements.requirements_observed_at,
           },
         },
       },

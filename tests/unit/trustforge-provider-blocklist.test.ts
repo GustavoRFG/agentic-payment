@@ -16,6 +16,7 @@ import {
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 function requestFields(endpoint: string) {
   const binding = createThinSettlementRequestBinding({
@@ -32,25 +33,39 @@ function requestFields(endpoint: string) {
     requestBody: binding.body,
     requestInputProvenance: "bazaar.extensions.bazaar.info.input" as const,
     requestBindingSha256: binding.binding_sha256,
+    sellerRequirements: sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: MAINNET_NETWORK,
+      asset: MAINNET_USDC_ADDRESS,
+      payTo: "0x2222222222222222222222222222222222222222",
+      amountAtomic: "1125",
+      endpoint,
+    }),
   };
 }
 
-function paymentRequiredBody(amount: string, payTo = "0x2222222222222222222222222222222222222222"): string {
-  return JSON.stringify({
-    x402Version: 2,
-    accepts: [
-      {
-        scheme: "exact",
-        network: MAINNET_NETWORK,
-        asset: MAINNET_USDC_ADDRESS,
-        maxAmountRequired: amount,
-        payTo,
-        maxTimeoutSeconds: 300,
-      },
-    ],
-    nonce: "probe-nonce",
-    expiresAt: "2099-01-01T00:00:00.000Z",
+function paymentRequiredBody(
+  endpoint: string,
+  amount: string,
+  payTo = "0x2222222222222222222222222222222222222222",
+): string {
+  const binding = createThinSettlementRequestBinding({
+    endpoint,
+    method: "POST",
+    input_status: "known",
+    query: [],
+    body: {},
   });
+  return JSON.stringify(
+    sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: MAINNET_NETWORK,
+      asset: MAINNET_USDC_ADDRESS,
+      payTo,
+      amountAtomic: amount,
+      endpoint,
+    }).payment_required_envelope,
+  );
 }
 
 describe("provider blocklist config", () => {
@@ -237,7 +252,7 @@ describe("adapt applies excluding entries but not watch entries", () => {
       const url = String(input);
       expect(containsX402PaymentHeader(init?.headers)).toBe(false);
       if (url === retiredWatchEndpoint) {
-        return new Response(paymentRequiredBody("1125"), {
+        return new Response(paymentRequiredBody(retiredWatchEndpoint, "1125"), {
           status: 402,
           headers: { "content-type": "application/json" },
         });

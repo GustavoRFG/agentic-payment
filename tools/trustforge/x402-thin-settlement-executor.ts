@@ -4,6 +4,7 @@
 
 import {
   requestBindingFromSelectedCandidate,
+  sellerRequirementsFromSelectedCandidate,
   type DiscoveredSelectedCandidate,
 } from "./discovered-target-to-selected-candidate";
 import { parseUsdcDecimalToAtomic } from "./external-x402-get-policy";
@@ -116,6 +117,7 @@ export async function executeThinX402Settlement(input: {
   }
 
   const requestBinding = requestBindingFromSelectedCandidate(input.selected);
+  const sellerRequirements = sellerRequirementsFromSelectedCandidate(input.selected);
   const authorizedRequestBinding = input.auth.request_binding_sha256?.trim().toLowerCase();
   if (!authorizedRequestBinding) {
     throw new Error(`${BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING}: authorization hash absent`);
@@ -126,8 +128,9 @@ export async function executeThinX402Settlement(input: {
     );
   }
 
+  let paytimePreflight: Awaited<ReturnType<typeof runPaidQuoteFreshnessPreflight>> | null = null;
   if (!input.skipFreshnessPreflight) {
-    const preflight = await runPaidQuoteFreshnessPreflight({
+    paytimePreflight = await runPaidQuoteFreshnessPreflight({
       authorized: {
         endpoint: input.selected.endpoint,
         quote_amount_usdc: input.selected.quote_amount_usdc,
@@ -137,11 +140,15 @@ export async function executeThinX402Settlement(input: {
         network: input.selected.network,
         asset: input.selected.asset,
         request_binding: requestBinding,
+        seller_requirements: sellerRequirements,
+        canonical_requirements_sha256: input.auth.canonical_requirements_sha256!,
+        canonical_envelope_sha256: input.auth.canonical_envelope_sha256!,
+        human_authorization_expires_at: input.auth.authorization_expires_at!,
       },
       fetchImpl: input.fetchImpl,
     });
-    if (!preflight.go) {
-      throw new Error(`BLOCKED_PAY_TIME_FRESHNESS: ${preflight.reasons.join("; ")}`);
+    if (!paytimePreflight.go) {
+      throw new Error(`BLOCKED_PAY_TIME_FRESHNESS: ${paytimePreflight.reasons.join("; ")}`);
     }
   }
 
@@ -192,6 +199,11 @@ export async function executeThinX402Settlement(input: {
       maxAmountAtomic,
       runDir: input.runDir,
       authorizationHash: input.authorizationHash,
+      canonicalRequirementsSha256: sellerRequirements.binding.canonical_requirements_sha256,
+      canonicalEnvelopeSha256: sellerRequirements.binding.canonical_envelope_sha256,
+      selectionRequirementsObservedAt: sellerRequirements.requirements_observed_at,
+      paytimeRequirementsObservedAt: paytimePreflight?.paytime_requirements_observed_at,
+      effectiveSigningDeadline: paytimePreflight?.effective_signing_deadline,
       require402BeforePayment: input.profile.require402BeforePayment,
       expectedNetworkIn402: input.profile.caip2,
     },

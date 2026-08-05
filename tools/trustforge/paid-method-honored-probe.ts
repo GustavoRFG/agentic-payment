@@ -7,13 +7,14 @@
  */
 
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
-import { extractMaxAmountRequiredAtomic } from "./quote-stability-probe";
+import { extractBoundQuote } from "./quote-stability-probe";
 import { startAbortDeadline } from "./abort-deadline";
 import {
   isThinRunnerSettleableMethod,
   planThinSettleRequest,
 } from "./thin-settlement-method-contract";
 import type { ThinSettlementRequestBinding } from "./thin-settlement-request-binding";
+import type { SellerRequirementsObservation } from "./x402-seller-requirements-binding";
 export {
   REJECTED_METHOD_UNSUPPORTED_BY_THIN_RUNNER,
 } from "./thin-settlement-method-contract";
@@ -46,6 +47,8 @@ export interface PaidMethodHonoredProbeResult {
   readonly method: string;
   readonly endpoint: string;
   readonly maxAmountRequiredAtomic: string | null;
+  readonly sellerRequirements: SellerRequirementsObservation | null;
+  readonly sellerRequirementsError: string | null;
   readonly reason: string | null;
   readonly walletUsed: false;
   readonly paymentAttempted: false;
@@ -56,6 +59,7 @@ export interface PaidMethodHonoredProbeOptions {
   readonly expectedNetwork?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  readonly now?: Date;
 }
 
 function lowerHeaders(headers: Headers): Record<string, string> {
@@ -81,6 +85,8 @@ export async function probePaidMethodHonored(
       method: plan.method,
       endpoint: options.requestBinding.endpoint,
       maxAmountRequiredAtomic: null,
+      sellerRequirements: null,
+      sellerRequirementsError: null,
       reason: plan.reason,
       walletUsed: false,
       paymentAttempted: false,
@@ -118,13 +124,18 @@ export async function probePaidMethodHonored(
         body = { rawText: bodyText.slice(0, 2000) };
       }
     }
-    const maxAmountRequiredAtomic =
+    const bound =
       httpStatus === 402
-        ? extractMaxAmountRequiredAtomic(
+        ? extractBoundQuote(
             { headers: lowerHeaders(response.headers), body },
-            { expectedNetwork: options.expectedNetwork },
+            {
+              expectedNetwork: options.expectedNetwork,
+              requestBindingSha256: options.requestBinding.binding_sha256,
+              requirementsObservedAt: options.now ?? new Date(),
+            },
           )
         : null;
+    const maxAmountRequiredAtomic = bound?.atomic ?? null;
 
     if (PAID_METHOD_NOT_HONORED_HTTP_STATUSES.has(httpStatus)) {
       return {
@@ -133,6 +144,8 @@ export async function probePaidMethodHonored(
         method,
         endpoint,
         maxAmountRequiredAtomic: null,
+        sellerRequirements: null,
+        sellerRequirementsError: bound?.sellerRequirementsError ?? null,
         reason: `${REJECTED_PAID_METHOD_NOT_HONORED}: settle ${method} ${endpoint} returned HTTP ${httpStatus}`,
         walletUsed: false,
         paymentAttempted: false,
@@ -144,6 +157,8 @@ export async function probePaidMethodHonored(
       method,
       endpoint,
       maxAmountRequiredAtomic,
+      sellerRequirements: bound?.sellerRequirements ?? null,
+      sellerRequirementsError: bound?.sellerRequirementsError ?? null,
       reason: null,
       walletUsed: false,
       paymentAttempted: false,
@@ -156,6 +171,8 @@ export async function probePaidMethodHonored(
       method,
       endpoint,
       maxAmountRequiredAtomic: null,
+      sellerRequirements: null,
+      sellerRequirementsError: null,
       reason: `PAID_METHOD_PROBE_FAILED: settle ${method} ${endpoint} (${message})`,
       walletUsed: false,
       paymentAttempted: false,

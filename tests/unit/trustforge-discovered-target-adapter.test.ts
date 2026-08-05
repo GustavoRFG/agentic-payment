@@ -16,6 +16,7 @@ import { ZAPPER_TX_EXPLAINER_POLICY } from "../../tools/trustforge/rich-tx-expla
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
 
@@ -24,6 +25,8 @@ function requestFields(
   method: "GET" | "POST",
   query: unknown = [],
   body: unknown = {},
+  amountAtomic = "1125",
+  payTo = "0x2222222222222222222222222222222222222222",
 ) {
   const binding = createThinSettlementRequestBinding({
     endpoint: resourceUrl,
@@ -39,24 +42,31 @@ function requestFields(
     requestBody: binding.body,
     requestInputProvenance: "bazaar.extensions.bazaar.info.input" as const,
     requestBindingSha256: binding.binding_sha256,
+    sellerRequirements: sellerRequirementsFixture({
+      requestBindingSha256: binding.binding_sha256,
+      network: MAINNET_NETWORK,
+      asset: MAINNET_USDC_ADDRESS,
+      payTo,
+      amountAtomic,
+      endpoint: resourceUrl,
+    }),
   };
 }
 
 function paymentRequiredBody(amount: string, payTo = "0x2222222222222222222222222222222222222222"): string {
   return JSON.stringify({
     x402Version: 2,
+    resource: { url: "https://seller.example/paid" },
     accepts: [
       {
         scheme: "exact",
         network: MAINNET_NETWORK,
         asset: MAINNET_USDC_ADDRESS,
-        maxAmountRequired: amount,
+        amount,
         payTo,
         maxTimeoutSeconds: 300,
       },
     ],
-    nonce: "probe-nonce",
-    expiresAt: "2099-01-01T00:00:00.000Z",
   });
 }
 
@@ -89,7 +99,14 @@ describe("discovered target adapter", () => {
             method: "POST",
             handshakeStatus: "live_402_ok",
             resourceUrl: endpoint,
-            ...requestFields(endpoint, "POST"),
+            ...requestFields(
+              endpoint,
+              "POST",
+              [],
+              {},
+              "1125",
+              "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+            ),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
@@ -156,7 +173,14 @@ describe("discovered target adapter", () => {
           method: "GET" as const,
           handshakeStatus: "live_402_ok",
           resourceUrl: autonomousEndpoint,
-          ...requestFields(autonomousEndpoint, "GET"),
+          ...requestFields(
+            autonomousEndpoint,
+            "GET",
+            [],
+            {},
+            "1000",
+            "0x1111111111111111111111111111111111111111",
+          ),
           quoteUsdc: "0.001",
           quoteAtomic: "1000",
           selectedPayTo: "0x1111111111111111111111111111111111111111",
@@ -169,7 +193,14 @@ describe("discovered target adapter", () => {
             method: "POST" as const,
             handshakeStatus: "live_402_ok",
             resourceUrl: endpoint,
-            ...requestFields(endpoint, "POST"),
+            ...requestFields(
+              endpoint,
+              "POST",
+              [],
+              {},
+              "1125",
+              "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+            ),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
@@ -355,7 +386,14 @@ describe("discovered target adapter", () => {
 
   it("detects a query change after target selection before any probe", async () => {
     const target = "https://api.onesource.io/api/chain/network-info";
-    const persisted = requestFields(target, "GET", { network: "ethereum" });
+    const persisted = requestFields(
+      target,
+      "GET",
+      { network: "ethereum" },
+      {},
+      "1000",
+      "0x1111111111111111111111111111111111111111",
+    );
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const result = await adaptDiscoveredTargetWithPaidMethodProbe(
       {
@@ -391,7 +429,14 @@ describe("discovered target adapter", () => {
           method: "POST" as const,
           handshakeStatus: "live_402_ok",
           resourceUrl: unstableEndpoint,
-          ...requestFields(unstableEndpoint, "POST"),
+          ...requestFields(
+            unstableEndpoint,
+            "POST",
+            [],
+            {},
+            "1000",
+            "0x1111111111111111111111111111111111111111",
+          ),
           quoteUsdc: "0.001",
           quoteAtomic: "1000",
           selectedPayTo: "0x1111111111111111111111111111111111111111",

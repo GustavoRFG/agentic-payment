@@ -15,11 +15,23 @@ import {
   requireThinSettlementRequestBinding,
   type ThinSettlementRequestBinding,
 } from "./thin-settlement-request-binding";
+import {
+  BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH,
+  BLOCKED_PAYMENT_REQUIREMENTS_STALE,
+  REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED,
+  calculateEffectiveSigningDeadline,
+  validatePersistedSellerRequirementsObservation,
+  type SellerRequirementsObservation,
+} from "./x402-seller-requirements-binding";
 
 export interface AuthorizedPaymentQuote {
   readonly endpoint: string;
   readonly method?: TargetCandidate["method"];
   readonly request_binding: ThinSettlementRequestBinding;
+  readonly seller_requirements: SellerRequirementsObservation;
+  readonly canonical_requirements_sha256: string;
+  readonly canonical_envelope_sha256: string;
+  readonly human_authorization_expires_at?: string;
   readonly quote_amount_usdc: string;
   readonly quote_atomic: string;
   readonly authorized_max_usdc: string;
@@ -32,6 +44,9 @@ export interface PaidQuoteFreshnessPreflightResult {
   readonly go: boolean;
   readonly reasons: readonly string[];
   readonly outcome: TargetHandshakeOutcome | null;
+  readonly paytime_requirements_observed_at: string | null;
+  readonly effective_signing_deadline: string | null;
+  readonly fresh_unsigned_402_required_before_signing: boolean;
 }
 
 function genericCandidateId(endpoint: string): string {
@@ -54,11 +69,12 @@ export function buildProbeCandidateForAuthorizedQuote(
   }
   const expectedNetwork = quote.network ?? MAINNET_NETWORK;
   const expectedAsset = quote.asset ?? MAINNET_USDC_ADDRESS;
+  const requirements = quote.seller_requirements.binding;
   return {
     candidateId: genericCandidateId(quote.endpoint),
     resourceUrl: quote.endpoint,
     method: requestBinding.method,
-    x402Version: 2,
+    x402Version: requirements.protocol_version,
     freshness: {
       lastUpdated: new Date().toISOString(),
       sortKey: new Date().toISOString(),
@@ -69,12 +85,12 @@ export function buildProbeCandidateForAuthorizedQuote(
     requestBindingError: null,
     accepts: [
       {
-        scheme: "exact",
+        scheme: requirements.scheme,
         network: expectedNetwork,
         asset: expectedAsset,
         amountAtomic: quote.quote_atomic,
         payTo: quote.pay_to,
-        maxTimeoutSeconds: 300,
+        maxTimeoutSeconds: requirements.max_timeout_seconds,
       },
     ],
   };
@@ -86,6 +102,7 @@ export function evaluateFresh402AgainstAuthorizedQuote(
   now: Date = new Date(),
 ): PaidQuoteFreshnessPreflightResult {
   const reasons: string[] = [];
+  let effectiveSigningDeadline: string | null = null;
 
   if (outcome.resourceUrl && outcome.resourceUrl !== quote.endpoint) {
     reasons.push(`endpoint mismatch fresh=${outcome.resourceUrl} authorized=${quote.endpoint}`);
@@ -93,6 +110,45 @@ export function evaluateFresh402AgainstAuthorizedQuote(
 
   if (outcome.status !== "live_402_ok") {
     reasons.push(`fresh handshake status ${outcome.status}`);
+    if (outcome.detail) reasons.push(`fresh handshake detail ${outcome.detail}`);
+  }
+
+  const freshRequirements = outcome.sellerRequirements;
+  if (!freshRequirements) {
+    reasons.push(`${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: fresh 402 binding absent`);
+  } else {
+    const validation = validatePersistedSellerRequirementsObservation(
+      freshRequirements,
+      quote.request_binding.binding_sha256,
+    );
+    reasons.push(...validation.reasons);
+    if (
+      freshRequirements.binding.canonical_requirements_sha256 !==
+      quote.canonical_requirements_sha256
+    ) {
+      reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: requirements hash mismatch`);
+    }
+    if (freshRequirements.binding.canonical_envelope_sha256 !== quote.canonical_envelope_sha256) {
+      reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: envelope hash mismatch`);
+    }
+    if (quote.human_authorization_expires_at) {
+      try {
+        const freshness = calculateEffectiveSigningDeadline({
+          paytimeRequirementsObservedAt: freshRequirements.requirements_observed_at,
+          maxTimeoutSeconds: freshRequirements.binding.max_timeout_seconds,
+          humanAuthorizationExpiresAt: quote.human_authorization_expires_at,
+          now,
+        });
+        effectiveSigningDeadline = freshness.effective_signing_deadline;
+        if (freshness.stale) {
+          reasons.push(
+            `${BLOCKED_PAYMENT_REQUIREMENTS_STALE}: pay-time requirements exceeded effective signing deadline`,
+          );
+        }
+      } catch (error) {
+        reasons.push(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   const expectedNetwork = quote.network ?? MAINNET_NETWORK;
@@ -127,20 +183,13 @@ export function evaluateFresh402AgainstAuthorizedQuote(
     reasons.push(`fresh quote ${outcome.quoteAtomic} exceeds authorized max budget`);
   }
 
-  const expiresAt = outcome.challenge.expiresAt;
-  if (!expiresAt) {
-    reasons.push("fresh challenge missing expiresAt");
-  } else if (Date.parse(expiresAt) <= now.getTime()) {
-    reasons.push(`fresh challenge expired at ${expiresAt}`);
-  }
-  if (!outcome.challenge.nonce) {
-    reasons.push("fresh challenge missing nonce");
-  }
-
   return {
     go: reasons.length === 0,
     reasons,
     outcome,
+    paytime_requirements_observed_at: freshRequirements?.requirements_observed_at ?? null,
+    effective_signing_deadline: effectiveSigningDeadline,
+    fresh_unsigned_402_required_before_signing: reasons.length > 0,
   };
 }
 
@@ -155,6 +204,7 @@ export function evaluateFreshProbeResponseAgainstAuthorizedQuote(
     parseUsdcDecimalToAtomic(quote.authorized_max_usdc).toString();
   const outcome = classifyTargetProbeResponse(candidate, response, {
     maxTargetPriceAtomic: maxAtomic,
+    requirementsObservedAt: options.now,
   });
   return evaluateFresh402AgainstAuthorizedQuote(outcome, quote, options.now);
 }

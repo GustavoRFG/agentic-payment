@@ -54,6 +54,10 @@ import { planAuthorizedRichTxExplainerRequest } from "./trustforge/rich-tx-expla
 import { verifyBaseUsdcPayment } from "./trustforge/verify-base-usdc-payment";
 import { parseUsdcDecimalToAtomic } from "./trustforge/external-x402-get-policy";
 import {
+  sellerRequirementsFromSelectedCandidate,
+  type DiscoveredSelectedCandidate,
+} from "./trustforge/discovered-target-to-selected-candidate";
+import {
   requestBindingFromRichSelectedCandidate,
   type SelectedCandidate,
 } from "./trustforge/rich-provider-discovery";
@@ -171,6 +175,9 @@ export async function runPhase6SinglePaidRichProbe(
   }
 
   const selectedRequestBinding = requestBindingFromRichSelectedCandidate(selected);
+  const selectedSellerRequirements = sellerRequirementsFromSelectedCandidate(
+    selected as unknown as DiscoveredSelectedCandidate,
+  );
   const authorizedMethod =
     auth.method === "GET" || auth.method === "POST" ? auth.method : null;
 
@@ -222,6 +229,12 @@ export async function runPhase6SinglePaidRichProbe(
         authorized_max_usdc: auth.max_usdc,
         pay_to: payTo,
         request_binding: selectedRequestBinding,
+        seller_requirements: selectedSellerRequirements,
+        canonical_requirements_sha256:
+          selectedSellerRequirements.binding.canonical_requirements_sha256,
+        canonical_envelope_sha256:
+          selectedSellerRequirements.binding.canonical_envelope_sha256,
+        human_authorization_expires_at: auth.authorization_expires_at ?? undefined,
       },
       fetchImpl: options.fetchImpl,
       now: options.now,

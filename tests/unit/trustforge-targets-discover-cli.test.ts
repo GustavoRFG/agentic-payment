@@ -11,6 +11,7 @@ import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import type { BazaarResource } from "../../tools/trustforge/bazaar-client";
 import type { TargetCandidate } from "../../tools/trustforge/target-candidates";
 import type { TargetHandshakeOutcome } from "../../tools/trustforge/target-liveness";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 function resource(input: {
   readonly url: string;
@@ -55,6 +56,14 @@ function liveOutcome(candidate: TargetCandidate, quoteAtomic: string): TargetHan
       payTo: "0x1111111111111111111111111111111111111111",
       maxTimeoutSeconds: 300,
     },
+    sellerRequirements: sellerRequirementsFixture({
+      requestBindingSha256: candidate.requestBinding!.binding_sha256,
+      network: "eip155:8453",
+      asset: MAINNET_USDC_ADDRESS,
+      payTo: "0x1111111111111111111111111111111111111111",
+      amountAtomic: quoteAtomic,
+      endpoint: candidate.resourceUrl,
+    }),
     challenge: {
       nonce: "nonce",
       expiresAt: "2026-06-20T00:00:00.000Z",

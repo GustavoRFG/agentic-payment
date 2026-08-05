@@ -16,6 +16,8 @@ import {
   ZAPPER_TX_EXPLAINER_POLICY,
 } from "../../tools/trustforge/rich-tx-explainer-policy";
 import { createThinSettlementRequestBinding } from "../../tools/trustforge/thin-settlement-request-binding";
+import { authorizationExpiresAt } from "../../tools/trustforge/x402-seller-requirements-binding";
+import { sellerRequirementsFixture } from "./_trustforge-seller-requirements-fixture";
 
 const endpoint = ZAPPER_TX_EXPLAINER_POLICY.endpointUrl;
 const requestBinding = createThinSettlementRequestBinding({
@@ -45,6 +47,14 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
             requestBody: requestBinding.body,
             requestInputProvenance: "bazaar.extensions.bazaar.info.input",
             requestBindingSha256: requestBinding.binding_sha256,
+            sellerRequirements: sellerRequirementsFixture({
+              requestBindingSha256: requestBinding.binding_sha256,
+              network: "eip155:8453",
+              asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              payTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+              amountAtomic: "1125",
+              endpoint,
+            }),
             quoteUsdc: "0.001125",
             quoteAtomic: "1125",
             selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
@@ -63,6 +73,7 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
         ...draft,
         decision: "authorize_one_payment" as const,
         decided_at: "2026-06-20T00:00:00.000Z",
+        authorization_expires_at: authorizationExpiresAt("2026-06-20T00:00:00.000Z"),
         rationale: "testnet-safe single shot",
       };
       const validation = validateHumanPaymentAuthorization(auth, adapted.candidate);
@@ -82,6 +93,14 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
             payTo: adapted.candidate.authorized_pay_to,
             maxTimeoutSeconds: 300,
           },
+          sellerRequirements: sellerRequirementsFixture({
+            requestBindingSha256: requestBinding.binding_sha256,
+            network: "eip155:8453",
+            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            payTo: adapted.candidate.authorized_pay_to,
+            amountAtomic: "20000",
+            endpoint,
+          }),
           challenge: { nonce: "n", expiresAt: "2099-01-01T00:00:00.000Z" },
           quoteAtomic: "20000",
           quoteUsdc: "0.02",
@@ -98,6 +117,10 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
           authorized_max_usdc: auth.max_usdc,
           pay_to: adapted.candidate.authorized_pay_to,
           request_binding: requestBinding,
+          seller_requirements: adapted.candidate.seller_requirements,
+          canonical_requirements_sha256: auth.canonical_requirements_sha256,
+          canonical_envelope_sha256: auth.canonical_envelope_sha256,
+          human_authorization_expires_at: auth.authorization_expires_at,
         },
       );
       expect(noGo.go).toBe(false);
@@ -112,9 +135,33 @@ describe("paid discovered target pipeline (offline/testnet-safe)", () => {
         ]),
       );
 
-      const fetchImpl = vi.fn(async () => {
-        throw new Error("preflight should abort before network");
-      }) as unknown as typeof fetch;
+      const changedRequirements = {
+        x402Version: 2,
+        resource: { url: endpoint, description: "changed pay-time quote", mimeType: "application/json" },
+        accepts: [
+          {
+            scheme: "exact",
+            network: "eip155:8453",
+            amount: "20000",
+            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            payTo: adapted.candidate.authorized_pay_to,
+            maxTimeoutSeconds: 300,
+            extra: { name: "USDC", version: "2" },
+          },
+        ],
+      };
+      const fetchImpl = vi.fn(async () =>
+        new Response(JSON.stringify({ error: "Payment Required" }), {
+          status: 402,
+          headers: {
+            "content-type": "application/json",
+            "payment-required": Buffer.from(
+              JSON.stringify(changedRequirements),
+              "utf8",
+            ).toString("base64"),
+          },
+        }),
+      ) as unknown as typeof fetch;
 
       await expect(
         runPhase6SinglePaidRichProbe({

@@ -42,3 +42,19 @@ For the rich flow, the Phase 5 template is the source of the request-binding
 decision. Phase 6 must read the approved hash and summary from the resulting
 human artifact; it may canonicalize them for validation, but it must never use
 the runtime planner's own hash as the authorized value.
+
+## Seller requirements / buyer authorization separation (B.1)
+
+The human decision `ACCEPT_X402_CHALLENGE_MODEL_ALIGNMENT_AUDIT` establishes
+three separate contracts: seller `PaymentRequirements`, human payment
+authorization, and the future buyer-signed EIP-3009 authorization. Seller
+requirements do not own `nonce`, `validAfter`, `validBefore`, `expiresAt`, or a
+signature.
+
+Approved policy constants are: seller local freshness cap 300 seconds; human
+authorization default TTL 900 seconds and maximum TTL 1800 seconds; buyer
+`validAfter` clock skew 60 seconds; Tempo `id`/`expires` record-only and
+non-authoritative; signed-but-not-sent attempts terminal-abandoned and requiring
+reauthorization. B.1 creates no buyer nonce or signed payload. A future B.2 must
+refresh an unsigned 402 immediately before signing and require exact authorized
+requirements/envelope hashes.
