@@ -22,7 +22,8 @@ interface TestOnlyX402PaidSettlementRunInput extends X402PaidSettlementRunInput 
   readonly executeImpl?: typeof executeThinX402Settlement;
 }
 
-async function runX402PaidSettlementCore(
+/** Implementation core. Productive callers must use runX402PaidSettlement. */
+export async function runX402PaidSettlementCore(
   input: TestOnlyX402PaidSettlementRunInput,
 ): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
   const { runDir, profile } = input;
@@ -157,11 +158,4 @@ export async function runX402PaidSettlement(
       "Implement and audit B.2 before any paid execution; no retry or bypass is available.",
     ],
   };
-}
-
-/** Explicit test-only seam for historical runner result-capture tests. */
-export async function __testOnlyRunX402PaidSettlementCore(
-  input: TestOnlyX402PaidSettlementRunInput,
-): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
-  return runX402PaidSettlementCore(input);
 }

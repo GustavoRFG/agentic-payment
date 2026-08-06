@@ -21,7 +21,7 @@ import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safe
 import type { DiscoveredSelectedCandidate } from "../../tools/trustforge/discovered-target-to-selected-candidate";
 import type { HumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
 import { executeSingleX402Settlement } from "../../tools/trustforge/x402-single-settlement-executor";
-import { __testOnlyExecuteThinX402SettlementCore as executeThinX402Settlement } from "../../tools/trustforge/x402-thin-settlement-executor";
+import { executeThinX402Settlement } from "../support/trustforge-paid-core-seams";
 import { MAINNET_X402_SETTLEMENT_PROFILE } from "../../tools/trustforge/x402-settlement-profile";
 import {
   createThinSettlementRequestBinding,

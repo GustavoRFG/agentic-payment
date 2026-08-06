@@ -1,13 +1,12 @@
 /**
  * GUARD_NO_PRODUCTIVE_IMPORT_OF_TEST_ONLY_PAID_CORE
+ * GUARD_NO_PRODUCTIVE_TEST_SUPPORT_DEPENDENCY
  *
- * The paid core exposes `__testOnly*` seams so tests can drive it without the
- * productive blockers. That is only safe while the seams stay unreachable from
- * productive code: an import of one from tools/, buyer-client/, seller-api/ or
- * shared/ would be a way around the blocker that no blocker could see.
+ * Structural barrier after B.2 audit:
+ * - productive modules must not export or call `__testOnly*` seams;
+ * - productive modules must not import `tests/**` or `test-support`.
  *
- * Declaring a seam is fine — that is where they live. Importing or calling one
- * from productive code is not.
+ * Historical tests reach paid cores only via `tests/support/`.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -16,16 +15,16 @@ import { extname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const PRODUCTIVE_ROOTS = ["tools", "buyer-client", "seller-api", "shared"] as const;
-const ALLOWED_ROOTS = ["tests"] as const;
 const SKIP_DIRECTORIES = new Set(["node_modules", "dist", "build", "coverage", ".git", "__pycache__"]);
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
 
-/** Importing or calling a seam. Declaring or exporting one is not a violation. */
-const IMPORT_PATTERN = /import\s*(?:type\s*)?\{[^}]*__testOnly[A-Za-z0-9_]*/;
-const NAMED_IMPORT_LINE = /\b__testOnly[A-Za-z0-9_]*\b/;
-const DECLARATION_PATTERN =
+const TEST_ONLY_SYMBOL = /\b__testOnly[A-Za-z0-9_]*\b/;
+const TEST_ONLY_DECLARATION =
   /^\s*(?:export\s+)?(?:async\s+)?(?:function|const|let|var|class)\s+__testOnly/;
-const EXPORT_LIST_PATTERN = /^\s*export\s*\{[^}]*\}/;
+const TEST_SUPPORT_IMPORT =
+  /(?:from\s+["'][^"']*(?:\/tests\/|tests\/support|test-support)[^"']*["']|import\s*\(\s*["'][^"']*(?:\/tests\/|tests\/support|test-support)[^"']*["']\s*\))/;
+const DYNAMIC_TEST_ONLY_IMPORT =
+  /import\s*\(\s*["'][^"']*["']\s*\)[^;]*__testOnly|__testOnly[A-Za-z0-9_]*\s*\(/;
 
 function sourceFiles(root: string): string[] {
   const out: string[] = [];
@@ -60,6 +59,7 @@ interface Violation {
   readonly file: string;
   readonly line: number;
   readonly text: string;
+  readonly kind: string;
 }
 
 function findViolations(): Violation[] {
@@ -67,19 +67,44 @@ function findViolations(): Violation[] {
   for (const root of PRODUCTIVE_ROOTS) {
     for (const file of sourceFiles(root)) {
       const relativePath = relative(process.cwd(), file).split(sep).join("/");
-      if (ALLOWED_ROOTS.some((allowed) => relativePath.startsWith(`${allowed}/`))) continue;
-      if (/(^|\/)(tests?|__tests__)\//.test(relativePath)) continue;
+      if (/(^|\/)(tests?|__tests__|support)\//.test(relativePath)) continue;
       if (/\.(test|spec)\.[cm]?tsx?$/.test(relativePath)) continue;
 
       const lines = readFileSync(file, "utf8").split(/\r?\n/);
       lines.forEach((line, index) => {
-        if (!NAMED_IMPORT_LINE.test(line)) return;
-        if (DECLARATION_PATTERN.test(line)) return;
-        if (EXPORT_LIST_PATTERN.test(line)) return;
         if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
-        // an import statement, or any other reference that is not a declaration
-        if (IMPORT_PATTERN.test(line) || /\brequire\(/.test(line) || /__testOnly[A-Za-z0-9_]*\s*\(/.test(line)) {
-          violations.push({ file: relativePath, line: index + 1, text: line.trim() });
+
+        if (TEST_SUPPORT_IMPORT.test(line)) {
+          violations.push({
+            file: relativePath,
+            line: index + 1,
+            text: line.trim(),
+            kind: "test-support-dependency",
+          });
+          return;
+        }
+
+        if (!TEST_ONLY_SYMBOL.test(line)) return;
+        if (TEST_ONLY_DECLARATION.test(line)) {
+          violations.push({
+            file: relativePath,
+            line: index + 1,
+            text: line.trim(),
+            kind: "test-only-export-or-declaration",
+          });
+          return;
+        }
+        if (
+          /import\s*(?:type\s*)?\{[^}]*__testOnly/.test(line) ||
+          /\brequire\(/.test(line) ||
+          DYNAMIC_TEST_ONLY_IMPORT.test(line)
+        ) {
+          violations.push({
+            file: relativePath,
+            line: index + 1,
+            text: line.trim(),
+            kind: "test-only-import-or-call",
+          });
         }
       });
     }
@@ -88,32 +113,40 @@ function findViolations(): Violation[] {
 }
 
 describe("GUARD_NO_PRODUCTIVE_IMPORT_OF_TEST_ONLY_PAID_CORE", () => {
-  it("no productive module imports or calls a __testOnly paid-core seam", () => {
-    const violations = findViolations();
+  it("no productive module declares, imports, or calls a __testOnly paid-core seam", () => {
+    const violations = findViolations().filter((v) => v.kind.startsWith("test-only"));
     expect(
       violations,
       `productive code reached a test-only seam:\n${violations
+        .map((v) => `  ${v.kind} ${v.file}:${v.line}  ${v.text}`)
+        .join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("the guard detects a productive __testOnly import", () => {
+    const offending = 'import { __testOnlyRunX402PaidSettlementCore } from "./x402-paid-settlement-runner";';
+    expect(/import\s*(?:type\s*)?\{[^}]*__testOnly/.test(offending)).toBe(true);
+  });
+});
+
+describe("GUARD_NO_PRODUCTIVE_TEST_SUPPORT_DEPENDENCY", () => {
+  it("no productive module depends on tests/ or test-support", () => {
+    const violations = findViolations().filter((v) => v.kind === "test-support-dependency");
+    expect(
+      violations,
+      `productive code depends on test support:\n${violations
         .map((v) => `  ${v.file}:${v.line}  ${v.text}`)
         .join("\n")}`,
     ).toEqual([]);
   });
 
-  it("the guard actually detects a productive import", () => {
-    // proves the matcher is not vacuous
-    const offending = 'import { __testOnlyRunX402PaidSettlementCore } from "./x402-paid-settlement-runner";';
-    expect(IMPORT_PATTERN.test(offending)).toBe(true);
-    expect(DECLARATION_PATTERN.test(offending)).toBe(false);
-    const call = "  await __testOnlyRunX402PaidSettlementCore({});";
-    expect(/__testOnly[A-Za-z0-9_]*\s*\(/.test(call)).toBe(true);
-  });
-
-  it("the guard does not flag the declarations themselves", () => {
-    for (const declaration of [
-      "export async function __testOnlyRunX402PaidSettlementCore(input) {",
-      "export const __testOnlyExecuteThinX402SettlementCore = core;",
-    ]) {
-      expect(DECLARATION_PATTERN.test(declaration)).toBe(true);
-    }
+  it("the guard detects a productive tests/support import", () => {
+    const offending =
+      'import { runX402PaidSettlement } from "../../tests/support/trustforge-paid-core-seams";';
+    expect(TEST_SUPPORT_IMPORT.test(offending)).toBe(true);
+    const dynamic =
+      'const m = await import("../tests/support/trustforge-paid-core-seams");';
+    expect(TEST_SUPPORT_IMPORT.test(dynamic)).toBe(true);
   });
 
   it("scans every productive root", () => {

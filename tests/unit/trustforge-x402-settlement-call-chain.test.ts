@@ -35,15 +35,13 @@ vi.mock("../../tools/trustforge/x402-thin-settlement-executor", async (importOri
     await importOriginal<typeof import("../../tools/trustforge/x402-thin-settlement-executor")>();
   return {
     ...actual,
-    __testOnlyExecuteThinX402SettlementCore: vi.fn(
-      actual.__testOnlyExecuteThinX402SettlementCore,
-    ),
+    executeThinX402SettlementCore: vi.fn(actual.executeThinX402SettlementCore),
   };
 });
 
-import { __testOnlyRunX402PaidSettlementCore as runX402PaidSettlement } from "../../tools/trustforge/x402-paid-settlement-runner";
+import { runX402PaidSettlement } from "../support/trustforge-paid-core-seams";
 import { executeSingleX402Settlement } from "../../tools/trustforge/x402-single-settlement-executor";
-import { __testOnlyExecuteThinX402SettlementCore as executeThinX402Settlement } from "../../tools/trustforge/x402-thin-settlement-executor";
+import { executeThinX402SettlementCore as executeThinX402Settlement } from "../../tools/trustforge/x402-thin-settlement-executor";
 import {
   MAINNET_X402_SETTLEMENT_PROFILE,
   SEPOLIA_X402_SETTLEMENT_PROFILE,

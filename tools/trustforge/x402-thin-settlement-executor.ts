@@ -100,7 +100,8 @@ export interface ThinSettlementExecutionInput {
   readonly skipFreshnessPreflight?: boolean;
 }
 
-async function executeThinX402SettlementCore(
+/** Implementation core. Productive callers must use executeThinX402Settlement. */
+export async function executeThinX402SettlementCore(
   input: ThinSettlementExecutionInput,
 ): Promise<ThinSettlementExecutionResult> {
   const env = input.env ?? process.env;
@@ -230,11 +231,4 @@ export async function executeThinX402Settlement(
 ): Promise<ThinSettlementExecutionResult> {
   void input;
   assertB2BuyerSignedAuthorizationPipelineImplemented();
-}
-
-/** Explicit test-only seam for deterministic wrapper tests. */
-export async function __testOnlyExecuteThinX402SettlementCore(
-  input: ThinSettlementExecutionInput,
-): Promise<ThinSettlementExecutionResult> {
-  return executeThinX402SettlementCore(input);
 }

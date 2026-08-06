@@ -144,7 +144,8 @@ export interface Phase6RunOptions {
   readonly now?: Date;
 }
 
-async function runPhase6SinglePaidRichProbeCore(
+/** Implementation core. Productive callers must use runPhase6SinglePaidRichProbe. */
+export async function runPhase6SinglePaidRichProbeCore(
   options: Phase6RunOptions = {},
 ): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
   const phase5RunDir = options.phase5RunDir ?? DEFAULT_PHASE5_RUN;
@@ -338,13 +339,6 @@ export async function runPhase6SinglePaidRichProbe(
   if (!options.finalizeOnly) {
     assertB2BuyerSignedAuthorizationPipelineImplemented();
   }
-  return runPhase6SinglePaidRichProbeCore(options);
-}
-
-/** Explicit test-only seam for historical keyless preflight/core tests. */
-export async function __testOnlyRunPhase6SinglePaidRichProbeCore(
-  options: Phase6RunOptions = {},
-): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
   return runPhase6SinglePaidRichProbeCore(options);
 }
 

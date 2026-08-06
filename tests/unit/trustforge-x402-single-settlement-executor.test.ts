@@ -7,10 +7,10 @@ import * as networkGuards from "../../tools/trustforge/settlement-network-guards
 import {
   assertPaymentRequiredRailMatchesIntent,
   decodePaymentRequiredHeader,
-  __testOnlyExecuteSingleX402SettlementCore as executeSingleX402Settlement,
   persistSettlementIntent,
   type SingleSettlementRequest,
 } from "../../tools/trustforge/x402-single-settlement-executor";
+import { executeSingleX402Settlement } from "../support/trustforge-paid-core-seams";
 import { buildSettlementIntent } from "../../tools/trustforge/settlement-run-binding";
 import {
   TEST_SIGNING_ADDRESS_A,

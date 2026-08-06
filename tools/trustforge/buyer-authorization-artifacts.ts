@@ -7,12 +7,22 @@
  * never written down.
  *
  * Writes go to a temporary file, are flushed where the platform supports it, and
- * are renamed into place with exclusive creation, so a half-written artifact can
- * never be mistaken for a complete one and an existing artifact is never
- * overwritten.
+ * are published with COPYFILE_EXCL (exclusive create of the destination). On
+ * Windows, rename would overwrite an existing destination; exclusive copy refuses
+ * that, so write-once does not depend on a TOCTOU existsSync check alone.
  */
 
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 import { canonicalJson, canonicalJsonSha256 } from "./x402-seller-requirements-binding";
@@ -53,7 +63,7 @@ export function writeArtifactOnce(path: string, value: unknown): {
   }
   mkdirSync(dirname(path), { recursive: true });
   const body = `${canonicalJson(value)}\n`;
-  const temporary = `${path}.tmp-${process.pid}`;
+  const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
   let handle: number | null = null;
   try {
     handle = openSync(temporary, "wx");
@@ -61,17 +71,27 @@ export function writeArtifactOnce(path: string, value: unknown): {
     try {
       fsyncSync(handle);
     } catch {
-      // flushing is best-effort; the exclusive rename below is what guarantees
-      // that a partially written file is never observed under the real name
+      // flushing is best-effort on platforms that reject it for this fd type
     }
     closeSync(handle);
     handle = null;
-    if (existsSync(path)) {
-      throw new Error(
-        `${BLOCKED_BUYER_ARTIFACT_OVERWRITE}: ${path} appeared while writing; refusing to overwrite`,
-      );
+    try {
+      // Exclusive create of the final name. Unlike rename on Windows, this fails
+      // if the destination already exists instead of silently replacing it.
+      copyFileSync(temporary, path, constants.COPYFILE_EXCL);
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : null;
+      if (code === "EEXIST" || existsSync(path)) {
+        throw new Error(
+          `${BLOCKED_BUYER_ARTIFACT_OVERWRITE}: ${path} already exists and buyer authorization artifacts are write-once`,
+        );
+      }
+      throw error;
     }
-    renameSync(temporary, path);
+    unlinkSync(temporary);
   } finally {
     if (handle !== null) {
       try {

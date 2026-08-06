@@ -4,7 +4,6 @@ import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
   defaultExternalPaidReadinessRunDir,
   requestFromPaidPolicy,
-  __testOnlyRunExternalPaidProbeCore as runExternalPaidProbe,
   sanitizeForExternalPaidEvidence,
   validatePaidResponseForPolicy,
   validateExternalPaidArming,
@@ -14,6 +13,7 @@ import {
   type ExternalPaidRequestContext,
   type PaidResponse,
 } from "../../tools/trustforge/external-x402-paid-executor";
+import { runExternalPaidProbe } from "../support/trustforge-paid-core-seams";
 import {
   ONESOURCE_ETHEREUM_CHAIN_ID_POLICY,
   resolveExternalX402GetProbePolicy,

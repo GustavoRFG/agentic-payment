@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { __testOnlyRunX402PaidSettlementCore as runX402PaidSettlement } from "../../tools/trustforge/x402-paid-settlement-runner";
+import { runX402PaidSettlement } from "../support/trustforge-paid-core-seams";
 import { MAINNET_X402_SETTLEMENT_PROFILE } from "../../tools/trustforge/x402-settlement-profile";
 
 let runDir: string;

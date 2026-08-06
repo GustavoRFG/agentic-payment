@@ -6,10 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
   requestFromPaidPolicy,
-  __testOnlyRunExternalPaidProbeCore as runExternalPaidProbe,
   writeExternalPaidReadinessArtifacts,
   type ExternalPaidRequestContext,
 } from "../../tools/trustforge/external-x402-paid-executor";
+import { runExternalPaidProbe } from "../support/trustforge-paid-core-seams";
 import { ONESOURCE_ETHEREUM_CHAIN_ID_POLICY } from "../../tools/trustforge/external-x402-get-policy";
 import type { ExternalHandshakeInspection } from "../../tools/trustforge/external-x402-get-adapter";
 

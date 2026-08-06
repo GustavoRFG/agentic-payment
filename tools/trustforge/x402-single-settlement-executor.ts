@@ -176,7 +176,8 @@ export interface SingleSettlementExecutionInput {
   readonly paymentBearingGuard?: ReturnType<typeof createPaymentBearingRequestGuard>;
 }
 
-async function executeSingleX402SettlementCore(
+/** Implementation core. Productive callers must use executeSingleX402Settlement. */
+export async function executeSingleX402SettlementCore(
   input: SingleSettlementExecutionInput,
 ): Promise<SingleSettlementExecutionResult> {
   const env = input.env ?? process.env;
@@ -415,14 +416,4 @@ export async function executeSingleX402Settlement(
 ): Promise<SingleSettlementExecutionResult> {
   void input;
   assertB2BuyerSignedAuthorizationPipelineImplemented();
-}
-
-/**
- * Explicit test-only seam for legacy deterministic core tests. Productive CLIs
- * and runners import executeSingleX402Settlement, never this symbol.
- */
-export async function __testOnlyExecuteSingleX402SettlementCore(
-  input: SingleSettlementExecutionInput,
-): Promise<SingleSettlementExecutionResult> {
-  return executeSingleX402SettlementCore(input);
 }

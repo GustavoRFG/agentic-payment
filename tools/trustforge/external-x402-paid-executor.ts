@@ -448,7 +448,8 @@ function result(
   };
 }
 
-async function runExternalPaidProbeCore(
+/** Implementation core. Productive execute-paid callers must use runExternalPaidProbe. */
+export async function runExternalPaidProbeCore(
   options: ExternalPaidProbeOptions,
   dependencies: ExternalPaidProbeDependencies,
 ): Promise<ExternalPaidProbeResult> {
@@ -578,14 +579,6 @@ export async function runExternalPaidProbe(
   if (options.mode === "execute-paid") {
     assertB2BuyerSignedAuthorizationPipelineImplemented();
   }
-  return runExternalPaidProbeCore(options, dependencies);
-}
-
-/** Explicit test-only seam for historical deterministic paid-core tests. */
-export async function __testOnlyRunExternalPaidProbeCore(
-  options: ExternalPaidProbeOptions,
-  dependencies: ExternalPaidProbeDependencies,
-): Promise<ExternalPaidProbeResult> {
   return runExternalPaidProbeCore(options, dependencies);
 }
 

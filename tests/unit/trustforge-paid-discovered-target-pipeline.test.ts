@@ -9,7 +9,7 @@ import {
   PENDING_HUMAN_DECISION,
 } from "../../tools/run-trustforge-emit-paid-authorization-draft";
 import { evaluateFresh402AgainstAuthorizedQuote } from "../../tools/trustforge/paid-quote-freshness-preflight";
-import { __testOnlyRunPhase6SinglePaidRichProbeCore as runPhase6SinglePaidRichProbe } from "../../tools/run-trustforge-phase6-single-paid-rich-probe";
+import { runPhase6SinglePaidRichProbe } from "../support/trustforge-paid-core-seams";
 import { validateHumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
 import {
   PHASE2_FIXTURE_TX,
