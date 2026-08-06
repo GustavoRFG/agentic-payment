@@ -173,6 +173,7 @@ import {
 } from "./buyer-authorization-state-machine";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 import { canonicalCaip2ChainId } from "./x402-network-identity";
+import { BLOCKED_B2_REAL_SIGNER_NOT_AUTHORIZED } from "./b2-execution-gates";
 
 export interface BuyerAuthorizationPipelineResult {
   readonly attempt_id: string;
@@ -190,14 +191,121 @@ export interface BuyerAuthorizationPipelineResult {
   readonly resumable_for_send: false;
 }
 
+export interface BuyerAuthorizationPrepareOnlyResult {
+  readonly attempt_id: string;
+  readonly state: Extract<BuyerAuthorizationState, "UNSIGNED_PERSISTED">;
+  readonly unsigned_artifact_sha256: string;
+  readonly canonical_unsigned_payload_sha256: string;
+  readonly sent: false;
+  readonly payment_header_created: false;
+  readonly payment_bearing_request_count: 0;
+  readonly real_signer_invoked: false;
+  readonly stopped_at: typeof BLOCKED_B2_REAL_SIGNER_NOT_AUTHORIZED;
+}
+
 /**
- * validate -> reserve -> nonce -> build -> persist unsigned -> sign ->
- * persist signed -> abandon (no send).
- *
- * Binding mismatches are checked before the nonce source is touched. The signer
- * is only reached after the unsigned artifact is on disk. B.2 has no send path,
- * so a successful run always ends TERMINAL_ABANDONED_REAUTHORIZE: the signature
- * exists on disk and may never be resumed.
+ * Prepare-only productive path: validate → reserve → nonce → persist unsigned →
+ * stop before any real signer. Never creates a signed artifact and never sends.
+ */
+export function runBuyerAuthorizationPrepareOnly(input: {
+  readonly directory: string;
+  readonly runId: string;
+  readonly attemptId: string;
+  readonly commitSha: string | null;
+  readonly registry: BuyerAttemptRegistry;
+  readonly nonceSource: BuyerNonceSource;
+  readonly now: Date;
+  readonly prepared: Omit<PreparedAuthorizationInput, "nonce">;
+}): BuyerAuthorizationPrepareOnlyResult {
+  validateFreshAuthorizedRequirements(input.prepared);
+  resolveEip3009Domain({
+    observation: input.prepared.paytimeObservation,
+    authorizedAsset: input.prepared.paytimeObservation.binding.asset,
+  });
+
+  let state: BuyerAuthorizationState = "RESERVED";
+  const reserved = input.registry.reserve({
+    attemptId: input.attemptId,
+    runId: input.runId,
+    nonceSource: input.nonceSource,
+    now: input.now,
+  });
+  assertReachableInB2(state);
+
+  const binding = input.prepared.paytimeObservation.binding;
+  const provenance = {
+    schema_version: "trustforge_buyer_authorization_artifact_v0.1.0",
+    run_id: input.runId,
+    attempt_id: input.attemptId,
+    commit_sha: input.commitSha,
+    created_at: input.now.toISOString(),
+  } as const;
+
+  persistAttemptArtifact(input.directory, {
+    ...provenance,
+    state: "RESERVED",
+    reserved_at: reserved.reserved_at,
+    endpoint: input.prepared.authorizedEndpoint,
+    method: input.prepared.authorizedMethod,
+    max_payment_attempts: 1,
+    allow_retry: false,
+  });
+
+  const unsigned = buildUnsignedBuyerAuthorization({ ...input.prepared, nonce: reserved.nonce });
+  const unsignedArtifact: UnsignedArtifact = {
+    ...provenance,
+    state: "UNSIGNED_PERSISTED",
+    signing_time: unsigned.signing_time,
+    human_authorization_sha256: canonicalJsonSha256(input.prepared.humanAuthorization),
+    canonical_requirements_sha256: binding.canonical_requirements_sha256,
+    canonical_envelope_sha256: binding.canonical_envelope_sha256,
+    request_binding_sha256: binding.request_binding_sha256,
+    endpoint: input.prepared.authorizedEndpoint,
+    method: input.prepared.authorizedMethod,
+    protocol_version: binding.protocol_version,
+    seller_network_raw: binding.seller_network_raw,
+    canonical_network_caip2: binding.canonical_network_caip2,
+    chain_id: canonicalCaip2ChainId(binding.canonical_network_caip2),
+    asset: binding.asset,
+    pay_to: binding.pay_to,
+    seller_amount_atomic: unsigned.seller_amount_atomic,
+    maximum_authorized_amount_atomic: unsigned.maximum_authorized_amount_atomic,
+    buyer_wallet: unsigned.message.from,
+    paytime_requirements_observed_at:
+      input.prepared.paytimeObservation.requirements_observed_at,
+    effective_signing_deadline: unsigned.effective_signing_deadline,
+    valid_after: unsigned.message.validAfter,
+    valid_before: unsigned.message.validBefore,
+    nonce: unsigned.message.nonce,
+    domain: unsigned.domain,
+    domain_provenance: unsigned.domain_provenance,
+    types: unsigned.types,
+    primary_type: unsigned.primary_type,
+    message: unsigned.message,
+    canonical_unsigned_payload_sha256: unsigned.canonical_unsigned_payload_sha256,
+  };
+
+  assertLegalTransition(state, "UNSIGNED_PERSISTED");
+  const unsignedWrite = persistUnsignedArtifact(input.directory, unsignedArtifact);
+  state = "UNSIGNED_PERSISTED";
+
+  // Real signer / wallet lookup / payment header / send are not connected.
+  return {
+    attempt_id: input.attemptId,
+    state,
+    unsigned_artifact_sha256: unsignedWrite.sha256,
+    canonical_unsigned_payload_sha256: unsigned.canonical_unsigned_payload_sha256,
+    sent: false,
+    payment_header_created: false,
+    payment_bearing_request_count: 0,
+    real_signer_invoked: false,
+    stopped_at: BLOCKED_B2_REAL_SIGNER_NOT_AUTHORIZED,
+  };
+}
+
+/**
+ * Offline fixture pipeline with injected signer: validate → reserve → nonce →
+ * unsigned persist → sign → signed persist → abandon. Not a productive send path.
  */
 export async function runBuyerAuthorizationPipeline(input: {
   readonly directory: string;

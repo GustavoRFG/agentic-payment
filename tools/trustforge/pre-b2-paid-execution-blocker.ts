@@ -1,15 +1,19 @@
 /**
- * Absolute production blocker until B.2 owns buyer nonce creation, unsigned and
- * signed payload persistence, signing, and the single payment-bearing send.
- *
- * This module deliberately has no environment-variable escape hatch.
+ * Absolute production gates for B.2. Prepare-only activation is controlled by
+ * the versioned policy module; this file re-exports the granular blockers so
+ * historical imports keep working without an environment escape hatch.
  */
 
-export const BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED =
-  "BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED" as const;
-
-export function assertB2BuyerSignedAuthorizationPipelineImplemented(): never {
-  throw new Error(
-    `${BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED}: buyer authorization preparation, persistence, signing, and controlled send are deferred to B.2`,
-  );
-}
+export {
+  BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED,
+  BLOCKED_B2_HUMAN_PAYMENT_AUTHORIZATION_MISSING,
+  BLOCKED_B2_PAYMENT_BEARING_SEND_NOT_AUTHORIZED,
+  BLOCKED_B2_PREPARE_ACTIVATION_POLICY_INVALID,
+  BLOCKED_B2_PREPARE_ACTIVATION_POLICY_MISSING,
+  BLOCKED_B2_REAL_SIGNER_NOT_AUTHORIZED,
+  BLOCKED_B2_SETTLEMENT_NOT_AUTHORIZED,
+  assertB2BuyerSignedAuthorizationPipelineImplemented,
+  assertB2PaymentBearingSendNotAuthorized,
+  assertB2RealSignerNotAuthorized,
+  assertB2SettlementNotAuthorized,
+} from "./b2-execution-gates";

@@ -15,16 +15,25 @@ only the exact supported CAIP-2 identifiers. Selection-time observations may
 age during human review, but a fresh exact-hash unsigned 402 is required
 immediately before future signing.
 
-All productive TrustForge paid runners, thin/shared executors, and rich paid
-callers now fail before key inspection, wallet load, nonce RNG, signing, x402
-client/header creation, fetch, intent consumption, or payment-bearing counters
-with `BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED`. The offline
-B.2 buyer-authorization pipeline (reserve → nonce → unsigned persist → injected
-sign → signed persist → abandon) is implemented and tested, but remains inactive
-for production: no productive runner imports or activates it. There is
-no environment bypass. Historical core tests use explicitly named test-only
-dependency seams; B.2 must replace the blocker with persisted unsigned/signed
-buyer authorization gates.
+B.2 pipeline implementation is complete. Independent offline audit
+`PASS_B2_OFFLINE_AUDIT` is recorded under
+`D:\trustforge\artifacts\runs\b2-offline-audit\run_20260806_030405`.
+
+Activation state (do not collapse these into a single ambiguous “B.2 active”):
+
+- B.2 pipeline implementation: complete
+- B.2 prepare-only production activation: active
+  (`config/trustforge_b2_activation_policy.json`)
+- B.2 real signing: inactive (`BLOCKED_B2_REAL_SIGNER_NOT_AUTHORIZED`)
+- B.2 payment-bearing send: inactive
+  (`BLOCKED_B2_PAYMENT_BEARING_SEND_NOT_AUTHORIZED`)
+- B.2 settlement: inactive (`BLOCKED_B2_SETTLEMENT_NOT_AUTHORIZED`)
+
+Productive prepare may reserve an attempt and persist an unsigned artifact only
+with a valid activation policy, concrete human payment authorization, and an
+injected fresh pay-time observation. It never loads a private key, never creates
+a payment header, and never sends. Historical paid-core tests reach
+implementation cores only through `tests/support/`.
 
 Phase 3B (rich `tx_explainer` settlement reconciliation) is **complete (no-payment)**.
 Phase 4 (settlement-first architecture) is **complete (no-payment)** — rich probes

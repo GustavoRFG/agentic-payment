@@ -1,0 +1,14 @@
+{
+  "schema_version": "trustforge_b2_activation_policy.v1",
+  "decision": "activate_prepare_only",
+  "prepare_enabled": true,
+  "real_signing_enabled": false,
+  "payment_bearing_send_enabled": false,
+  "settlement_enabled": false,
+  "retry_enabled": false,
+  "required_b2_commits": ["39fe28c", "49c8952"],
+  "audit_result": "PASS_B2_OFFLINE_AUDIT",
+  "audit_run": "D:\\trustforge\\artifacts\\runs\\b2-offline-audit\\run_20260806_030405",
+  "decided_by": "Gustavo Gomes",
+  "effect": "prepare-only; no private key, signature, payment header, send, or settlement"
+}
