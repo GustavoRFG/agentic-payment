@@ -58,3 +58,18 @@ non-authoritative; signed-but-not-sent attempts terminal-abandoned and requiring
 reauthorization. B.1 creates no buyer nonce or signed payload. A future B.2 must
 refresh an unsigned 402 immediately before signing and require exact authorized
 requirements/envelope hashes.
+
+## B.1 corrective R1
+
+The human decision `REQUEST_B1_CORRECTIVE_R1` keeps every productive paid path
+technically disabled until B.2. The stable blocker is
+`BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED`; it has no
+environment or CLI bypass. Test-only seams may exercise historical deterministic
+core logic but are not imported by productive tools.
+
+Seller network identity is version-aware and exact: x402 v1 `base` maps to
+`eip155:8453`, v1 `base-sepolia` maps to `eip155:84532`, and x402 v2 requires the
+corresponding CAIP-2 string. Numeric, case-folded, whitespace-normalized, and
+heuristic aliases are rejected. Human authorization and future intent bind both
+the raw seller identifier and canonical CAIP-2 identity; seller hashes continue
+to cover the unmodified raw JSON.

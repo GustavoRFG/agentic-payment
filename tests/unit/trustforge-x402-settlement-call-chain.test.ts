@@ -2,7 +2,7 @@
  * Architectural regression guard for the thin x402 settlement call-chain.
  *
  * Proves the parameterized runner traverses exactly:
- *   runX402PaidSettlement -> executeThinX402Settlement -> executeSingleX402Settlement
+ *   test-only runner core -> test-only thin core -> mocked shared core
  * for BOTH Sepolia and mainnet, with only the network profile changing.
  *
  * The test fails if a future refactor makes the runner call the shared core
@@ -33,12 +33,17 @@ vi.mock("../../tools/trustforge/validate-human-payment-authorization", () => ({
 vi.mock("../../tools/trustforge/x402-thin-settlement-executor", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../tools/trustforge/x402-thin-settlement-executor")>();
-  return { ...actual, executeThinX402Settlement: vi.fn(actual.executeThinX402Settlement) };
+  return {
+    ...actual,
+    __testOnlyExecuteThinX402SettlementCore: vi.fn(
+      actual.__testOnlyExecuteThinX402SettlementCore,
+    ),
+  };
 });
 
-import { runX402PaidSettlement } from "../../tools/trustforge/x402-paid-settlement-runner";
+import { __testOnlyRunX402PaidSettlementCore as runX402PaidSettlement } from "../../tools/trustforge/x402-paid-settlement-runner";
 import { executeSingleX402Settlement } from "../../tools/trustforge/x402-single-settlement-executor";
-import { executeThinX402Settlement } from "../../tools/trustforge/x402-thin-settlement-executor";
+import { __testOnlyExecuteThinX402SettlementCore as executeThinX402Settlement } from "../../tools/trustforge/x402-thin-settlement-executor";
 import {
   MAINNET_X402_SETTLEMENT_PROFILE,
   SEPOLIA_X402_SETTLEMENT_PROFILE,
@@ -145,7 +150,7 @@ async function runChain(profile: X402SettlementProfile, _network: string) {
   coreMock.mockResolvedValue(cannedCoreResult(profile) as never);
   const runDir = await makeRunDir(profile);
   try {
-    await runX402PaidSettlement({ runDir, profile });
+    await runX402PaidSettlement({ runDir, profile, executeImpl: executeThinX402Settlement });
   } finally {
     await rm(runDir, { recursive: true, force: true });
   }

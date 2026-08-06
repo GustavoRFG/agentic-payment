@@ -26,7 +26,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const PENDING_HUMAN_DECISION = "PENDING_HUMAN" as const;
 
 export interface HumanPaymentAuthorizationDraft {
-  readonly authorization_schema_version: "trustforge_paid_probe_authorization.v2";
+  readonly authorization_schema_version: "trustforge_paid_probe_authorization.v3";
   readonly decision: typeof PENDING_HUMAN_DECISION;
   readonly allowed_values: readonly ["reject", "authorize_one_payment"];
   readonly provider: string;
@@ -40,6 +40,9 @@ export interface HumanPaymentAuthorizationDraft {
   readonly canonical_envelope_sha256: string;
   readonly x402_version: 1 | 2;
   readonly scheme: string;
+  readonly seller_network_raw: string;
+  readonly canonical_network_caip2: string;
+  /** Operational alias, exactly equal to canonical_network_caip2. */
   readonly network: string;
   readonly asset: string;
   readonly pay_to: string;
@@ -70,7 +73,7 @@ export function buildHumanPaymentAuthorizationDraft(
   const requestBinding = requestBindingFromSelectedCandidate(candidate);
   const requirements = sellerRequirementsFromSelectedCandidate(candidate).binding;
   return {
-    authorization_schema_version: "trustforge_paid_probe_authorization.v2",
+    authorization_schema_version: "trustforge_paid_probe_authorization.v3",
     decision: PENDING_HUMAN_DECISION,
     allowed_values: ["reject", "authorize_one_payment"],
     provider: candidate.provider,
@@ -83,7 +86,9 @@ export function buildHumanPaymentAuthorizationDraft(
     canonical_envelope_sha256: requirements.canonical_envelope_sha256,
     x402_version: requirements.protocol_version,
     scheme: requirements.scheme,
-    network: requirements.network,
+    seller_network_raw: requirements.seller_network_raw,
+    canonical_network_caip2: requirements.canonical_network_caip2,
+    network: requirements.canonical_network_caip2,
     asset: requirements.asset,
     pay_to: requirements.pay_to,
     amount_atomic: requirements.amount_atomic,

@@ -24,6 +24,7 @@ import {
   persistFacilitatorReceiptArtifact,
   type SanitizedFacilitatorReceipt,
 } from "./facilitator-settlement-receipt";
+import { assertB2BuyerSignedAuthorizationPipelineImplemented } from "./pre-b2-paid-execution-blocker";
 
 export {
   extractFacilitatorHashFromResponse,
@@ -70,6 +71,9 @@ export interface SingleSettlementRequest {
   readonly canonicalRequirementsSha256?: string;
   readonly canonicalEnvelopeSha256?: string;
   readonly selectionRequirementsObservedAt?: string;
+  readonly protocolVersion?: 1 | 2;
+  readonly sellerNetworkRaw?: string;
+  readonly canonicalNetworkCaip2?: string;
   readonly paytimeRequirementsObservedAt?: string | null;
   readonly effectiveSigningDeadline?: string | null;
   readonly attemptId?: string;
@@ -164,13 +168,17 @@ export async function persistSettlementIntent(
   return path;
 }
 
-export async function executeSingleX402Settlement(input: {
+export interface SingleSettlementExecutionInput {
   readonly request: SingleSettlementRequest;
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly paidInvocationGuard?: ReturnType<typeof createPaidInvocationGuard>;
   readonly paymentBearingGuard?: ReturnType<typeof createPaymentBearingRequestGuard>;
-}): Promise<SingleSettlementExecutionResult> {
+}
+
+async function executeSingleX402SettlementCore(
+  input: SingleSettlementExecutionInput,
+): Promise<SingleSettlementExecutionResult> {
   const env = input.env ?? process.env;
   const req = input.request;
   // Pre-live method binding, checked before the key is even read: an authorization for
@@ -225,7 +233,10 @@ export async function executeSingleX402Settlement(input: {
   if (
     !req.canonicalRequirementsSha256 ||
     !req.canonicalEnvelopeSha256 ||
-    !req.selectionRequirementsObservedAt
+    !req.selectionRequirementsObservedAt ||
+    !req.protocolVersion ||
+    !req.sellerNetworkRaw ||
+    !req.canonicalNetworkCaip2
   ) {
     throw new Error(
       "REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED: settlement request lacks seller requirements binding",
@@ -243,6 +254,9 @@ export async function executeSingleX402Settlement(input: {
     selectionRequirementsObservedAt: req.selectionRequirementsObservedAt,
     paytimeRequirementsObservedAt: req.paytimeRequirementsObservedAt,
     effectiveSigningDeadline: req.effectiveSigningDeadline,
+    protocolVersion: req.protocolVersion,
+    sellerNetworkRaw: req.sellerNetworkRaw,
+    canonicalNetworkCaip2: req.canonicalNetworkCaip2,
     network: req.network,
     buyer: req.expectedBuyerAddress,
     payTo: req.payTo,
@@ -393,4 +407,22 @@ export async function executeSingleX402Settlement(input: {
       outbound_request_binding_sha256: outboundRequestBinding.binding_sha256,
     },
   };
+}
+
+/** Production entry point. B.2 must replace this absolute blocker. */
+export async function executeSingleX402Settlement(
+  input: SingleSettlementExecutionInput,
+): Promise<SingleSettlementExecutionResult> {
+  void input;
+  assertB2BuyerSignedAuthorizationPipelineImplemented();
+}
+
+/**
+ * Explicit test-only seam for legacy deterministic core tests. Productive CLIs
+ * and runners import executeSingleX402Settlement, never this symbol.
+ */
+export async function __testOnlyExecuteSingleX402SettlementCore(
+  input: SingleSettlementExecutionInput,
+): Promise<SingleSettlementExecutionResult> {
+  return executeSingleX402SettlementCore(input);
 }

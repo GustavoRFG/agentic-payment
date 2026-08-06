@@ -6,11 +6,22 @@ consumed by autonomous agents. The core value is semantic correctness
 verification of purchased third-party artifacts over time.
 
 ## Current Phase
-Seller requirements binding B.1 is implemented in no-payment mode. x402 v1/v2
-seller requirements are now version-validated and canonically bound without
-requiring seller `nonce`/`expiresAt`; buyer nonce generation/signing remains
-deferred to B.2. Selection-time observations may age during human review, but a
-fresh exact-hash unsigned 402 is required immediately before future signing.
+Seller requirements binding B.1 plus corrective R1 are implemented in
+no-payment mode. x402 v1/v2 seller requirements are version-validated and
+canonically bound without requiring seller `nonce`/`expiresAt`. v1 `base` and
+`base-sepolia` are mapped explicitly to their CAIP-2 execution identities while
+the raw seller value remains inside the requirements/envelope hashes; v2 accepts
+only the exact supported CAIP-2 identifiers. Selection-time observations may
+age during human review, but a fresh exact-hash unsigned 402 is required
+immediately before future signing.
+
+All productive TrustForge paid runners, thin/shared executors, and rich paid
+callers now fail before key inspection, wallet load, nonce RNG, signing, x402
+client/header creation, fetch, intent consumption, or payment-bearing counters
+with `BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED`. There is
+no environment bypass. Historical core tests use explicitly named test-only
+dependency seams; B.2 must replace the blocker with persisted unsigned/signed
+buyer authorization gates.
 
 Phase 3B (rich `tx_explainer` settlement reconciliation) is **complete (no-payment)**.
 Phase 4 (settlement-first architecture) is **complete (no-payment)** — rich probes

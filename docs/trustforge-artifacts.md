@@ -58,8 +58,8 @@ final report. Run `run_20260614_010720` is the first real paid T0C smoke (PASS).
 
 ## Thin settlement request binding
 
-Fresh discovery output uses `trustforge_target_selection.v3` and
-`trustforge_target_resolution_evidence.v3`. Primary/fallback candidates and the
+Fresh discovery output uses `trustforge_target_selection.v4` and
+`trustforge_target_resolution_evidence.v4`. Primary/fallback candidates and the
 corresponding evidence persist the canonical request endpoint, method, query,
 body, input provenance, and `request_binding_sha256`. A
 `selected_candidate.json` must carry the identical fields and hash. Artifacts
@@ -70,9 +70,12 @@ empty request input.
 The same discovery artifacts now persist the full protocol-versioned seller
 `PaymentRequirements`, `requirements_observed_at`, normalized requirements
 binding, and canonical requirements/envelope SHA-256 hashes. The selected
-candidate schema is `trustforge_selected_candidate.v2`; the human authorization
-schema is `trustforge_paid_probe_authorization.v2`; and the prepared settlement
-intent schema is `trustforge_settlement_intent.v2`. Older artifacts without the
+candidate schema is `trustforge_selected_candidate.v3`; the human authorization
+schema is `trustforge_paid_probe_authorization.v3`; and the prepared settlement
+intent schema is `trustforge_settlement_intent.v3`. These artifacts persist
+`seller_network_raw` separately from `canonical_network_caip2`; the former stays
+inside the seller hashes and the latter is the exact execution/chain profile.
+Older artifacts without the
 seller binding fail closed with
 `REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED`; hashes are never rebuilt
 from quote, asset, or `payTo` summaries.
@@ -81,6 +84,11 @@ Tempo `WWW-Authenticate` `method`/`id`/`expires` values are retained only as
 typed ancillary evidence (`authoritative: false`,
 `used_as_eip3009_nonce: false`). They are not x402 core timeout or buyer
 EIP-3009 nonce/validity fields.
+
+Until B.2, prepared intent fields do not make a run executable. Productive paid
+entry points stop unconditionally with
+`BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED` before any key,
+nonce, signer, payment header, fetch, or intent-consumption side effect.
 
 Rich Phase 5 `selected_candidate.json` and
 `human_payment_authorization_template.json` artifacts also carry the canonical

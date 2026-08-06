@@ -142,6 +142,39 @@ describe("validateHumanPaymentAuthorization", () => {
     expect(result.reasons.join(" ")).toContain("BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH");
   });
 
+  it("binds v1 raw Base plus canonical CAIP-2 through candidate and authorization", () => {
+    const requirements = sellerRequirementsFixture({
+      ...SELLER_INPUT,
+      protocolVersion: 1,
+      network: "base",
+      requestBindingSha256: POST_BINDING.binding_sha256,
+    });
+    const v1Selected = {
+      ...selected,
+      ...selectedCandidateSellerFields(requirements),
+      network: "eip155:8453",
+    };
+    const v1Auth: HumanPaymentAuthorization = {
+      ...validAuth,
+      ...humanAuthorizationSellerFields(requirements, {
+        maximumAuthorizedAmountAtomic: "100000",
+        decidedAt: "2026-06-15T06:30:00.000Z",
+      }),
+    };
+    expect(v1Selected.seller_network_raw).toBe("base");
+    expect(v1Selected.canonical_network_caip2).toBe("eip155:8453");
+    expect(validateHumanPaymentAuthorization(v1Auth, v1Selected)).toEqual({
+      valid: true,
+      reasons: [],
+    });
+    expect(
+      validateHumanPaymentAuthorization(
+        { ...v1Auth, canonical_network_caip2: "eip155:84532" },
+        v1Selected,
+      ).valid,
+    ).toBe(false);
+  });
+
   it("rejects missing or divergent seller requirements hashes", () => {
     const { canonical_requirements_sha256: _missing, ...withoutRequirementsHash } = validAuth;
     expect(

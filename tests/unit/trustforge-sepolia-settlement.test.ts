@@ -233,6 +233,8 @@ describe("Sepolia settlement proof pipeline", () => {
         selectedAccept: {
           scheme: "exact",
           network: TESTNET_NETWORK,
+          sellerNetworkRaw: TESTNET_NETWORK,
+          canonicalNetworkCaip2: TESTNET_NETWORK,
           asset: TESTNET_USDC_ADDRESS,
           amountAtomic: "1000",
           payTo: SEPOLIA_TESTNET_BUYER_WALLET,
@@ -257,6 +259,9 @@ describe("Sepolia settlement proof pipeline", () => {
         quote_atomic: "1000",
         authorized_max_usdc: "0.002",
         pay_to: SEPOLIA_TESTNET_BUYER_WALLET,
+        seller_network_raw: sellerRequirements.binding.seller_network_raw,
+        canonical_network_caip2:
+          sellerRequirements.binding.canonical_network_caip2,
         network: TESTNET_NETWORK,
         asset: TESTNET_USDC_ADDRESS,
       },
@@ -350,6 +355,9 @@ describe("Sepolia settlement proof pipeline", () => {
       canonicalRequirementsSha256: "b".repeat(64),
       canonicalEnvelopeSha256: "c".repeat(64),
       selectionRequirementsObservedAt: "2026-06-21T04:53:00.000Z",
+      protocolVersion: 2,
+      sellerNetworkRaw: TESTNET_NETWORK,
+      canonicalNetworkCaip2: TESTNET_NETWORK,
       requestBindingSha256: "d".repeat(64),
       network: TESTNET_NETWORK,
       buyer: SEPOLIA_TESTNET_BUYER_WALLET,

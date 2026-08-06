@@ -6,6 +6,7 @@ import {
   parseAndBindSellerPaymentRequirements,
   type SellerRequirementsObservation,
 } from "../../tools/trustforge/x402-seller-requirements-binding";
+import { normalizeX402NetworkIdentity } from "../../tools/trustforge/x402-network-identity";
 
 export const TEST_REQUIREMENTS_OBSERVED_AT = "2026-08-05T05:00:00.000Z";
 export const TEST_AUTHORIZATION_DECIDED_AT = "2026-08-05T05:01:00.000Z";
@@ -13,6 +14,7 @@ export const TEST_AUTHORIZATION_DECIDED_AT = "2026-08-05T05:01:00.000Z";
 export function sellerRequirementsFixture(input: {
   readonly requestBindingSha256: string;
   readonly network: string;
+  readonly protocolVersion?: 1 | 2;
   readonly asset: string;
   readonly payTo: string;
   readonly amountAtomic: string;
@@ -21,31 +23,46 @@ export function sellerRequirementsFixture(input: {
   readonly observedAt?: string;
   readonly extra?: Record<string, unknown>;
 }): SellerRequirementsObservation {
-  const requirement = {
+  const protocolVersion = input.protocolVersion ?? 2;
+  const common = {
     scheme: "exact",
     network: input.network,
-    amount: input.amountAtomic,
     asset: input.asset,
     payTo: input.payTo,
     maxTimeoutSeconds: input.maxTimeoutSeconds ?? 300,
     extra: input.extra ?? { name: "USD Coin", version: "2" },
   };
-  const envelope = {
-    x402Version: 2,
-    resource: {
-      url: input.endpoint ?? "https://seller.example/paid",
-      description: "deterministic x402 v2 test fixture",
-      mimeType: "application/json",
-    },
-    accepts: [requirement],
-  };
+  const requirement =
+    protocolVersion === 1
+      ? {
+          ...common,
+          maxAmountRequired: input.amountAtomic,
+          resource: input.endpoint ?? "https://seller.example/paid",
+          description: "deterministic x402 v1 test fixture",
+        }
+      : { ...common, amount: input.amountAtomic };
+  const envelope =
+    protocolVersion === 1
+      ? { x402Version: 1, accepts: [requirement] }
+      : {
+          x402Version: 2,
+          resource: {
+            url: input.endpoint ?? "https://seller.example/paid",
+            description: "deterministic x402 v2 test fixture",
+            mimeType: "application/json",
+          },
+          accepts: [requirement],
+        };
   const result = parseAndBindSellerPaymentRequirements({
-    headers: {
-      "payment-required": Buffer.from(JSON.stringify(envelope), "utf8").toString("base64"),
-    },
-    body: null,
+    headers:
+      protocolVersion === 2
+        ? {
+            "payment-required": Buffer.from(JSON.stringify(envelope), "utf8").toString("base64"),
+          }
+        : {},
+    body: protocolVersion === 1 ? envelope : null,
     requestBindingSha256: input.requestBindingSha256,
-    expectedNetwork: input.network,
+    expectedNetwork: normalizeX402NetworkIdentity(protocolVersion, input.network).canonical_caip2,
     expectedAsset: input.asset,
     requirementsObservedAt: input.observedAt ?? TEST_REQUIREMENTS_OBSERVED_AT,
   });
@@ -56,10 +73,13 @@ export function sellerRequirementsFixture(input: {
 export function selectedCandidateSellerFields(observation: SellerRequirementsObservation) {
   const binding = observation.binding;
   return {
-    schema_version: "trustforge_selected_candidate.v2" as const,
+    schema_version: "trustforge_selected_candidate.v3" as const,
     protocol_version: binding.protocol_version,
     transport: binding.transport,
     scheme: binding.scheme,
+    seller_network_raw: binding.seller_network_raw,
+    canonical_network_caip2: binding.canonical_network_caip2,
+    network: binding.canonical_network_caip2,
     amount_field: binding.amount_field,
     max_timeout_seconds: binding.max_timeout_seconds,
     resource: binding.resource,
@@ -84,12 +104,14 @@ export function humanAuthorizationSellerFields(
   const decidedAt = options.decidedAt ?? TEST_AUTHORIZATION_DECIDED_AT;
   const ttlSeconds = options.ttlSeconds ?? HUMAN_AUTHORIZATION_DEFAULT_TTL_SECONDS;
   return {
-    authorization_schema_version: "trustforge_paid_probe_authorization.v2",
+    authorization_schema_version: "trustforge_paid_probe_authorization.v3",
     canonical_requirements_sha256: binding.canonical_requirements_sha256,
     canonical_envelope_sha256: binding.canonical_envelope_sha256,
     x402_version: binding.protocol_version,
     scheme: binding.scheme,
-    network: binding.network,
+    seller_network_raw: binding.seller_network_raw,
+    canonical_network_caip2: binding.canonical_network_caip2,
+    network: binding.canonical_network_caip2,
     asset: binding.asset,
     pay_to: binding.pay_to,
     amount_atomic: binding.amount_atomic,

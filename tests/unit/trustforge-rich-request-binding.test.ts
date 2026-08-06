@@ -21,6 +21,7 @@ import {
   createThinSettlementRequestBinding,
   thinSettlementRequestSummary,
 } from "../../tools/trustforge/thin-settlement-request-binding";
+import { BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED } from "../../tools/trustforge/pre-b2-paid-execution-blocker";
 
 const POLICY = ZAPPER_TX_EXPLAINER_POLICY;
 const BINDING = createThinSettlementRequestBinding({
@@ -140,16 +141,15 @@ describe("rich request authorization source", () => {
     expect(input.paymentBearingGuard.getPaymentBearingRequests()).toBe(0);
   });
 
-  it("passes an independently supplied matching hash to the shared executor", async () => {
+  it("blocks a valid rich request before the shared executor until B.2", async () => {
     const input = options();
-    const result = await performRichTxExplainerPaidRequest(input);
+    await expect(performRichTxExplainerPaidRequest(input)).rejects.toThrow(
+      BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED,
+    );
 
-    expect(coreMock).toHaveBeenCalledTimes(1);
-    const request = coreMock.mock.calls[0][0].request;
-    expect(request.authorizedRequestBindingSha256).toBe(BINDING.binding_sha256);
-    expect(request.plannedRequestBinding.binding_sha256).toBe(BINDING.binding_sha256);
-    expect(result.paymentBearingRequestCount).toBe(0);
+    expect(coreMock).not.toHaveBeenCalled();
     expect(input.fetchImpl).not.toHaveBeenCalled();
+    expect(input.paymentBearingGuard.getPaymentBearingRequests()).toBe(0);
   });
 
   it("contains no runtime self-authorization assignment in the rich caller", () => {

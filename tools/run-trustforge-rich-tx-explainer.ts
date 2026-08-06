@@ -46,6 +46,7 @@ import {
   type TrustScore,
 } from "./trustforge/consolidate-bootstrap-trust-score";
 import type { EvaluationResult } from "./trustforge/evaluate-bootstrap-probe";
+import { assertB2BuyerSignedAuthorizationPipelineImplemented } from "./trustforge/pre-b2-paid-execution-blocker";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -169,6 +170,9 @@ export async function runRichTxExplainerPhase3(options: {
   readonly runDir: string;
   readonly resultLines: string[];
 }> {
+  if (options.executePaid) {
+    assertB2BuyerSignedAuthorizationPipelineImplemented();
+  }
   const now = options.now ?? (() => new Date());
   const env = options.env ?? process.env;
   const runDir =
@@ -830,8 +834,11 @@ function buildResult(input: {
 }
 
 async function main(): Promise<number> {
-  loadLocalEnv();
   const executePaid = resolveExecutePaidFlag(process.argv.slice(2));
+  if (executePaid) {
+    assertB2BuyerSignedAuthorizationPipelineImplemented();
+  }
+  loadLocalEnv();
   const result = await runRichTxExplainerPhase3({ executePaid });
   console.log(result.resultLines.join("\n"));
   return result.status.startsWith("PASS") ? 0 : 1;

@@ -7,7 +7,7 @@ import * as networkGuards from "../../tools/trustforge/settlement-network-guards
 import {
   assertPaymentRequiredRailMatchesIntent,
   decodePaymentRequiredHeader,
-  executeSingleX402Settlement,
+  __testOnlyExecuteSingleX402SettlementCore as executeSingleX402Settlement,
   persistSettlementIntent,
   type SingleSettlementRequest,
 } from "../../tools/trustforge/x402-single-settlement-executor";
@@ -84,6 +84,9 @@ function requestBindingFields(endpoint: string, method: "GET" | "POST", body: un
     canonicalRequirementsSha256: "b".repeat(64),
     canonicalEnvelopeSha256: "c".repeat(64),
     selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
+    protocolVersion: 2 as const,
+    sellerNetworkRaw: TESTNET_NETWORK,
+    canonicalNetworkCaip2: TESTNET_NETWORK,
   };
 }
 
@@ -169,6 +172,9 @@ describe("x402-single-settlement-executor pre-live method binding", () => {
         canonicalRequirementsSha256: "b".repeat(64),
         canonicalEnvelopeSha256: "c".repeat(64),
         selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
+        protocolVersion: 2,
+        sellerNetworkRaw: TESTNET_NETWORK,
+        canonicalNetworkCaip2: TESTNET_NETWORK,
         requestBindingSha256: "d".repeat(64),
         network: TESTNET_NETWORK,
         buyer: SEPOLIA_TESTNET_BUYER_WALLET,
@@ -305,6 +311,9 @@ describe("x402-single-settlement-executor", () => {
           canonicalRequirementsSha256: "b".repeat(64),
           canonicalEnvelopeSha256: "c".repeat(64),
           selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
+          protocolVersion: 2,
+          sellerNetworkRaw: TESTNET_NETWORK,
+          canonicalNetworkCaip2: TESTNET_NETWORK,
           require402BeforePayment: false,
         },
         env: { [SEPOLIA_BUYER_PRIVATE_KEY_ENV]: TEST_SIGNING_KEY_A },
@@ -333,6 +342,9 @@ describe("x402-single-settlement-executor", () => {
         canonicalRequirementsSha256: "b".repeat(64),
         canonicalEnvelopeSha256: "c".repeat(64),
         selectionRequirementsObservedAt: "2026-08-05T05:00:00.000Z",
+        protocolVersion: 2,
+        sellerNetworkRaw: TESTNET_NETWORK,
+        canonicalNetworkCaip2: TESTNET_NETWORK,
         requestBindingSha256: "d".repeat(64),
         network: TESTNET_NETWORK,
         buyer: SEPOLIA_TESTNET_BUYER_WALLET,

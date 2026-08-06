@@ -28,6 +28,9 @@ function phase62Intent() {
     requestBindingSha256: "d".repeat(64),
     paytimeRequirementsObservedAt: "2026-06-22T00:26:00.000Z",
     effectiveSigningDeadline: "2026-06-22T00:27:00.000Z",
+    protocolVersion: 2,
+    sellerNetworkRaw: TESTNET_NETWORK,
+    canonicalNetworkCaip2: TESTNET_NETWORK,
     network: TESTNET_NETWORK,
     buyer: SEPOLIA_TESTNET_BUYER_WALLET,
     payTo: PAY_TO,
@@ -54,10 +57,32 @@ const currentTransfer = {
 };
 
 describe("settlement-run-binding temporal repair", () => {
+  it("persists raw and canonical seller network identity without conflation", () => {
+    const intent = buildSettlementIntent({
+      attemptId: "attempt_v1",
+      runId: "run_v1",
+      authorizationHash: "auth-v1",
+      canonicalRequirementsSha256: "b".repeat(64),
+      canonicalEnvelopeSha256: "c".repeat(64),
+      selectionRequirementsObservedAt: "2026-06-22T00:25:00.000Z",
+      requestBindingSha256: "d".repeat(64),
+      protocolVersion: 1,
+      sellerNetworkRaw: "base-sepolia",
+      canonicalNetworkCaip2: TESTNET_NETWORK,
+      network: TESTNET_NETWORK,
+      buyer: SEPOLIA_TESTNET_BUYER_WALLET,
+      payTo: PAY_TO,
+      asset: TESTNET_USDC_ADDRESS,
+      amountAtomic: "1000",
+    });
+    expect(intent.seller_network_raw).toBe("base-sepolia");
+    expect(intent.canonical_network_caip2).toBe(TESTNET_NETWORK);
+    expect(intent.network).toBe(TESTNET_NETWORK);
+  });
   it("reserves B.2 fields without a buyer signature", () => {
     const intent = phase62Intent();
     expect(intent).toMatchObject({
-      schema_version: "trustforge_settlement_intent.v2",
+      schema_version: "trustforge_settlement_intent.v3",
       human_authorization_hash:
         "a6ab2d6b518734e807515e99fb816c1c6669759a1f030693b6ec87cc4d6a1a03",
       canonical_requirements_sha256: "b".repeat(64),
@@ -68,6 +93,9 @@ describe("settlement-run-binding temporal repair", () => {
       effective_signing_deadline: "2026-06-22T00:27:00.000Z",
       buyer_signed_authorization: null,
       attempt_state: "PREPARED_NO_BUYER_SIGNATURE",
+      protocol_version: 2,
+      seller_network_raw: TESTNET_NETWORK,
+      canonical_network_caip2: TESTNET_NETWORK,
     });
   });
 

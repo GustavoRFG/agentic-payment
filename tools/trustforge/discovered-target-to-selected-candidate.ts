@@ -81,6 +81,9 @@ export interface DiscoveredTargetSelectionPrimary {
   readonly quoteAtomic: string;
   readonly selectedPayTo: string | null;
   readonly sellerRequirements?: SellerRequirementsObservation;
+  readonly sellerNetworkRaw?: string;
+  readonly canonicalNetworkCaip2?: string;
+  /** Operational network alias; when present it must equal canonicalNetworkCaip2. */
   readonly network?: string;
   readonly asset?: string;
   readonly scoringRationale: readonly string[];
@@ -98,7 +101,7 @@ export interface DiscoveredTargetSelectionInput {
 }
 
 export interface DiscoveredSelectedCandidate {
-  readonly schema_version: "trustforge_selected_candidate.v2";
+  readonly schema_version: "trustforge_selected_candidate.v3";
   readonly provider: string;
   readonly service_id: string;
   readonly endpoint: string;
@@ -124,6 +127,9 @@ export interface DiscoveredSelectedCandidate {
   readonly quote_atomic: string;
   readonly authorized_pay_to: string;
   readonly recommended_max_usdc: string;
+  readonly seller_network_raw: string;
+  readonly canonical_network_caip2: string;
+  /** Operational network, required to equal canonical_network_caip2. */
   readonly network: string;
   readonly asset: string;
   readonly buyer_wallet: string;
@@ -262,7 +268,10 @@ function sellerRequirementsFromSelectionEntry(
   if (
     binding.amount_atomic !== entry.quoteAtomic ||
     binding.pay_to.toLowerCase() !== (entry.selectedPayTo ?? "").toLowerCase() ||
-    (entry.network && binding.network !== entry.network) ||
+    (entry.sellerNetworkRaw && binding.seller_network_raw !== entry.sellerNetworkRaw) ||
+    (entry.canonicalNetworkCaip2 &&
+      binding.canonical_network_caip2 !== entry.canonicalNetworkCaip2) ||
+    (entry.network && binding.canonical_network_caip2 !== entry.network) ||
     (entry.asset && binding.asset.toLowerCase() !== entry.asset.toLowerCase())
   ) {
     return {
@@ -276,7 +285,7 @@ function sellerRequirementsFromSelectionEntry(
 export function sellerRequirementsFromSelectedCandidate(
   candidate: DiscoveredSelectedCandidate,
 ): SellerRequirementsObservation {
-  if (candidate.schema_version !== "trustforge_selected_candidate.v2" || !candidate.seller_requirements) {
+  if (candidate.schema_version !== "trustforge_selected_candidate.v3" || !candidate.seller_requirements) {
     throw new Error(
       `${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: selected_candidate lacks seller requirements binding`,
     );
@@ -291,7 +300,9 @@ export function sellerRequirementsFromSelectedCandidate(
     candidate.protocol_version === binding.protocol_version &&
     candidate.transport === binding.transport &&
     candidate.scheme === binding.scheme &&
-    candidate.network === binding.network &&
+    candidate.seller_network_raw === binding.seller_network_raw &&
+    candidate.canonical_network_caip2 === binding.canonical_network_caip2 &&
+    candidate.network === binding.canonical_network_caip2 &&
     candidate.asset.toLowerCase() === binding.asset.toLowerCase() &&
     candidate.amount_field === binding.amount_field &&
     candidate.quote_atomic === binding.amount_atomic &&
@@ -541,10 +552,12 @@ export function recommendedAuthorizationMaxUsdc(quoteUsdc: string): string {
 function selectedCandidateRequirementsFields(observation: SellerRequirementsObservation) {
   const binding = observation.binding;
   return {
-    schema_version: "trustforge_selected_candidate.v2" as const,
+    schema_version: "trustforge_selected_candidate.v3" as const,
     protocol_version: binding.protocol_version,
     transport: binding.transport,
     scheme: binding.scheme,
+    seller_network_raw: binding.seller_network_raw,
+    canonical_network_caip2: binding.canonical_network_caip2,
     amount_field: binding.amount_field,
     max_timeout_seconds: binding.max_timeout_seconds,
     resource: binding.resource,
@@ -601,8 +614,8 @@ export function adaptDiscoveredPrimaryToThinSettlementCandidate(
   if (!requirements.ok) return requirements;
 
   const sepoliaPolicy = resolveSepoliaLocalPolicy(primary.resourceUrl);
-  const network = requirements.observation.binding.network;
-  const isSepolia = network === TESTNET_NETWORK || network === "84532";
+  const network = requirements.observation.binding.canonical_network_caip2;
+  const isSepolia = network === TESTNET_NETWORK;
   const asset = requirements.observation.binding.asset;
   const buyerWallet = isSepolia ? SEPOLIA_TESTNET_BUYER_WALLET : MAINNET_BUYER_WALLET;
   const allowlisted = resolveAllowlistedPolicy(primary.resourceUrl);
@@ -681,7 +694,7 @@ export function adaptDiscoveredPrimaryToSelectedCandidate(
   }
 
   const isSepolia = Boolean(sepoliaPolicy);
-  const network = requirements.observation.binding.network;
+  const network = requirements.observation.binding.canonical_network_caip2;
   const asset = requirements.observation.binding.asset;
   const buyerWallet = isSepolia ? SEPOLIA_TESTNET_BUYER_WALLET : MAINNET_BUYER_WALLET;
 

@@ -10,13 +10,21 @@ import { executeThinX402Settlement } from "./x402-thin-settlement-executor";
 import type { X402SettlementProfile } from "./x402-settlement-profile";
 import type { HumanPaymentAuthorization } from "./validate-human-payment-authorization";
 import { hashAuthorizationContent, parseJsonText, readJsonFile } from "./bom-safe-json";
+import { BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED } from "./pre-b2-paid-execution-blocker";
 
-export async function runX402PaidSettlement(input: {
+export interface X402PaidSettlementRunInput {
   readonly runDir: string;
   readonly profile: X402SettlementProfile;
-  /** Injection seam for tests; defaults to the real (untouched) thin executor. */
+}
+
+interface TestOnlyX402PaidSettlementRunInput extends X402PaidSettlementRunInput {
+  /** Test-only dependency seam; never exposed by the productive runner. */
   readonly executeImpl?: typeof executeThinX402Settlement;
-}): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
+}
+
+async function runX402PaidSettlementCore(
+  input: TestOnlyX402PaidSettlementRunInput,
+): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
   const { runDir, profile } = input;
   const executeThin = input.executeImpl ?? executeThinX402Settlement;
   const authPath = join(runDir, "human_payment_authorization.json");
@@ -126,4 +134,34 @@ export async function runX402PaidSettlement(input: {
   ];
   await writeFile(join(runDir, "settlement_probe", "RESULT.txt"), `${lines.join("\n")}\n`, "utf8");
   return { exitCode: 0, lines };
+}
+
+/** Productive runner: absolute no-payment result until B.2 is implemented. */
+export async function runX402PaidSettlement(
+  input: X402PaidSettlementRunInput,
+): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
+  const blocker = BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED;
+  return {
+    exitCode: 1,
+    lines: [
+      "RESULT",
+      `x402_settlement_execution_status: ${blocker}`,
+      `network_profile: ${input.profile.id}`,
+      `run_dir: ${input.runDir}`,
+      "payment_attempted: no",
+      "payment_bearing_http_request_count: 0",
+      `blocked_reason: ${blocker}`,
+      "blocked_detail: buyer signed authorization pipeline is deferred to B.2",
+      "single_shot: yes",
+      "NEXT",
+      "Implement and audit B.2 before any paid execution; no retry or bypass is available.",
+    ],
+  };
+}
+
+/** Explicit test-only seam for historical runner result-capture tests. */
+export async function __testOnlyRunX402PaidSettlementCore(
+  input: TestOnlyX402PaidSettlementRunInput,
+): Promise<{ readonly exitCode: number; readonly lines: string[] }> {
+  return runX402PaidSettlementCore(input);
 }

@@ -4,6 +4,7 @@
 
 import type { SanitizedFacilitatorReceipt } from "./facilitator-settlement-receipt";
 import type { ThinSettlementRequestSummary } from "./thin-settlement-request-binding";
+import { assertX402NetworkMatchesCanonical } from "./x402-network-identity";
 
 export const CLOCK_SKEW_TOLERANCE_MS = 120_000 as const;
 export const ONCHAIN_SETTLEMENT_GRACE_MS = 30 * 60 * 1000 as const;
@@ -21,7 +22,7 @@ export function resolveBindingUpperBoundUtc(input: {
 }
 
 export interface SettlementIntent {
-  readonly schema_version: "trustforge_settlement_intent.v2";
+  readonly schema_version: "trustforge_settlement_intent.v3";
   readonly attempt_id: string;
   readonly run_id: string;
   readonly authorization_hash: string;
@@ -33,6 +34,10 @@ export interface SettlementIntent {
   readonly effective_signing_deadline: string | null;
   readonly buyer_signed_authorization: null;
   readonly attempt_state: "PREPARED_NO_BUYER_SIGNATURE";
+  readonly protocol_version: 1 | 2;
+  readonly seller_network_raw: string;
+  readonly canonical_network_caip2: string;
+  /** Operational network, exactly equal to canonical_network_caip2. */
   readonly network: string;
   readonly buyer: string;
   readonly pay_to: string;
@@ -119,6 +124,9 @@ export function buildSettlementIntent(input: {
   readonly selectionRequirementsObservedAt: string;
   readonly paytimeRequirementsObservedAt?: string | null;
   readonly effectiveSigningDeadline?: string | null;
+  readonly protocolVersion: 1 | 2;
+  readonly sellerNetworkRaw: string;
+  readonly canonicalNetworkCaip2: string;
   readonly network: string;
   readonly buyer: string;
   readonly payTo: string;
@@ -157,8 +165,18 @@ export function buildSettlementIntent(input: {
       "BLOCKED_PAYMENT_REQUIREMENTS_STALE: pay-time observation and effective deadline must be persisted together",
     );
   }
+  assertX402NetworkMatchesCanonical({
+    protocolVersion: input.protocolVersion,
+    sellerNetworkRaw: input.sellerNetworkRaw,
+    canonicalCaip2: input.canonicalNetworkCaip2,
+  });
+  if (input.network !== input.canonicalNetworkCaip2) {
+    throw new Error(
+      "BLOCKED_WRONG_NETWORK: settlement intent operational network differs from canonical CAIP-2",
+    );
+  }
   return {
-    schema_version: "trustforge_settlement_intent.v2",
+    schema_version: "trustforge_settlement_intent.v3",
     attempt_id: input.attemptId,
     run_id: input.runId,
     authorization_hash: input.authorizationHash,
@@ -170,6 +188,9 @@ export function buildSettlementIntent(input: {
     effective_signing_deadline: input.effectiveSigningDeadline ?? null,
     buyer_signed_authorization: null,
     attempt_state: "PREPARED_NO_BUYER_SIGNATURE",
+    protocol_version: input.protocolVersion,
+    seller_network_raw: input.sellerNetworkRaw,
+    canonical_network_caip2: input.canonicalNetworkCaip2,
     network: input.network,
     buyer: input.buyer.toLowerCase(),
     pay_to: input.payTo.toLowerCase(),

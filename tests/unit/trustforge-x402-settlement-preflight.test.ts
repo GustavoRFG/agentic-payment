@@ -131,6 +131,26 @@ function sepoliaCandidate(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function v1Candidate(profile: "mainnet" | "sepolia") {
+  const base = profile === "mainnet" ? mainnetCandidate() : sepoliaCandidate();
+  const rawNetwork = profile === "mainnet" ? "base" : "base-sepolia";
+  const requirements = sellerRequirementsFixture({
+    requestBindingSha256: base.request_binding_sha256,
+    protocolVersion: 1,
+    network: rawNetwork,
+    asset: base.asset,
+    payTo: base.authorized_pay_to,
+    amountAtomic: base.quote_atomic,
+    endpoint: base.endpoint,
+    observedAt: NOW.toISOString(),
+  });
+  return {
+    ...base,
+    ...selectedCandidateSellerFields(requirements),
+    network: requirements.binding.canonical_network_caip2,
+  };
+}
+
 function writeCandidate(runDir: string, candidate: unknown): void {
   writeFileSync(join(runDir, "selected_candidate.json"), `${JSON.stringify(candidate, null, 2)}\n`, "utf8");
 }
@@ -227,6 +247,67 @@ describe("x402 settlement preflight — keyless mainnet + Sepolia", () => {
     expect(result.sepolia_buyer_private_key_present).toBe(false);
     expectNoPayment(result);
   });
+
+  it.each([
+    ["mainnet", 8453, "base", "eip155:8453"],
+    ["sepolia", 84532, "base-sepolia", "eip155:84532"],
+  ] as const)(
+    "x402 v1 %s raw network normalizes and matches the observed chain",
+    async (profile, chainId, raw, canonical) => {
+      const runDir = makeRunDir();
+      writeCandidate(runDir, v1Candidate(profile));
+      const result = await runX402SettlementPreflight({
+        runDir,
+        network: profile,
+        env: {},
+        now: NOW,
+        chainStateReader: readerReturning(chainId),
+        freshness: freshGo,
+      });
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      expect(result.seller_network_raw).toBe(raw);
+      expect(result.canonical_network_caip2).toBe(canonical);
+      expect(result.chain_id_observed).toBe(chainId);
+    },
+  );
+
+  it("blocks a v1 Base candidate when the observed chain is Base Sepolia", async () => {
+    const runDir = makeRunDir();
+    writeCandidate(runDir, v1Candidate("mainnet"));
+    const result = await runX402SettlementPreflight({
+      runDir,
+      network: "mainnet",
+      env: {},
+      now: NOW,
+      chainStateReader: readerReturning(84532),
+      freshness: freshGo,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.blocker).toBe("BLOCKED_WRONG_CHAIN");
+  });
+
+  it.each([
+    ["mainnet", "sepolia"],
+    ["sepolia", "mainnet"],
+  ] as const)(
+    "does not authorize a v1 %s candidate under the %s execution profile",
+    async (candidateProfile, executionProfile) => {
+      const runDir = makeRunDir();
+      writeCandidate(runDir, v1Candidate(candidateProfile));
+      const reader = vi.fn(readerReturning(executionProfile === "mainnet" ? 8453 : 84532));
+      const result = await runX402SettlementPreflight({
+        runDir,
+        network: executionProfile,
+        env: {},
+        now: NOW,
+        chainStateReader: reader,
+        freshness: freshGo,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.blocker).toBe("BLOCKED_WRONG_NETWORK");
+      expect(reader).not.toHaveBeenCalled();
+    },
+  );
 
   it("mainnet preflight accepts a valid non-Zapper selected_candidate endpoint", async () => {
     const runDir = makeRunDir();

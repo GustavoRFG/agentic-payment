@@ -4,7 +4,7 @@ import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
   defaultExternalPaidReadinessRunDir,
   requestFromPaidPolicy,
-  runExternalPaidProbe,
+  __testOnlyRunExternalPaidProbeCore as runExternalPaidProbe,
   sanitizeForExternalPaidEvidence,
   validatePaidResponseForPolicy,
   validateExternalPaidArming,

@@ -62,7 +62,7 @@ describe("human payment authorization DRAFT generator", () => {
   it("writes a PENDING_HUMAN draft with single-shot constraints", () => {
     const draft = buildHumanPaymentAuthorizationDraft(candidate);
     expect(draft.decision).toBe(PENDING_HUMAN_DECISION);
-    expect(draft.authorization_schema_version).toBe("trustforge_paid_probe_authorization.v2");
+    expect(draft.authorization_schema_version).toBe("trustforge_paid_probe_authorization.v3");
     expect(draft.max_payment_attempts).toBe(1);
     expect(draft.allow_retry).toBe(false);
     expect(draft.require_dedicated_wallet).toBe(true);
@@ -77,6 +77,9 @@ describe("human payment authorization DRAFT generator", () => {
       candidate.canonical_requirements_sha256,
     );
     expect(draft.canonical_envelope_sha256).toBe(candidate.canonical_envelope_sha256);
+    expect(draft.seller_network_raw).toBe(candidate.seller_network_raw);
+    expect(draft.canonical_network_caip2).toBe(candidate.canonical_network_caip2);
+    expect(draft.network).toBe(candidate.canonical_network_caip2);
     expect(draft.requirements_refresh_policy).toBe("exact_hash_match_before_signing");
     expect(draft).not.toHaveProperty("nonce");
   });

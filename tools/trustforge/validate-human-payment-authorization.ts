@@ -52,6 +52,9 @@ export interface HumanPaymentAuthorization {
   readonly canonical_envelope_sha256?: string | null;
   readonly x402_version?: 1 | 2 | null;
   readonly scheme?: string | null;
+  readonly seller_network_raw?: string | null;
+  readonly canonical_network_caip2?: string | null;
+  /** Operational alias, required to equal canonical_network_caip2. */
   readonly network?: string;
   readonly asset?: string;
   readonly pay_to?: string | null;
@@ -91,6 +94,8 @@ export interface SelectedCandidateRef {
   readonly seller_requirements?: SellerRequirementsObservation | null;
   readonly quote_amount_usdc?: string;
   readonly recommended_max_usdc?: string;
+  readonly seller_network_raw?: string;
+  readonly canonical_network_caip2?: string;
   readonly network?: string;
   readonly asset?: string;
   readonly buyer_wallet?: string;
@@ -164,7 +169,7 @@ function validateSellerRequirementsAuthorization(
   selected: SelectedCandidateRef,
   reasons: string[],
 ): void {
-  if (selected.schema_version !== "trustforge_selected_candidate.v2" || !selected.seller_requirements) {
+  if (selected.schema_version !== "trustforge_selected_candidate.v3" || !selected.seller_requirements) {
     reasons.push(
       `${REJECTED_PAYMENT_REQUIREMENTS_BINDING_NOT_PERSISTED}: selected_candidate seller requirements absent`,
     );
@@ -190,7 +195,15 @@ function validateSellerRequirementsAuthorization(
   }
   if (auth.x402_version !== binding.protocol_version) reasons.push("x402_version mismatch vs selected_candidate");
   if (auth.scheme !== binding.scheme) reasons.push("scheme mismatch vs selected_candidate");
-  if (auth.network !== binding.network) reasons.push("network mismatch vs seller requirements");
+  if (auth.seller_network_raw !== binding.seller_network_raw) {
+    reasons.push("seller_network_raw mismatch vs seller requirements");
+  }
+  if (auth.canonical_network_caip2 !== binding.canonical_network_caip2) {
+    reasons.push("canonical_network_caip2 mismatch vs seller requirements");
+  }
+  if (auth.network !== binding.canonical_network_caip2) {
+    reasons.push("operational network mismatch vs seller requirements canonical network");
+  }
   if (auth.asset?.toLowerCase() !== binding.asset.toLowerCase()) {
     reasons.push("asset mismatch vs seller requirements");
   }
@@ -297,7 +310,7 @@ export function validateHumanPaymentAuthorization(
 ): { readonly valid: boolean; readonly reasons: readonly string[] } {
   const reasons: string[] = [];
 
-  if (auth.authorization_schema_version !== "trustforge_paid_probe_authorization.v2") {
+  if (auth.authorization_schema_version !== "trustforge_paid_probe_authorization.v3") {
     reasons.push("invalid authorization_schema_version");
   }
   if (auth.decision !== "authorize_one_payment") {
@@ -336,6 +349,16 @@ export function validateHumanPaymentAuthorization(
   );
   validateRequestBinding(auth, selected, reasons);
   validateSellerRequirementsAuthorization(auth, selected, reasons);
+  if (
+    selected.seller_network_raw !== selected.seller_requirements?.binding.seller_network_raw ||
+    selected.canonical_network_caip2 !==
+      selected.seller_requirements?.binding.canonical_network_caip2
+  ) {
+    reasons.push("selected_candidate network identity mismatch vs seller requirements");
+  }
+  if (selected.network !== selected.canonical_network_caip2) {
+    reasons.push("selected_candidate operational network must equal canonical_network_caip2");
+  }
   if (auth.network && selected.network && auth.network !== selected.network) {
     reasons.push("network mismatch vs selected_candidate");
   }

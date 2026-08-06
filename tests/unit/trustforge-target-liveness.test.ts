@@ -145,6 +145,44 @@ describe("Target liveness handshake probe", () => {
     expect(outcome.paymentAttempted).toBe(false);
   });
 
+  it("classifies a real-format x402 v1 Base alias into a separate canonical identity", () => {
+    const v1Candidate: TargetCandidate = {
+      ...candidate(),
+      x402Version: 1,
+      accepts: [{ ...candidate().accepts[0]!, network: "base" }],
+    };
+    const outcome = classifyTargetProbeResponse(
+      v1Candidate,
+      {
+        httpStatus: 402,
+        headers: {},
+        body: {
+          x402Version: 1,
+          accepts: [
+            {
+              scheme: "exact",
+              network: "base",
+              maxAmountRequired: "1125",
+              resource: v1Candidate.resourceUrl,
+              description: "v1 paid resource",
+              payTo: v1Candidate.accepts[0]!.payTo,
+              maxTimeoutSeconds: 60,
+              asset: MAINNET_USDC_ADDRESS,
+            },
+          ],
+        },
+      },
+      { maxTargetPriceAtomic: "10000", expectedNetwork: "eip155:8453" },
+    );
+    expect(outcome.status).toBe("live_402_ok");
+    expect(outcome.selectedAccept).toMatchObject({
+      network: "eip155:8453",
+      sellerNetworkRaw: "base",
+      canonicalNetworkCaip2: "eip155:8453",
+    });
+    expect(outcome.sellerRequirements?.selected_requirements.network).toBe("base");
+  });
+
   it("classifies the same real 402 as over_budget when the budget is lower", () => {
     const outcome = classifyTargetProbeResponse(
       candidate(),

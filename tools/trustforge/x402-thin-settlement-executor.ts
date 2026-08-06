@@ -36,6 +36,7 @@ import {
   expectedAssetForProfile,
   type X402SettlementProfile,
 } from "./x402-settlement-profile";
+import { assertB2BuyerSignedAuthorizationPipelineImplemented } from "./pre-b2-paid-execution-blocker";
 
 export interface ThinSettlementExecutionResult {
   readonly ok: boolean;
@@ -88,7 +89,7 @@ function mapThinResult(
   };
 }
 
-export async function executeThinX402Settlement(input: {
+export interface ThinSettlementExecutionInput {
   readonly profile: X402SettlementProfile;
   readonly runDir: string;
   readonly auth: HumanPaymentAuthorization;
@@ -97,7 +98,11 @@ export async function executeThinX402Settlement(input: {
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly skipFreshnessPreflight?: boolean;
-}): Promise<ThinSettlementExecutionResult> {
+}
+
+async function executeThinX402SettlementCore(
+  input: ThinSettlementExecutionInput,
+): Promise<ThinSettlementExecutionResult> {
   const env = input.env ?? process.env;
   assertProfileEnvBeforeSettlement(input.profile, env);
 
@@ -137,6 +142,8 @@ export async function executeThinX402Settlement(input: {
         quote_atomic: input.selected.quote_atomic,
         authorized_max_usdc: input.auth.max_usdc,
         pay_to: input.selected.authorized_pay_to,
+        seller_network_raw: input.selected.seller_network_raw,
+        canonical_network_caip2: input.selected.canonical_network_caip2,
         network: input.selected.network,
         asset: input.selected.asset,
         request_binding: requestBinding,
@@ -202,14 +209,32 @@ export async function executeThinX402Settlement(input: {
       canonicalRequirementsSha256: sellerRequirements.binding.canonical_requirements_sha256,
       canonicalEnvelopeSha256: sellerRequirements.binding.canonical_envelope_sha256,
       selectionRequirementsObservedAt: sellerRequirements.requirements_observed_at,
+      protocolVersion: sellerRequirements.binding.protocol_version,
+      sellerNetworkRaw: sellerRequirements.binding.seller_network_raw,
+      canonicalNetworkCaip2: sellerRequirements.binding.canonical_network_caip2,
       paytimeRequirementsObservedAt: paytimePreflight?.paytime_requirements_observed_at,
       effectiveSigningDeadline: paytimePreflight?.effective_signing_deadline,
       require402BeforePayment: input.profile.require402BeforePayment,
-      expectedNetworkIn402: input.profile.caip2,
+      expectedNetworkIn402: sellerRequirements.binding.seller_network_raw,
     },
     env,
     fetchImpl: input.fetchImpl,
   });
 
   return mapThinResult(result, input.selected.network, methodBinding);
+}
+
+/** Production entry point. It cannot inspect wallet-related environment state pre-B.2. */
+export async function executeThinX402Settlement(
+  input: ThinSettlementExecutionInput,
+): Promise<ThinSettlementExecutionResult> {
+  void input;
+  assertB2BuyerSignedAuthorizationPipelineImplemented();
+}
+
+/** Explicit test-only seam for deterministic wrapper tests. */
+export async function __testOnlyExecuteThinX402SettlementCore(
+  input: ThinSettlementExecutionInput,
+): Promise<ThinSettlementExecutionResult> {
+  return executeThinX402SettlementCore(input);
 }

@@ -42,6 +42,8 @@ export interface TargetSelectionEntry {
   readonly quoteUsdc: string;
   readonly selectedPayTo: string | null;
   readonly sellerRequirements: SellerRequirementsObservation;
+  readonly sellerNetworkRaw: string;
+  readonly canonicalNetworkCaip2: string;
   /** @deprecated Ancillary proprietary evidence presence only. */
   readonly challengeNoncePresent: boolean;
   /** @deprecated Ancillary proprietary evidence presence only. */
@@ -51,7 +53,7 @@ export interface TargetSelectionEntry {
 }
 
 export interface TargetSelectionReport {
-  readonly schema_version: "trustforge_target_selection.v3";
+  readonly schema_version: "trustforge_target_selection.v4";
   readonly selection_mode: "dry_run_no_payment";
   readonly primary: TargetSelectionEntry | null;
   readonly fallbacks: readonly TargetSelectionEntry[];
@@ -127,6 +129,9 @@ function entryFromOutcome(
     quoteUsdc: outcome.quoteUsdc,
     selectedPayTo: outcome.selectedAccept?.payTo ?? null,
     sellerRequirements: outcome.sellerRequirements,
+    sellerNetworkRaw: outcome.sellerRequirements.binding.seller_network_raw,
+    canonicalNetworkCaip2:
+      outcome.sellerRequirements.binding.canonical_network_caip2,
     challengeNoncePresent: Boolean(outcome.challenge.nonce),
     challengeExpiryPresent: Boolean(outcome.challenge.expiresAt),
     score: {
@@ -169,7 +174,7 @@ export function selectTargets(input: {
   const selectedIds = new Set(ranked.map((entry) => entry.candidateId));
 
   return {
-    schema_version: "trustforge_target_selection.v3",
+    schema_version: "trustforge_target_selection.v4",
     selection_mode: "dry_run_no_payment",
     primary: ranked[0] ?? null,
     fallbacks: ranked.slice(1),

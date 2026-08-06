@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   TRUSTFORGE_EXTERNAL_PAID_ARMING_VALUE,
   requestFromPaidPolicy,
-  runExternalPaidProbe,
+  __testOnlyRunExternalPaidProbeCore as runExternalPaidProbe,
   writeExternalPaidReadinessArtifacts,
   type ExternalPaidRequestContext,
 } from "../../tools/trustforge/external-x402-paid-executor";

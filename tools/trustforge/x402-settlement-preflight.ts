@@ -102,6 +102,8 @@ export interface X402PreflightResult {
   readonly mode: "keyless" | "verify-wallet-env";
   readonly network_profile: "mainnet" | "sepolia";
   readonly caip2: string;
+  readonly seller_network_raw: string | null;
+  readonly canonical_network_caip2: string;
   readonly chain_id_expected: number;
   readonly chain_id_observed: number | null;
   readonly asset_expected: string;
@@ -362,7 +364,10 @@ export async function runX402SettlementPreflight(
     ? options.loadCandidate()
     : defaultLoadCandidate(options.runDir);
 
-  const profile = resolveX402SettlementProfileFromCli(options.network, candidate?.network);
+  const profile = resolveX402SettlementProfileFromCli(
+    options.network,
+    candidate?.canonical_network_caip2,
+  );
   const rpc = resolveRpcUrls(profile, env);
   const buyerKeyPresent = Boolean(env[MAINNET_BUYER_PRIVATE_KEY_ENV]?.trim());
   const sepoliaKeyPresent = Boolean(env[SEPOLIA_BUYER_PRIVATE_KEY_ENV]?.trim());
@@ -371,6 +376,8 @@ export async function runX402SettlementPreflight(
     mode: options.verifyWalletEnv ? "verify-wallet-env" : "keyless",
     network_profile: profile.id,
     caip2: profile.caip2,
+    seller_network_raw: candidate?.seller_network_raw ?? null,
+    canonical_network_caip2: profile.caip2,
     chain_id_expected: profile.chainId,
     chain_id_observed: null,
     asset_expected: expectedAssetForProfile(profile),
@@ -546,8 +553,17 @@ export async function runX402SettlementPreflight(
   }
 
   // (5) Static candidate field gates (no network).
-  if (candidate.network !== profile.caip2) {
-    return block(withConsumed, "BLOCKED_WRONG_NETWORK", `candidate network ${candidate.network} != ${profile.caip2}`);
+  if (
+    candidate.canonical_network_caip2 !== profile.caip2 ||
+    candidate.network !== candidate.canonical_network_caip2 ||
+    sellerRequirements.binding.seller_network_raw !== candidate.seller_network_raw ||
+    sellerRequirements.binding.canonical_network_caip2 !== candidate.canonical_network_caip2
+  ) {
+    return block(
+      withConsumed,
+      "BLOCKED_WRONG_NETWORK",
+      `candidate network raw=${candidate.seller_network_raw} canonical=${candidate.canonical_network_caip2} profile=${profile.caip2}`,
+    );
   }
   if ((candidate.asset ?? "").toLowerCase() !== expectedAssetForProfile(profile).toLowerCase()) {
     return block(withConsumed, "BLOCKED_WRONG_ASSET", `candidate asset ${candidate.asset} != ${expectedAssetForProfile(profile)}`);
@@ -615,6 +631,8 @@ export async function runX402SettlementPreflight(
     quote_atomic: candidate.quote_atomic,
     authorized_max_usdc: candidate.recommended_max_usdc,
     pay_to: candidate.authorized_pay_to,
+    seller_network_raw: candidate.seller_network_raw,
+    canonical_network_caip2: candidate.canonical_network_caip2,
     network: candidate.network,
     asset: candidate.asset,
     request_binding: requestBindingFromSelectedCandidate(candidate),

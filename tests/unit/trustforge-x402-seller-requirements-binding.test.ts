@@ -9,6 +9,7 @@ import {
   REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_MISSING,
   REJECTED_PAYMENT_REQUIREMENTS_VERSION_UNSUPPORTED,
   SELLER_REQUIREMENTS_LOCAL_FRESHNESS_CAP_SECONDS,
+  SELLER_REQUIREMENTS_ENVELOPE_VALIDATION_POLICY,
   authorizationExpiresAt,
   calculateEffectiveSigningDeadline,
   canonicalJsonSha256,
@@ -20,13 +21,14 @@ import {
 
 const REQUEST_HASH = "a".repeat(64);
 const NETWORK = "eip155:8453";
+const V1_NETWORK = "base";
 const ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const PAY_TO = "0x52E29e0d2Aa49bfBfC548C0A9F2196F4aa51f3ea";
 
 function v1Requirement(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     scheme: "exact",
-    network: NETWORK,
+    network: V1_NETWORK,
     maxAmountRequired: "1000",
     resource: "https://seller.example/paid",
     description: "paid resource",
@@ -105,6 +107,8 @@ describe("x402 seller PaymentRequirements binding", () => {
     expect(observation.binding).toMatchObject({
       protocol_version: 1,
       transport: "legacy-body",
+      seller_network_raw: "base",
+      canonical_network_caip2: NETWORK,
       amount_field: "maxAmountRequired",
       amount_atomic: "1000",
       max_timeout_seconds: 60,
@@ -113,13 +117,48 @@ describe("x402 seller PaymentRequirements binding", () => {
     expect(observation.selected_requirements).not.toHaveProperty("expiresAt");
   });
 
+  it("accepts v1 base-sepolia only for the matching canonical profile", () => {
+    const result = parseAndBindSellerPaymentRequirements({
+      headers: {},
+      body: {
+        x402Version: 1,
+        accepts: [v1Requirement({ network: "base-sepolia" })],
+      },
+      requestBindingSha256: REQUEST_HASH,
+      expectedNetwork: "eip155:84532",
+      expectedAsset: ASSET,
+      requirementsObservedAt: "2026-08-05T05:13:29.000Z",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.observation.binding.seller_network_raw).toBe("base-sepolia");
+    expect(result.observation.binding.canonical_network_caip2).toBe("eip155:84532");
+  });
+
+  it("rejects CAIP-2 in v1 and a v1 alias in v2", () => {
+    const v1Caip = parse({
+      envelope: {
+        x402Version: 1,
+        accepts: [v1Requirement({ network: NETWORK })],
+      },
+      transport: "body",
+    });
+    expect(v1Caip.ok).toBe(false);
+
+    const v2Alias = parse({
+      envelope: v2Envelope(v2Requirement({ network: "base" })),
+    });
+    expect(v2Alias.ok).toBe(false);
+  });
+
   it("accepts a OneSource-style v2 PAYMENT-REQUIRED header without seller nonce/expiresAt", () => {
     const observation = requireObservation(parse({ envelope: v2Envelope() }));
     expect(observation.binding).toMatchObject({
       protocol_version: 2,
       transport: "payment-required-header",
       scheme: "exact",
-      network: NETWORK,
+      seller_network_raw: NETWORK,
+      canonical_network_caip2: NETWORK,
       asset: ASSET,
       amount_field: "amount",
       amount_atomic: "1000",
@@ -161,6 +200,27 @@ describe("x402 seller PaymentRequirements binding", () => {
       const result = parse({ envelope: v2Envelope(v2Requirement({ maxTimeoutSeconds: invalid })) });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe(REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_INVALID);
+    }
+  });
+
+  it("strictly validates every accepts[] timeout independent of array order", () => {
+    expect(SELLER_REQUIREMENTS_ENVELOPE_VALIDATION_POLICY).toBe(
+      "STRICT_ENVELOPE_VALIDATION",
+    );
+    const unsupportedInvalid = v2Requirement({
+      network: "eip155:999999",
+      maxTimeoutSeconds: 0,
+    });
+    const supportedValid = v2Requirement();
+    for (const accepts of [
+      [unsupportedInvalid, supportedValid],
+      [supportedValid, unsupportedInvalid],
+    ]) {
+      const result = parse({ envelope: { ...v2Envelope(), accepts } });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe(REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_INVALID);
+      }
     }
   });
 
@@ -217,6 +277,20 @@ describe("x402 seller PaymentRequirements binding", () => {
     expect(canonicalJsonSha256(extensionsChanged)).not.toBe(
       first.binding.canonical_envelope_sha256,
     );
+  });
+
+  it("hashes the raw v1 seller network without rewriting the seller JSON", () => {
+    const baseEnvelope = { x402Version: 1, accepts: [v1Requirement({ network: "base" })] };
+    const base = requireObservation(parse({ envelope: baseEnvelope, transport: "body" }));
+    const sepoliaRequirement = v1Requirement({ network: "base-sepolia" });
+    expect(canonicalJsonSha256(sepoliaRequirement)).not.toBe(
+      base.binding.canonical_requirements_sha256,
+    );
+    expect(base.selected_requirements.network).toBe("base");
+    expect((base.payment_required_envelope.accepts as Record<string, unknown>[])[0]?.network).toBe(
+      "base",
+    );
+    expect(base.binding.canonical_network_caip2).toBe("eip155:8453");
   });
 
   it("rejects non-representable seller JSON before hashing", () => {

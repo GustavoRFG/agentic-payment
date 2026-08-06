@@ -12,6 +12,7 @@ import {
   parseAndBindSellerPaymentRequirements,
   type SellerRequirementsObservation,
 } from "./x402-seller-requirements-binding";
+import { normalizeX402NetworkIdentity } from "./x402-network-identity";
 
 export type TargetHandshakeStatus =
   | "live_402_ok"
@@ -323,7 +324,9 @@ export function classifyTargetProbeResponse(
   const binding = observation.binding;
   const selectedAccept: TargetAccept = {
     scheme: binding.scheme,
-    network: binding.network,
+    network: binding.canonical_network_caip2,
+    sellerNetworkRaw: binding.seller_network_raw,
+    canonicalNetworkCaip2: binding.canonical_network_caip2,
     asset: binding.asset,
     amountAtomic: binding.amount_atomic,
     payTo: binding.pay_to,
@@ -430,9 +433,20 @@ export async function probeTargetLiveness(
       body: parseJsonMaybe(bodyText),
       bodyText,
     };
+    let expectedNetwork = candidate.accepts[0]?.network ?? MAINNET_NETWORK;
+    if (candidate.x402Version === 1 || candidate.x402Version === 2) {
+      try {
+        expectedNetwork = normalizeX402NetworkIdentity(
+          candidate.x402Version,
+          expectedNetwork,
+        ).canonical_caip2;
+      } catch {
+        // Preserve the unsupported raw value so classification fails closed.
+      }
+    }
     return classifyTargetProbeResponse(candidate, recorded, {
       maxTargetPriceAtomic: options.maxTargetPriceAtomic,
-      expectedNetwork: candidate.accepts[0]?.network ?? MAINNET_NETWORK,
+      expectedNetwork,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -125,8 +125,8 @@ describe("TARGET RESOLUTION dry-run stage", () => {
       });
 
       expect(report.chosenTarget?.resourceUrl).toBe("https://primary.example/x402");
-      expect(report.schema_version).toBe("trustforge_target_resolution.v3");
-      expect(report.selection.schema_version).toBe("trustforge_target_selection.v3");
+      expect(report.schema_version).toBe("trustforge_target_resolution.v4");
+      expect(report.selection.schema_version).toBe("trustforge_target_selection.v4");
       expect(report.chosenTarget).toMatchObject({
         requestInputStatus: "known",
         requestQuery: [],
@@ -154,7 +154,7 @@ describe("TARGET RESOLUTION dry-run stage", () => {
       const evidence = JSON.parse(
         readFileSync(targetResolutionEvidencePath(outputPath), "utf8"),
       );
-      expect(evidence.schema_version).toBe("trustforge_target_resolution_evidence.v3");
+      expect(evidence.schema_version).toBe("trustforge_target_resolution_evidence.v4");
       expect(evidence.candidateRequestBindings[0]).toMatchObject({
         requestInputProvenance: "bazaar.extensions.bazaar.info.input",
       });

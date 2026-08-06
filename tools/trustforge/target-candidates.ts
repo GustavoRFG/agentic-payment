@@ -11,6 +11,7 @@ import {
   type RequestInputProvenance,
   type ThinSettlementRequestBinding,
 } from "./thin-settlement-request-binding";
+import { normalizeX402NetworkIdentity } from "./x402-network-identity";
 
 export const DEFAULT_MAX_TARGET_PRICE_ATOMIC = "10000" as const;
 export const TRUSTFORGE_MAX_TARGET_PRICE_ATOMIC_ENV =
@@ -26,6 +27,8 @@ export type TargetRejectReason =
 export interface TargetAccept {
   readonly scheme: string;
   readonly network: string;
+  readonly sellerNetworkRaw?: string;
+  readonly canonicalNetworkCaip2?: string;
   readonly asset: string;
   readonly amountAtomic: string;
   readonly payTo: string | null;
@@ -189,8 +192,16 @@ function hasValidAmount(accept: TargetAccept): boolean {
   return parseAtomic(accept.amountAtomic) !== null;
 }
 
-function isBaseAccept(accept: TargetAccept): boolean {
-  return accept.network === MAINNET_NETWORK;
+function isBaseAccept(accept: TargetAccept, x402Version: number): boolean {
+  if (x402Version !== 1 && x402Version !== 2) return false;
+  try {
+    return (
+      normalizeX402NetworkIdentity(x402Version, accept.network).canonical_caip2 ===
+      MAINNET_NETWORK
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isUsdcAccept(accept: TargetAccept): boolean {
@@ -256,7 +267,9 @@ function rejectionFor(
       detail: "At least one accepts[] amount is missing or non-integer",
     };
   }
-  const base = candidate.accepts.filter(isBaseAccept);
+  const base = candidate.accepts.filter((accept) =>
+    isBaseAccept(accept, candidate.x402Version),
+  );
   if (base.length === 0) {
     return {
       resourceUrl: candidate.resourceUrl,

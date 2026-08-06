@@ -26,6 +26,7 @@ import {
   MAINNET_BUYER_WALLET,
 } from "./network-config";
 import { executeSingleX402Settlement } from "./x402-single-settlement-executor";
+import { assertB2BuyerSignedAuthorizationPipelineImplemented } from "./pre-b2-paid-execution-blocker";
 import {
   BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISSING,
   BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH,
@@ -200,6 +201,9 @@ export async function performRichTxExplainerPaidRequest(options: {
       authorizedRequestSummary: options.authorizedRequestSummary,
     },
   });
+  // The request binding above remains independently testable, but no productive
+  // rich caller may reach wallet/signing/header/fetch work before B.2.
+  assertB2BuyerSignedAuthorizationPipelineImplemented();
   const maxAmountAtomic = parseUsdcDecimalToAtomic(options.policy.maxTotalSpendUsdc).toString();
 
   const settlement = await executeSingleX402Settlement({

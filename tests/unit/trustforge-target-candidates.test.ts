@@ -110,6 +110,30 @@ describe("TargetCandidate normalization and filtering", () => {
     expect(result.rejected).toEqual([]);
   });
 
+  it("filters seller networks with version-aware exactness", () => {
+    const v1Base = resource({
+      x402Version: 1,
+      accepts: [{ ...resource().accepts[0], network: "base" }],
+    });
+    const v1Caip = resource({
+      resourceUrl: "https://v1-caip.example/x402",
+      x402Version: 1,
+      accepts: [{ ...resource().accepts[0], network: "eip155:8453" }],
+    });
+    const v2Alias = resource({
+      resourceUrl: "https://v2-alias.example/x402",
+      accepts: [{ ...resource().accepts[0], network: "base" }],
+    });
+    const result = filterTargetCandidates([v1Base, v1Caip, v2Alias]);
+    expect(result.accepted.map((entry) => entry.resourceUrl)).toEqual([
+      v1Base.resourceUrl,
+    ]);
+    expect(result.rejected.map((entry) => entry.reason)).toEqual([
+      "wrong_network",
+      "wrong_network",
+    ]);
+  });
+
   it("rejects over-budget Base USDC candidates with an explicit reason", () => {
     const result = filterTargetCandidates(
       [resource({ accepts: [{ ...resource().accepts[0], amount: "10001" }] })],

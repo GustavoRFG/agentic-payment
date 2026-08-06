@@ -45,6 +45,9 @@ const authorized = {
   canonical_requirements_sha256:
     authorizedSellerRequirements.binding.canonical_requirements_sha256,
   canonical_envelope_sha256: authorizedSellerRequirements.binding.canonical_envelope_sha256,
+  seller_network_raw: authorizedSellerRequirements.binding.seller_network_raw,
+  canonical_network_caip2:
+    authorizedSellerRequirements.binding.canonical_network_caip2,
 };
 
 function liveOutcome(overrides: Partial<TargetHandshakeOutcome> = {}): TargetHandshakeOutcome {
@@ -56,6 +59,8 @@ function liveOutcome(overrides: Partial<TargetHandshakeOutcome> = {}): TargetHan
     selectedAccept: {
       scheme: "exact",
       network: "eip155:8453",
+      sellerNetworkRaw: "eip155:8453",
+      canonicalNetworkCaip2: "eip155:8453",
       asset: MAINNET_USDC_ADDRESS,
       amountAtomic: "1125",
       payTo: authorized.pay_to,
@@ -78,6 +83,40 @@ function liveOutcome(overrides: Partial<TargetHandshakeOutcome> = {}): TargetHan
 }
 
 describe("paid quote freshness pre-flight", () => {
+  it("replays v1 with the exact raw requirements hash before future signing", () => {
+    const v1Requirements = sellerRequirementsFixture({
+      requestBindingSha256: authorizedRequestBinding.binding_sha256,
+      protocolVersion: 1,
+      network: "base",
+      asset: MAINNET_USDC_ADDRESS,
+      payTo: authorized.pay_to,
+      amountAtomic: authorized.quote_atomic,
+      endpoint,
+    });
+    const v1Authorized = {
+      ...authorized,
+      seller_requirements: v1Requirements,
+      canonical_requirements_sha256:
+        v1Requirements.binding.canonical_requirements_sha256,
+      canonical_envelope_sha256: v1Requirements.binding.canonical_envelope_sha256,
+      seller_network_raw: "base",
+      canonical_network_caip2: "eip155:8453",
+      network: "eip155:8453",
+    };
+    const candidate = buildProbeCandidateForAuthorizedQuote(v1Authorized);
+    expect(candidate.accepts[0]?.network).toBe("base");
+    const exact = evaluateFreshProbeResponseAgainstAuthorizedQuote(
+      candidate,
+      {
+        httpStatus: 402,
+        headers: {},
+        body: v1Requirements.payment_required_envelope,
+      },
+      v1Authorized,
+    );
+    expect(exact.go, exact.reasons.join("; ")).toBe(true);
+  });
+
   it("returns go when fresh 402 matches the authorized quote and payTo", () => {
     const result = evaluateFresh402AgainstAuthorizedQuote(
       liveOutcome(),
@@ -228,6 +267,9 @@ describe("paid quote freshness pre-flight", () => {
       canonical_requirements_sha256:
         genericSellerRequirements.binding.canonical_requirements_sha256,
       canonical_envelope_sha256: genericSellerRequirements.binding.canonical_envelope_sha256,
+      seller_network_raw: genericSellerRequirements.binding.seller_network_raw,
+      canonical_network_caip2:
+        genericSellerRequirements.binding.canonical_network_caip2,
       network: "eip155:8453",
       asset: MAINNET_USDC_ADDRESS,
     });
@@ -264,6 +306,8 @@ describe("paid quote freshness pre-flight", () => {
       canonical_requirements_sha256:
         parsed.observation.binding.canonical_requirements_sha256,
       canonical_envelope_sha256: parsed.observation.binding.canonical_envelope_sha256,
+      seller_network_raw: parsed.observation.binding.seller_network_raw,
+      canonical_network_caip2: parsed.observation.binding.canonical_network_caip2,
     };
     const candidate = buildProbeCandidateForAuthorizedQuote(zapperAuthorized);
     expect(candidate).not.toBeNull();

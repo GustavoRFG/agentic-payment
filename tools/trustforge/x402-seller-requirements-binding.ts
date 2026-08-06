@@ -13,6 +13,10 @@ import {
   PaymentRequirementsV1Schema,
   PaymentRequirementsV2Schema,
 } from "@x402/core/schemas";
+import {
+  normalizeX402NetworkIdentity,
+  type X402NetworkIdentity,
+} from "./x402-network-identity";
 
 export const REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE =
   "REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE";
@@ -40,6 +44,8 @@ export const HUMAN_AUTHORIZATION_MAX_TTL_SECONDS = 1800 as const;
 export const BUYER_VALID_AFTER_CLOCK_SKEW_SECONDS = 60 as const;
 export const TEMPO_ID_EXPIRES_POLICY = "RECORD_ONLY_NON_AUTHORITATIVE" as const;
 export const SIGNED_BUT_NOT_SENT_POLICY = "TERMINAL_ABANDONED_REAUTHORIZE" as const;
+export const SELLER_REQUIREMENTS_ENVELOPE_VALIDATION_POLICY =
+  "STRICT_ENVELOPE_VALIDATION" as const;
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -61,7 +67,10 @@ export interface SellerRequirementsBinding {
   readonly protocol_version: X402ProtocolVersion;
   readonly transport: SellerRequirementsTransport;
   readonly scheme: string;
-  readonly network: string;
+  /** Exact, unmodified network identifier supplied by the seller. */
+  readonly seller_network_raw: string;
+  /** Version-aware operational identity; never substituted into seller JSON/hashes. */
+  readonly canonical_network_caip2: X402NetworkIdentity["canonical_caip2"];
   readonly asset: string;
   readonly amount_field: SellerAmountField;
   readonly amount_atomic: string;
@@ -239,25 +248,34 @@ function timeoutFailure(
   accepts: readonly unknown[],
   ancillary: AncillaryTempoEvidence | null,
 ): SellerRequirementsFailure | null {
-  for (const raw of accepts) {
-    if (!isRecord(raw)) continue;
-    if (!Object.prototype.hasOwnProperty.call(raw, "maxTimeoutSeconds")) {
-      return failure(
-        REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_MISSING,
-        "maxTimeoutSeconds is required",
-        "timeout",
-        ancillary,
+  // STRICT_ENVELOPE_VALIDATION: every accept must be schema-valid before selection.
+  // Aggregate first so reversing accepts[] cannot arbitrarily change the error code.
+  const records = accepts.filter(isRecord);
+  if (records.some((raw) => !Object.prototype.hasOwnProperty.call(raw, "maxTimeoutSeconds"))) {
+    return failure(
+      REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_MISSING,
+      "maxTimeoutSeconds is required on every accepts[] entry",
+      "timeout",
+      ancillary,
+    );
+  }
+  if (
+    records.some((raw) => {
+      const timeout = raw.maxTimeoutSeconds;
+      return (
+        typeof timeout !== "number" ||
+        !Number.isFinite(timeout) ||
+        !Number.isInteger(timeout) ||
+        timeout <= 0
       );
-    }
-    const timeout = raw.maxTimeoutSeconds;
-    if (typeof timeout !== "number" || !Number.isFinite(timeout) || !Number.isInteger(timeout) || timeout <= 0) {
-      return failure(
-        REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_INVALID,
-        "maxTimeoutSeconds must be a positive finite integer",
-        "timeout",
-        ancillary,
-      );
-    }
+    })
+  ) {
+    return failure(
+      REJECTED_PAYMENT_REQUIREMENTS_TIMEOUT_INVALID,
+      "maxTimeoutSeconds must be a positive finite integer on every accepts[] entry",
+      "timeout",
+      ancillary,
+    );
   }
   return null;
 }
@@ -277,8 +295,28 @@ function selectRequirement(input: {
   readonly expectedAsset: string;
   readonly expectedScheme: string;
   readonly ancillary: AncillaryTempoEvidence | null;
-}): SellerRequirementsFailure | { readonly ok: true; readonly requirement: JsonObject } {
-  const network = input.accepts.filter((entry) => entry.network === input.expectedNetwork);
+}):
+  | SellerRequirementsFailure
+  | {
+      readonly ok: true;
+      readonly requirement: JsonObject;
+      readonly networkIdentity: X402NetworkIdentity;
+    } {
+  const normalized = input.accepts.flatMap((entry) => {
+    try {
+      return [
+        {
+          entry,
+          identity: normalizeX402NetworkIdentity(input.version, entry.network),
+        },
+      ];
+    } catch {
+      return [];
+    }
+  });
+  const network = normalized.filter(
+    ({ identity }) => identity.canonical_caip2 === input.expectedNetwork,
+  );
   if (network.length === 0) {
     return failure(
       REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE,
@@ -287,7 +325,9 @@ function selectRequirement(input: {
       input.ancillary,
     );
   }
-  const asset = network.filter((entry) => normalizedAssetMatches(entry.asset, input.expectedAsset));
+  const asset = network.filter(({ entry }) =>
+    normalizedAssetMatches(entry.asset, input.expectedAsset),
+  );
   if (asset.length === 0) {
     return failure(
       REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE,
@@ -296,7 +336,7 @@ function selectRequirement(input: {
       input.ancillary,
     );
   }
-  const scheme = asset.filter((entry) => entry.scheme === input.expectedScheme);
+  const scheme = asset.filter(({ entry }) => entry.scheme === input.expectedScheme);
   if (scheme.length === 0) {
     return failure(
       REJECTED_PAYMENT_REQUIREMENTS_INCOMPLETE,
@@ -305,12 +345,18 @@ function selectRequirement(input: {
       input.ancillary,
     );
   }
-  let best: { readonly requirement: JsonObject; readonly amount: bigint } | null = null;
-  for (const requirement of scheme) {
+  let best: {
+    readonly requirement: JsonObject;
+    readonly networkIdentity: X402NetworkIdentity;
+    readonly amount: bigint;
+  } | null = null;
+  for (const { entry: requirement, identity } of scheme) {
     const rawAmount = amountFor(input.version, requirement);
     if (typeof rawAmount !== "string" || !/^\d+$/.test(rawAmount)) continue;
     const amount = BigInt(rawAmount);
-    if (!best || amount < best.amount) best = { requirement, amount };
+    if (!best || amount < best.amount) {
+      best = { requirement, networkIdentity: identity, amount };
+    }
   }
   if (!best) {
     return failure(
@@ -320,7 +366,11 @@ function selectRequirement(input: {
       input.ancillary,
     );
   }
-  return { ok: true, requirement: best.requirement };
+  return {
+    ok: true,
+    requirement: best.requirement,
+    networkIdentity: best.networkIdentity,
+  };
 }
 
 function observedAtIso(value: Date | string | undefined): string | null {
@@ -433,7 +483,8 @@ export function parseAndBindSellerPaymentRequirements(input: {
       protocol_version: version,
       transport: extracted.transport,
       scheme: String(requirement.scheme),
-      network: String(requirement.network),
+      seller_network_raw: selected.networkIdentity.seller_network_raw,
+      canonical_network_caip2: selected.networkIdentity.canonical_caip2,
       asset: String(requirement.asset),
       amount_field: amountField,
       amount_atomic: String(requirement[amountField]),
@@ -547,10 +598,12 @@ export function validatePersistedSellerRequirementsObservation(
   const expectedExtra = Object.prototype.hasOwnProperty.call(raw, "extra") ? raw.extra : null;
   let matches = false;
   try {
+    const networkIdentity = normalizeX402NetworkIdentity(version, raw.network);
     matches =
       observation.binding.amount_field === amountField &&
       observation.binding.scheme === raw.scheme &&
-      observation.binding.network === raw.network &&
+      observation.binding.seller_network_raw === raw.network &&
+      observation.binding.canonical_network_caip2 === networkIdentity.canonical_caip2 &&
       observation.binding.asset === raw.asset &&
       observation.binding.amount_atomic === raw[amountField] &&
       observation.binding.pay_to === raw.payTo &&

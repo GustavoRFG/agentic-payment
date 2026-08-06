@@ -9,6 +9,7 @@ import {
   createPaymentBearingRequestGuard,
   type PaymentBearingRequestGuard,
 } from "../../buyer-client/src/payment-bearing-request-guard";
+import { assertB2BuyerSignedAuthorizationPipelineImplemented } from "./pre-b2-paid-execution-blocker";
 import { MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import {
   compareUsdcDecimal,
@@ -447,7 +448,7 @@ function result(
   };
 }
 
-export async function runExternalPaidProbe(
+async function runExternalPaidProbeCore(
   options: ExternalPaidProbeOptions,
   dependencies: ExternalPaidProbeDependencies,
 ): Promise<ExternalPaidProbeResult> {
@@ -568,6 +569,24 @@ export async function runExternalPaidProbe(
       createdAtUtc: now().toISOString(),
     });
   }
+}
+
+export async function runExternalPaidProbe(
+  options: ExternalPaidProbeOptions,
+  dependencies: ExternalPaidProbeDependencies,
+): Promise<ExternalPaidProbeResult> {
+  if (options.mode === "execute-paid") {
+    assertB2BuyerSignedAuthorizationPipelineImplemented();
+  }
+  return runExternalPaidProbeCore(options, dependencies);
+}
+
+/** Explicit test-only seam for historical deterministic paid-core tests. */
+export async function __testOnlyRunExternalPaidProbeCore(
+  options: ExternalPaidProbeOptions,
+  dependencies: ExternalPaidProbeDependencies,
+): Promise<ExternalPaidProbeResult> {
+  return runExternalPaidProbeCore(options, dependencies);
 }
 
 export function normalizeChainId(value: PaidResponse["observedChainId"]): number | null {

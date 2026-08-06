@@ -61,6 +61,7 @@ import {
   requestBindingFromRichSelectedCandidate,
   type SelectedCandidate,
 } from "./trustforge/rich-provider-discovery";
+import { assertB2BuyerSignedAuthorizationPipelineImplemented } from "./trustforge/pre-b2-paid-execution-blocker";
 
 const WORKSPACE = "D:\\trustforge";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -143,7 +144,7 @@ export interface Phase6RunOptions {
   readonly now?: Date;
 }
 
-export async function runPhase6SinglePaidRichProbe(
+async function runPhase6SinglePaidRichProbeCore(
   options: Phase6RunOptions = {},
 ): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
   const phase5RunDir = options.phase5RunDir ?? DEFAULT_PHASE5_RUN;
@@ -228,6 +229,10 @@ export async function runPhase6SinglePaidRichProbe(
         quote_atomic: quoteAtomic,
         authorized_max_usdc: auth.max_usdc,
         pay_to: payTo,
+        seller_network_raw: selectedSellerRequirements.binding.seller_network_raw,
+        canonical_network_caip2:
+          selectedSellerRequirements.binding.canonical_network_caip2,
+        network: selectedSellerRequirements.binding.canonical_network_caip2,
         request_binding: selectedRequestBinding,
         seller_requirements: selectedSellerRequirements,
         canonical_requirements_sha256:
@@ -325,6 +330,22 @@ export async function runPhase6SinglePaidRichProbe(
     phase5RunDir,
     fetchImpl: options.fetchImpl,
   });
+}
+
+export async function runPhase6SinglePaidRichProbe(
+  options: Phase6RunOptions = {},
+): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
+  if (!options.finalizeOnly) {
+    assertB2BuyerSignedAuthorizationPipelineImplemented();
+  }
+  return runPhase6SinglePaidRichProbeCore(options);
+}
+
+/** Explicit test-only seam for historical keyless preflight/core tests. */
+export async function __testOnlyRunPhase6SinglePaidRichProbeCore(
+  options: Phase6RunOptions = {},
+): Promise<{ readonly runDir: string; readonly status: string; readonly resultLines: string[] }> {
+  return runPhase6SinglePaidRichProbeCore(options);
 }
 
 export async function finalizePhase6Run(input: {

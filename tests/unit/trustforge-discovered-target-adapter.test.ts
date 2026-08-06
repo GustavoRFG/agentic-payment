@@ -124,6 +124,8 @@ describe("discovered target adapter", () => {
       provider: "Zapper",
       service_id: "zapper_tx_explainer",
       endpoint,
+      seller_network_raw: "eip155:8453",
+      canonical_network_caip2: "eip155:8453",
       network: "eip155:8453",
       quote_amount_usdc: "0.001125",
       quote_atomic: "1125",
@@ -135,6 +137,50 @@ describe("discovered target adapter", () => {
         scoring_rationale: ["price_atomic=1125"],
       },
     });
+  });
+
+  it("materializes a v1 Base candidate with raw and canonical network fields", () => {
+    const fields = requestFields(
+      endpoint,
+      "POST",
+      [],
+      {},
+      "1125",
+      "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+    );
+    const result = adaptDiscoveredPrimaryToSelectedCandidate({
+      selection: {
+        primary: {
+          method: "POST",
+          handshakeStatus: "live_402_ok",
+          resourceUrl: endpoint,
+          ...fields,
+          sellerRequirements: sellerRequirementsFixture({
+            requestBindingSha256: fields.requestBindingSha256,
+            protocolVersion: 1,
+            network: "base",
+            asset: MAINNET_USDC_ADDRESS,
+            payTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+            amountAtomic: "1125",
+            endpoint,
+          }),
+          quoteUsdc: "0.001125",
+          quoteAtomic: "1125",
+          selectedPayTo: "0x43a2a720cd0911690c248075f4a29a5e7716f758",
+          scoringRationale: [],
+        },
+        fallbacks: [],
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate).toMatchObject({
+      protocol_version: 1,
+      seller_network_raw: "base",
+      canonical_network_caip2: "eip155:8453",
+      network: "eip155:8453",
+    });
+    expect(result.candidate.seller_requirements.selected_requirements.network).toBe("base");
   });
 
   it("rejects absent or non-live primaries without emitting a candidate", () => {
