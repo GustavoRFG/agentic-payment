@@ -151,11 +151,14 @@ export function redactNonce(nonce: string): string {
 // ---------------------------------------------------------------- pipeline
 import {
   buildUnsignedBuyerAuthorization,
+  resolveEip3009Domain,
   signUnsignedAuthorization,
+  validateFreshAuthorizedRequirements,
   type InjectedTypedDataSigner,
   type PreparedAuthorizationInput,
 } from "./buyer-eip3009-authorization";
 import {
+  persistAbandonedArtifact,
   persistAttemptArtifact,
   persistSignedArtifact,
   persistUnsignedArtifact,
@@ -165,6 +168,7 @@ import {
 import {
   assertLegalTransition,
   assertReachableInB2,
+  terminalStateForUnsentAttempt,
   type BuyerAuthorizationState,
 } from "./buyer-authorization-state-machine";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
@@ -172,22 +176,28 @@ import { canonicalCaip2ChainId } from "./x402-network-identity";
 
 export interface BuyerAuthorizationPipelineResult {
   readonly attempt_id: string;
-  readonly state: BuyerAuthorizationState;
+  readonly state: Extract<BuyerAuthorizationState, "TERMINAL_ABANDONED_REAUTHORIZE">;
+  readonly signed_state_reached: Extract<BuyerAuthorizationState, "SIGNED_PERSISTED">;
   readonly unsigned_artifact_sha256: string;
   readonly signed_artifact_sha256: string;
+  readonly abandoned_artifact_sha256: string;
   readonly canonical_unsigned_payload_sha256: string;
   readonly canonical_signed_payload_sha256: string;
   readonly sent: false;
   readonly payment_header_created: false;
   readonly payment_bearing_request_count: 0;
+  readonly retry_allowed: false;
+  readonly resumable_for_send: false;
 }
 
 /**
- * reserve -> nonce -> build -> persist unsigned -> sign -> persist signed -> stop.
+ * validate -> reserve -> nonce -> build -> persist unsigned -> sign ->
+ * persist signed -> abandon (no send).
  *
- * The signer is only reached after the unsigned artifact is on disk, and the
- * function returns at SIGNED_PERSISTED. There is no send here and no code path
- * that could add one without changing this function.
+ * Binding mismatches are checked before the nonce source is touched. The signer
+ * is only reached after the unsigned artifact is on disk. B.2 has no send path,
+ * so a successful run always ends TERMINAL_ABANDONED_REAUTHORIZE: the signature
+ * exists on disk and may never be resumed.
  */
 export async function runBuyerAuthorizationPipeline(input: {
   readonly directory: string;
@@ -200,6 +210,13 @@ export async function runBuyerAuthorizationPipeline(input: {
   readonly now: Date;
   readonly prepared: Omit<PreparedAuthorizationInput, "nonce">;
 }): Promise<BuyerAuthorizationPipelineResult> {
+  // Fail closed before any attempt reservation or nonce draw.
+  validateFreshAuthorizedRequirements(input.prepared);
+  resolveEip3009Domain({
+    observation: input.prepared.paytimeObservation,
+    authorizedAsset: input.prepared.paytimeObservation.binding.asset,
+  });
+
   let state: BuyerAuthorizationState = "RESERVED";
   const reserved = input.registry.reserve({
     attemptId: input.attemptId,
@@ -293,16 +310,35 @@ export async function runBuyerAuthorizationPipeline(input: {
   });
   state = "SIGNED_PERSISTED";
 
-  // B.2 stops here, deliberately.
+  // B.2 has no send. Closing without send abandons: signature is not resumable.
+  const abandonedState = terminalStateForUnsentAttempt(state);
+  assertLegalTransition(state, abandonedState);
+  assertReachableInB2(abandonedState);
+  input.registry.abandon(input.attemptId);
+  const abandonedWrite = persistAbandonedArtifact(input.directory, {
+    ...provenance,
+    state: "TERMINAL_ABANDONED_REAUTHORIZE",
+    abandoned_at: input.now.toISOString(),
+    reason: "B2_SIGNED_NOT_SENT_NO_PAYMENT_BEARING_SEND",
+    signature_reusable: false,
+    resumable_for_send: false,
+    requires_reauthorization: true,
+  });
+  state = "TERMINAL_ABANDONED_REAUTHORIZE";
+
   return {
     attempt_id: input.attemptId,
     state,
+    signed_state_reached: "SIGNED_PERSISTED",
     unsigned_artifact_sha256: unsignedWrite.sha256,
     signed_artifact_sha256: signedWrite.sha256,
+    abandoned_artifact_sha256: abandonedWrite.sha256,
     canonical_unsigned_payload_sha256: unsigned.canonical_unsigned_payload_sha256,
     canonical_signed_payload_sha256: signed.canonical_signed_payload_sha256,
     sent: false,
     payment_header_created: false,
     payment_bearing_request_count: 0,
+    retry_allowed: false,
+    resumable_for_send: false,
   };
 }

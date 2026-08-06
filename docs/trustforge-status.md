@@ -18,7 +18,10 @@ immediately before future signing.
 All productive TrustForge paid runners, thin/shared executors, and rich paid
 callers now fail before key inspection, wallet load, nonce RNG, signing, x402
 client/header creation, fetch, intent consumption, or payment-bearing counters
-with `BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED`. There is
+with `BLOCKED_B2_BUYER_SIGNED_AUTHORIZATION_PIPELINE_NOT_IMPLEMENTED`. The offline
+B.2 buyer-authorization pipeline (reserve → nonce → unsigned persist → injected
+sign → signed persist → abandon) is implemented and tested, but remains inactive
+for production: no productive runner imports or activates it. There is
 no environment bypass. Historical core tests use explicitly named test-only
 dependency seams; B.2 must replace the blocker with persisted unsigned/signed
 buyer authorization gates.

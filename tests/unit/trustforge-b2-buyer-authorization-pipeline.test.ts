@@ -499,13 +499,12 @@ describe("buyer nonce", () => {
   });
 
   it("is not drawn when the binding mismatches", async () => {
-    const nonceSource = vi.fn(() => NONCE_A);
     expect(() =>
       buildUnsignedBuyerAuthorization({
         ...prepared({ obs: observation({ requirementsSha: "other" }) }),
-        nonce: nonceSource(),
+        nonce: NONCE_A,
       }),
-    ).toThrow();
+    ).toThrow(/HASH_MISMATCH/);
     // the pipeline validates before reserving, so a mismatching run never spends one
     const dir = workDir();
     const registry = new BuyerAttemptRegistry(1);
@@ -523,6 +522,9 @@ describe("buyer nonce", () => {
         prepared: prepared({ obs: observation({ requirementsSha: "other" }) }),
       }),
     ).rejects.toThrow(/HASH_MISMATCH/);
+    expect(guardedSource).not.toHaveBeenCalled();
+    expect(registry.attemptCount).toBe(0);
+    expect(registry.hasConsumedNonce(NONCE_B)).toBe(false);
   });
 });
 
@@ -551,10 +553,13 @@ describe("write-once artifacts and ordering", () => {
       prepared: prepared(),
     });
     expect(order).toEqual(["unsigned-exists"]);
-    expect(result.state).toBe("SIGNED_PERSISTED");
+    expect(result.signed_state_reached).toBe("SIGNED_PERSISTED");
+    expect(result.state).toBe("TERMINAL_ABANDONED_REAUTHORIZE");
     expect(result.sent).toBe(false);
+    expect(result.resumable_for_send).toBe(false);
     expect(result.payment_bearing_request_count).toBe(0);
     expect(existsSync(join(dir, SIGNED_ARTIFACT))).toBe(true);
+    expect(existsSync(join(dir, "buyer_authorization_abandoned.json"))).toBe(true);
   });
 
   it("does not call the signer when the unsigned write fails", async () => {
@@ -656,6 +661,14 @@ describe("write-once artifacts and ordering", () => {
     expect(signed.sent).toBe(false);
     expect(signed.retry_allowed).toBe(false);
     expect(signed.unsigned_payload_sha256).toBe(artifact.canonical_unsigned_payload_sha256);
+
+    const abandoned = JSON.parse(
+      readFileSync(join(dir, "buyer_authorization_abandoned.json"), "utf8"),
+    );
+    expect(abandoned.state).toBe("TERMINAL_ABANDONED_REAUTHORIZE");
+    expect(abandoned.resumable_for_send).toBe(false);
+    expect(abandoned.signature_reusable).toBe(false);
+    expect(abandoned.requires_reauthorization).toBe(true);
   });
 });
 
