@@ -28,6 +28,8 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
 - B.2 payment-bearing send: inactive
   (`BLOCKED_B2_PAYMENT_BEARING_SEND_NOT_AUTHORIZED`)
 - B.2 settlement: inactive (`BLOCKED_B2_SETTLEMENT_NOT_AUTHORIZED`)
+- B.2 pre-sign gate: `UNSIGNED_PERSISTED` is never signable without current-time
+  validation inside `signUnsignedAuthorization` (`buyer-pre-sign-validation.ts`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

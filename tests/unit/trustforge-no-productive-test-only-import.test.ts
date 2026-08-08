@@ -1,10 +1,13 @@
 /**
  * GUARD_NO_PRODUCTIVE_IMPORT_OF_TEST_ONLY_PAID_CORE
  * GUARD_NO_PRODUCTIVE_TEST_SUPPORT_DEPENDENCY
+ * GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT
  *
  * Structural barrier after B.2 audit:
  * - productive modules must not export or call `__testOnly*` seams;
- * - productive modules must not import `tests/**` or `test-support`.
+ * - productive modules must not import `tests/**` or `test-support`;
+ * - productive modules must not call signTypedData except inside the
+ *   mandatory pre-sign-validated signing entry point.
  *
  * Historical tests reach paid cores only via `tests/support/`.
  */
@@ -153,5 +156,67 @@ describe("GUARD_NO_PRODUCTIVE_TEST_SUPPORT_DEPENDENCY", () => {
     for (const root of PRODUCTIVE_ROOTS) {
       expect(sourceFiles(root).length, `${root} had no scanned sources`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
+  const ALLOWED_SIGN_TYPED_DATA = new Set([
+    "tools/trustforge/buyer-eip3009-authorization.ts",
+  ]);
+  const BYPASS_EXPORT =
+    /^\s*export\s+(?:async\s+)?(?:function|const)\s+(?:signUnsignedPayload|signTypedDataWithoutValidation|__unsafeSign|rawSignUnsigned)/;
+
+  it("only the validated signing entry point may call signTypedData in productive code", () => {
+    const violations: Violation[] = [];
+    for (const root of PRODUCTIVE_ROOTS) {
+      for (const file of sourceFiles(root)) {
+        const relativePath = relative(process.cwd(), file).split(sep).join("/");
+        if (/(^|\/)(tests?|__tests__|support)\//.test(relativePath)) continue;
+        if (/\.(test|spec)\.[cm]?tsx?$/.test(relativePath)) continue;
+        const lines = readFileSync(file, "utf8").split(/\r?\n/);
+        lines.forEach((line, index) => {
+          if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+          if (BYPASS_EXPORT.test(line)) {
+            violations.push({
+              file: relativePath,
+              line: index + 1,
+              text: line.trim(),
+              kind: "unvalidated-signing-export",
+            });
+          }
+          if (/\.signTypedData\s*\(/.test(line) && !ALLOWED_SIGN_TYPED_DATA.has(relativePath)) {
+            violations.push({
+              file: relativePath,
+              line: index + 1,
+              text: line.trim(),
+              kind: "signTypedData-outside-validated-entrypoint",
+            });
+          }
+        });
+      }
+    }
+    expect(
+      violations,
+      `unvalidated signing entrypoint:\n${violations
+        .map((v) => `  ${v.kind} ${v.file}:${v.line}  ${v.text}`)
+        .join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("signUnsignedAuthorization source mandates pre-sign validation before signer", () => {
+    const source = readFileSync("tools/trustforge/buyer-eip3009-authorization.ts", "utf8");
+    const fnStart = source.indexOf("export async function signUnsignedAuthorization");
+    expect(fnStart).toBeGreaterThanOrEqual(0);
+    const body = source.slice(fnStart, fnStart + 1200);
+    expect(body).toMatch(/validateBuyerAuthorizationBeforeSigning/);
+    expect(body).toMatch(/unsignedArtifact/);
+    expect(body).toMatch(/humanAuthorization/);
+    expect(body.indexOf("validateBuyerAuthorizationBeforeSigning")).toBeLessThan(
+      body.indexOf("signTypedData"),
+    );
+    // No productive overload that accepts only unsigned + signer.
+    expect(source).not.toMatch(
+      /signUnsignedAuthorization\(input:\s*\{\s*readonly unsigned:\s*UnsignedBuyerAuthorization/,
+    );
   });
 });

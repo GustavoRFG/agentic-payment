@@ -26,6 +26,11 @@ import {
   canonicalCaip2ChainId,
 } from "./x402-network-identity";
 import { assertCanonicalBuyerNonce } from "./buyer-authorization-attempt";
+import type { UnsignedArtifact } from "./buyer-authorization-artifacts";
+import {
+  validateBuyerAuthorizationBeforeSigning,
+  type PreSignAttemptArtifact,
+} from "./buyer-pre-sign-validation";
 import type { HumanPaymentAuthorization } from "./validate-human-payment-authorization";
 
 export const BLOCKED_BUYER_EIP3009_DOMAIN_UNRESOLVED =
@@ -387,22 +392,40 @@ export interface SignedBuyerAuthorization {
   readonly signed_at: string;
 }
 
+/**
+ * The only productive signing entry point. Pre-sign validation is mandatory and
+ * cannot be skipped: there is no overload that accepts only an unsigned payload
+ * plus a signer. UNSIGNED_PERSISTED alone never implies SIGNABLE.
+ */
 export async function signUnsignedAuthorization(input: {
-  readonly unsigned: UnsignedBuyerAuthorization;
-  readonly signer: InjectedTypedDataSigner;
+  readonly unsignedArtifact: UnsignedArtifact;
+  readonly attempt: PreSignAttemptArtifact;
+  readonly humanAuthorization: HumanPaymentAuthorization;
   readonly now: Date;
+  readonly signer: InjectedTypedDataSigner;
+  readonly expectedUnsignedHash?: string | null;
 }): Promise<SignedBuyerAuthorization> {
-  const { unsigned, signer } = input;
-  if (!sameAddress(signer.address, unsigned.message.from)) {
+  validateBuyerAuthorizationBeforeSigning({
+    unsignedArtifact: input.unsignedArtifact,
+    attempt: input.attempt,
+    humanAuthorization: input.humanAuthorization,
+    now: input.now,
+    expectedUnsignedHash: input.expectedUnsignedHash,
+  });
+
+  const { unsignedArtifact, signer } = input;
+  if (!sameAddress(signer.address, unsignedArtifact.message.from)) {
     throw new Error(
       `${BLOCKED_BUYER_SIGNER_ADDRESS_MISMATCH}: signer is not the authorized buyer wallet`,
     );
   }
+  // Private to this entry point: no productive export reaches signTypedData without
+  // the validation above.
   const signature = await signer.signTypedData({
-    domain: unsigned.domain,
-    types: unsigned.types,
-    primaryType: unsigned.primary_type,
-    message: unsigned.message,
+    domain: unsignedArtifact.domain,
+    types: unsignedArtifact.types,
+    primaryType: unsignedArtifact.primary_type,
+    message: unsignedArtifact.message,
   });
   if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
     throw new Error(
@@ -410,7 +433,7 @@ export async function signUnsignedAuthorization(input: {
     );
   }
   const core = {
-    unsigned_payload_sha256: unsigned.canonical_unsigned_payload_sha256,
+    unsigned_payload_sha256: unsignedArtifact.canonical_unsigned_payload_sha256,
     signer_address: signer.address,
     signature,
   };
@@ -418,7 +441,7 @@ export async function signUnsignedAuthorization(input: {
     signature,
     signature_encoding: "eip712-65-byte-hex",
     signer_address: signer.address,
-    unsigned_payload_sha256: unsigned.canonical_unsigned_payload_sha256,
+    unsigned_payload_sha256: unsignedArtifact.canonical_unsigned_payload_sha256,
     canonical_signed_payload_sha256: canonicalJsonSha256(core),
     signed_at: input.now.toISOString(),
   };

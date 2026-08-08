@@ -700,9 +700,56 @@ describe("canonical hashing", () => {
   });
 
   it("a different signature changes the signed payload hash", async () => {
-    const unsigned = base();
+    const built = base();
+    const human = humanAuthorization();
+    const attempt = {
+      schema_version: "trustforge_buyer_authorization_artifact_v0.1.0" as const,
+      run_id: "run",
+      attempt_id: "attempt",
+      commit_sha: null,
+      created_at: SIGNING_TIME.toISOString(),
+      state: "RESERVED" as const,
+      reserved_at: SIGNING_TIME.toISOString(),
+      endpoint: "https://seller.example/api",
+      method: "POST",
+      max_payment_attempts: 1,
+      allow_retry: false as const,
+    };
+    const unsignedArtifact = {
+      ...attempt,
+      state: "UNSIGNED_PERSISTED" as const,
+      signing_time: built.signing_time,
+      human_authorization_sha256: canonicalJsonSha256(human),
+      canonical_requirements_sha256: "req-sha",
+      canonical_envelope_sha256: "env-sha",
+      request_binding_sha256: "rb-sha",
+      protocol_version: 1 as const,
+      seller_network_raw: "base",
+      canonical_network_caip2: "eip155:8453" as const,
+      chain_id: 8453,
+      asset: ASSET,
+      pay_to: PAY_TO,
+      seller_amount_atomic: built.seller_amount_atomic,
+      maximum_authorized_amount_atomic: built.maximum_authorized_amount_atomic,
+      buyer_wallet: BUYER,
+      paytime_requirements_observed_at: OBSERVED_AT,
+      effective_signing_deadline: built.effective_signing_deadline,
+      valid_after: built.message.validAfter,
+      valid_before: built.message.validBefore,
+      nonce: built.message.nonce,
+      domain: built.domain,
+      domain_provenance: built.domain_provenance,
+      types: built.types,
+      primary_type: built.primary_type,
+      message: built.message,
+      canonical_unsigned_payload_sha256: built.canonical_unsigned_payload_sha256,
+    };
     const first = await signUnsignedAuthorization({
-      unsigned, signer: fixtureSigner(), now: SIGNING_TIME,
+      unsignedArtifact,
+      attempt,
+      humanAuthorization: human,
+      signer: fixtureSigner(),
+      now: SIGNING_TIME,
     });
     const other: InjectedTypedDataSigner = {
       address: BUYER,
@@ -710,14 +757,66 @@ describe("canonical hashing", () => {
         return `0x${"cd".repeat(65)}`;
       },
     };
-    const second = await signUnsignedAuthorization({ unsigned, signer: other, now: SIGNING_TIME });
+    const second = await signUnsignedAuthorization({
+      unsignedArtifact,
+      attempt,
+      humanAuthorization: human,
+      signer: other,
+      now: SIGNING_TIME,
+    });
     expect(first.canonical_signed_payload_sha256).not.toBe(second.canonical_signed_payload_sha256);
   });
 
   it("refuses a signer that is not the authorized buyer", async () => {
+    const built = base();
+    const human = humanAuthorization();
+    const attempt = {
+      schema_version: "trustforge_buyer_authorization_artifact_v0.1.0" as const,
+      run_id: "run",
+      attempt_id: "attempt",
+      commit_sha: null,
+      created_at: SIGNING_TIME.toISOString(),
+      state: "RESERVED" as const,
+      reserved_at: SIGNING_TIME.toISOString(),
+      endpoint: "https://seller.example/api",
+      method: "POST",
+      max_payment_attempts: 1,
+      allow_retry: false as const,
+    };
+    const unsignedArtifact = {
+      ...attempt,
+      state: "UNSIGNED_PERSISTED" as const,
+      signing_time: built.signing_time,
+      human_authorization_sha256: canonicalJsonSha256(human),
+      canonical_requirements_sha256: "req-sha",
+      canonical_envelope_sha256: "env-sha",
+      request_binding_sha256: "rb-sha",
+      protocol_version: 1 as const,
+      seller_network_raw: "base",
+      canonical_network_caip2: "eip155:8453" as const,
+      chain_id: 8453,
+      asset: ASSET,
+      pay_to: PAY_TO,
+      seller_amount_atomic: built.seller_amount_atomic,
+      maximum_authorized_amount_atomic: built.maximum_authorized_amount_atomic,
+      buyer_wallet: BUYER,
+      paytime_requirements_observed_at: OBSERVED_AT,
+      effective_signing_deadline: built.effective_signing_deadline,
+      valid_after: built.message.validAfter,
+      valid_before: built.message.validBefore,
+      nonce: built.message.nonce,
+      domain: built.domain,
+      domain_provenance: built.domain_provenance,
+      types: built.types,
+      primary_type: built.primary_type,
+      message: built.message,
+      canonical_unsigned_payload_sha256: built.canonical_unsigned_payload_sha256,
+    };
     await expect(
       signUnsignedAuthorization({
-        unsigned: base(),
+        unsignedArtifact,
+        attempt,
+        humanAuthorization: human,
         signer: fixtureSigner("0x9999999999999999999999999999999999999999"),
         now: SIGNING_TIME,
       }),

@@ -343,15 +343,16 @@ export async function runBuyerAuthorizationPipeline(input: {
     created_at: input.now.toISOString(),
   } as const;
 
-  persistAttemptArtifact(input.directory, {
+  const attemptArtifact = {
     ...provenance,
-    state: "RESERVED",
+    state: "RESERVED" as const,
     reserved_at: reserved.reserved_at,
     endpoint: input.prepared.authorizedEndpoint,
     method: input.prepared.authorizedMethod,
     max_payment_attempts: 1,
-    allow_retry: false,
-  });
+    allow_retry: false as const,
+  };
+  persistAttemptArtifact(input.directory, attemptArtifact);
 
   const unsigned = buildUnsignedBuyerAuthorization({ ...input.prepared, nonce: reserved.nonce });
 
@@ -392,11 +393,14 @@ export async function runBuyerAuthorizationPipeline(input: {
   const unsignedWrite = persistUnsignedArtifact(input.directory, unsignedArtifact);
   state = "UNSIGNED_PERSISTED";
 
-  // only now may a signer be involved
+  // only now may a signer be involved — pre-sign validation is mandatory inside
   const signed = await signUnsignedAuthorization({
-    unsigned,
-    signer: input.signer,
+    unsignedArtifact,
+    attempt: attemptArtifact,
+    humanAuthorization: input.prepared.humanAuthorization,
     now: input.now,
+    signer: input.signer,
+    expectedUnsignedHash: unsignedWrite.sha256,
   });
 
   assertLegalTransition(state, "SIGNED_PERSISTED");
