@@ -152,7 +152,6 @@ export function redactNonce(nonce: string): string {
 import {
   buildUnsignedBuyerAuthorization,
   resolveEip3009Domain,
-  signUnsignedAuthorization,
   validateFreshAuthorizedRequirements,
   type InjectedTypedDataSigner,
   type PreparedAuthorizationInput,
@@ -160,9 +159,7 @@ import {
 import {
   persistAbandonedArtifact,
   persistAttemptArtifact,
-  persistSignedArtifact,
   persistUnsignedArtifact,
-  UNSIGNED_ARTIFACT,
   type UnsignedArtifact,
 } from "./buyer-authorization-artifacts";
 import {
@@ -174,6 +171,11 @@ import {
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 import { canonicalCaip2ChainId } from "./x402-network-identity";
 import { BLOCKED_B2_REAL_SIGNER_NOT_AUTHORIZED } from "./b2-execution-gates";
+import {
+  adaptInjectedTypedDataSigner,
+  runAuthorizedBuyerSigning,
+} from "./buyer-authorization-signer";
+import { buildSyntheticBuyerSigningAuthorization } from "./buyer-signing-authorization";
 
 export interface BuyerAuthorizationPipelineResult {
   readonly attempt_id: string;
@@ -393,36 +395,32 @@ export async function runBuyerAuthorizationPipeline(input: {
   const unsignedWrite = persistUnsignedArtifact(input.directory, unsignedArtifact);
   state = "UNSIGNED_PERSISTED";
 
-  // only now may a signer be involved — pre-sign validation is mandatory inside
-  const signed = await signUnsignedAuthorization({
+  // Offline fixture path: synthetic one-shot signing authorization + validated
+  // B.3 signer boundary. Never loads credentials; stops before send, then abandons.
+  const prepareAuthorizationSha256 = canonicalJsonSha256(input.prepared.humanAuthorization);
+  const signingAuthorization = buildSyntheticBuyerSigningAuthorization({
+    decisionId: `synthetic_${input.attemptId}`,
+    prepareAuthorizationSha256,
+    unsignedArtifact,
+    unsignedArtifactSha256: unsignedWrite.sha256,
+    signingAuthorizationExpiresAt: input.prepared.humanAuthorization.authorization_expires_at!,
+  });
+  const authorized = await runAuthorizedBuyerSigning({
+    directory: input.directory,
     unsignedArtifact,
     attempt: attemptArtifact,
     humanAuthorization: input.prepared.humanAuthorization,
+    signingAuthorization,
     now: input.now,
-    signer: input.signer,
+    signer: adaptInjectedTypedDataSigner(input.signer),
     expectedUnsignedHash: unsignedWrite.sha256,
+    commitSha: input.commitSha,
+    returnBeforeSendGateThrow: true,
   });
-
   assertLegalTransition(state, "SIGNED_PERSISTED");
-  const signedWrite = persistSignedArtifact(input.directory, {
-    ...provenance,
-    state: "SIGNED_PERSISTED",
-    unsigned_artifact_path: UNSIGNED_ARTIFACT,
-    unsigned_artifact_sha256: unsignedWrite.sha256,
-    unsigned_payload_sha256: signed.unsigned_payload_sha256,
-    signer_address: signed.signer_address,
-    signature: signed.signature,
-    signature_encoding: signed.signature_encoding,
-    canonical_signed_payload_sha256: signed.canonical_signed_payload_sha256,
-    signed_at: signed.signed_at,
-    payment_header_created: false,
-    payment_bearing_request_count: 0,
-    sent: false,
-    retry_allowed: false,
-  });
   state = "SIGNED_PERSISTED";
 
-  // B.2 has no send. Closing without send abandons: signature is not resumable.
+  // B.2/B.3 has no send. Closing without send abandons: signature is not resumable.
   const abandonedState = terminalStateForUnsentAttempt(state);
   assertLegalTransition(state, abandonedState);
   assertReachableInB2(abandonedState);
@@ -443,10 +441,11 @@ export async function runBuyerAuthorizationPipeline(input: {
     state,
     signed_state_reached: "SIGNED_PERSISTED",
     unsigned_artifact_sha256: unsignedWrite.sha256,
-    signed_artifact_sha256: signedWrite.sha256,
+    signed_artifact_sha256: authorized.signed_artifact_sha256,
     abandoned_artifact_sha256: abandonedWrite.sha256,
     canonical_unsigned_payload_sha256: unsigned.canonical_unsigned_payload_sha256,
-    canonical_signed_payload_sha256: signed.canonical_signed_payload_sha256,
+    canonical_signed_payload_sha256:
+      authorized.signed_artifact.canonical_signed_payload_sha256,
     sent: false,
     payment_header_created: false,
     payment_bearing_request_count: 0,

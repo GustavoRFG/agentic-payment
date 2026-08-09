@@ -37,6 +37,8 @@ import {
   signUnsignedAuthorization,
   type InjectedTypedDataSigner,
 } from "../../tools/trustforge/buyer-eip3009-authorization";
+import { prepareValidatedBuyerAuthorizationForSigning } from "../../tools/trustforge/buyer-validated-signing";
+import { buildSyntheticBuyerSigningAuthorization } from "../../tools/trustforge/buyer-signing-authorization";
 import {
   BLOCKED_BUYER_ARTIFACT_ORDER,
   BLOCKED_BUYER_ARTIFACT_OVERWRITE,
@@ -744,10 +746,24 @@ describe("canonical hashing", () => {
       message: built.message,
       canonical_unsigned_payload_sha256: built.canonical_unsigned_payload_sha256,
     };
-    const first = await signUnsignedAuthorization({
+    const unsignedHash = canonicalJsonSha256(unsignedArtifact);
+    const signingAuthorization = buildSyntheticBuyerSigningAuthorization({
+      decisionId: "hash-diff",
+      prepareAuthorizationSha256: canonicalJsonSha256(human),
+      unsignedArtifact,
+      unsignedArtifactSha256: unsignedHash,
+      signingAuthorizationExpiresAt: human.authorization_expires_at!,
+    });
+    const validated = prepareValidatedBuyerAuthorizationForSigning({
       unsignedArtifact,
       attempt,
       humanAuthorization: human,
+      signingAuthorization,
+      now: SIGNING_TIME,
+      expectedUnsignedHash: unsignedHash,
+    });
+    const first = await signUnsignedAuthorization({
+      validated,
       signer: fixtureSigner(),
       now: SIGNING_TIME,
     });
@@ -758,9 +774,7 @@ describe("canonical hashing", () => {
       },
     };
     const second = await signUnsignedAuthorization({
-      unsignedArtifact,
-      attempt,
-      humanAuthorization: human,
+      validated,
       signer: other,
       now: SIGNING_TIME,
     });
@@ -812,11 +826,25 @@ describe("canonical hashing", () => {
       message: built.message,
       canonical_unsigned_payload_sha256: built.canonical_unsigned_payload_sha256,
     };
+    const unsignedHash = canonicalJsonSha256(unsignedArtifact);
+    const signingAuthorization = buildSyntheticBuyerSigningAuthorization({
+      decisionId: "wrong-buyer",
+      prepareAuthorizationSha256: canonicalJsonSha256(human),
+      unsignedArtifact,
+      unsignedArtifactSha256: unsignedHash,
+      signingAuthorizationExpiresAt: human.authorization_expires_at!,
+    });
+    const validated = prepareValidatedBuyerAuthorizationForSigning({
+      unsignedArtifact,
+      attempt,
+      humanAuthorization: human,
+      signingAuthorization,
+      now: SIGNING_TIME,
+      expectedUnsignedHash: unsignedHash,
+    });
     await expect(
       signUnsignedAuthorization({
-        unsignedArtifact,
-        attempt,
-        humanAuthorization: human,
+        validated,
         signer: fixtureSigner("0x9999999999999999999999999999999999999999"),
         now: SIGNING_TIME,
       }),

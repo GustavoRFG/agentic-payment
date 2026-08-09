@@ -27,8 +27,43 @@ import {
   validateBuyerAuthorizationBeforeSigning,
   type PreSignAttemptArtifact,
 } from "../../tools/trustforge/buyer-pre-sign-validation";
+import { buildSyntheticBuyerSigningAuthorization } from "../../tools/trustforge/buyer-signing-authorization";
+import { prepareValidatedBuyerAuthorizationForSigning } from "../../tools/trustforge/buyer-validated-signing";
 import type { SellerRequirementsObservation } from "../../tools/trustforge/x402-seller-requirements-binding";
 import type { HumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
+
+function signWithValidated(input: {
+  readonly unsignedArtifact: UnsignedArtifact;
+  readonly attempt: PreSignAttemptArtifact;
+  readonly humanAuthorization: HumanPaymentAuthorization;
+  readonly now: Date;
+  readonly signer: InjectedTypedDataSigner;
+  readonly expectedUnsignedHash?: string | null;
+}) {
+  const unsignedHash =
+    input.expectedUnsignedHash ?? canonicalJsonSha256(input.unsignedArtifact);
+  const signingAuthorization = buildSyntheticBuyerSigningAuthorization({
+    decisionId: `presign_${input.attempt.attempt_id}`,
+    prepareAuthorizationSha256: canonicalJsonSha256(input.humanAuthorization),
+    unsignedArtifact: input.unsignedArtifact,
+    unsignedArtifactSha256: unsignedHash,
+    signingAuthorizationExpiresAt:
+      input.humanAuthorization.authorization_expires_at ?? "2099-01-01T00:00:00.000Z",
+  });
+  const validated = prepareValidatedBuyerAuthorizationForSigning({
+    unsignedArtifact: input.unsignedArtifact,
+    attempt: input.attempt,
+    humanAuthorization: input.humanAuthorization,
+    signingAuthorization,
+    now: input.now,
+    expectedUnsignedHash: input.expectedUnsignedHash,
+  });
+  return signUnsignedAuthorization({
+    validated,
+    signer: input.signer,
+    now: input.now,
+  });
+}
 
 const BUYER = "0x1111111111111111111111111111111111111111";
 const PAY_TO = "0x2222222222222222222222222222222222222222";
@@ -518,16 +553,16 @@ describe("pre-sign validation — adversarial bindings", () => {
     for (const c of cases) {
       const mutated = c.mutate();
       await expect(
-        signUnsignedAuthorization({
-          unsignedArtifact: mutated.unsignedArtifact,
-          attempt: mutated.attempt,
-          humanAuthorization: mutated.humanAuthorization,
-          now: SIGNING_TIME,
-          signer,
-          expectedUnsignedHash,
-        }),
+        () =>
+          validateBuyerAuthorizationBeforeSigning({
+            unsignedArtifact: mutated.unsignedArtifact,
+            attempt: mutated.attempt,
+            humanAuthorization: mutated.humanAuthorization,
+            now: SIGNING_TIME,
+            expectedUnsignedHash,
+          }),
         c.label,
-      ).rejects.toThrow(new RegExp(c.code));
+      ).toThrow(new RegExp(c.code));
     }
     expect(signer.calls).toBe(0);
   });
@@ -535,7 +570,7 @@ describe("pre-sign validation — adversarial bindings", () => {
   it("positive fresh fixture reaches the signer spy exactly once", async () => {
     const bundle = buildFreshBundle();
     const signer = fixtureSigner();
-    const result = await signUnsignedAuthorization({
+    const result = await signWithValidated({
       unsignedArtifact: bundle.unsignedArtifact,
       attempt: bundle.attempt,
       humanAuthorization: bundle.human,
@@ -555,7 +590,7 @@ describe("pre-sign validation — adversarial bindings", () => {
     const humanReloaded = JSON.parse(JSON.stringify(bundle.human)) as HumanPaymentAuthorization;
     const signer = fixtureSigner();
 
-    await signUnsignedAuthorization({
+    await signWithValidated({
       unsignedArtifact: reloaded,
       attempt: attemptReloaded,
       humanAuthorization: humanReloaded,
@@ -565,22 +600,24 @@ describe("pre-sign validation — adversarial bindings", () => {
     expect(signer.calls).toBe(1);
 
     await expect(
-      signUnsignedAuthorization({
-        unsignedArtifact: reloaded,
-        attempt: attemptReloaded,
-        humanAuthorization: humanReloaded,
-        now: new Date(Date.parse(reloaded.effective_signing_deadline)),
-        signer,
-      }),
+      (async () =>
+        signWithValidated({
+          unsignedArtifact: reloaded,
+          attempt: attemptReloaded,
+          humanAuthorization: humanReloaded,
+          now: new Date(Date.parse(reloaded.effective_signing_deadline)),
+          signer,
+        }))(),
     ).rejects.toThrow(new RegExp(BLOCKED_PAYMENT_REQUIREMENTS_STALE));
     await expect(
-      signUnsignedAuthorization({
-        unsignedArtifact: reloaded,
-        attempt: attemptReloaded,
-        humanAuthorization: humanReloaded,
-        now: new Date(Date.parse(reloaded.effective_signing_deadline) + 1),
-        signer,
-      }),
+      (async () =>
+        signWithValidated({
+          unsignedArtifact: reloaded,
+          attempt: attemptReloaded,
+          humanAuthorization: humanReloaded,
+          now: new Date(Date.parse(reloaded.effective_signing_deadline) + 1),
+          signer,
+        }))(),
     ).rejects.toThrow(new RegExp(BLOCKED_PAYMENT_REQUIREMENTS_STALE));
     expect(signer.calls).toBe(1);
   });
@@ -610,13 +647,14 @@ describe("pre-sign validation — real stale attempt rejection", () => {
     const signer = fixtureSigner(unsignedArtifact.buyer_wallet);
     const now = new Date();
     await expect(
-      signUnsignedAuthorization({
-        unsignedArtifact,
-        attempt,
-        humanAuthorization,
-        now,
-        signer,
-      }),
+      (async () =>
+        signWithValidated({
+          unsignedArtifact,
+          attempt,
+          humanAuthorization,
+          now,
+          signer,
+        }))(),
     ).rejects.toThrow(
       /BLOCKED_HUMAN_AUTHORIZATION_EXPIRED|BLOCKED_PAYMENT_REQUIREMENTS_STALE|BLOCKED_BUYER_AUTHORIZATION_VALIDITY_INVALID/,
     );

@@ -26,12 +26,9 @@ import {
   canonicalCaip2ChainId,
 } from "./x402-network-identity";
 import { assertCanonicalBuyerNonce } from "./buyer-authorization-attempt";
-import type { UnsignedArtifact } from "./buyer-authorization-artifacts";
-import {
-  validateBuyerAuthorizationBeforeSigning,
-  type PreSignAttemptArtifact,
-} from "./buyer-pre-sign-validation";
 import type { HumanPaymentAuthorization } from "./validate-human-payment-authorization";
+import type { ValidatedBuyerAuthorizationForSigning } from "./buyer-validated-signing";
+// type-only import: avoids runtime cycle with buyer-validated-signing
 
 export const BLOCKED_BUYER_EIP3009_DOMAIN_UNRESOLVED =
   "BLOCKED_BUYER_EIP3009_DOMAIN_UNRESOLVED" as const;
@@ -393,39 +390,30 @@ export interface SignedBuyerAuthorization {
 }
 
 /**
- * The only productive signing entry point. Pre-sign validation is mandatory and
- * cannot be skipped: there is no overload that accepts only an unsigned payload
- * plus a signer. UNSIGNED_PERSISTED alone never implies SIGNABLE.
+ * Low-level signing of an already-validated authorization object.
+ *
+ * Prefer `runAuthorizedBuyerSigning` for the B.3 productive boundary (signing
+ * authorization + one-shot ledger + send gate). This helper still refuses raw
+ * unsigned artifacts: callers must supply ValidatedBuyerAuthorizationForSigning
+ * from `prepareValidatedBuyerAuthorizationForSigning`.
  */
 export async function signUnsignedAuthorization(input: {
-  readonly unsignedArtifact: UnsignedArtifact;
-  readonly attempt: PreSignAttemptArtifact;
-  readonly humanAuthorization: HumanPaymentAuthorization;
+  readonly validated: ValidatedBuyerAuthorizationForSigning;
   readonly now: Date;
   readonly signer: InjectedTypedDataSigner;
-  readonly expectedUnsignedHash?: string | null;
 }): Promise<SignedBuyerAuthorization> {
-  validateBuyerAuthorizationBeforeSigning({
-    unsignedArtifact: input.unsignedArtifact,
-    attempt: input.attempt,
-    humanAuthorization: input.humanAuthorization,
-    now: input.now,
-    expectedUnsignedHash: input.expectedUnsignedHash,
-  });
-
-  const { unsignedArtifact, signer } = input;
+  const { validated, signer } = input;
+  const unsignedArtifact = validated.unsignedArtifact;
   if (!sameAddress(signer.address, unsignedArtifact.message.from)) {
     throw new Error(
       `${BLOCKED_BUYER_SIGNER_ADDRESS_MISMATCH}: signer is not the authorized buyer wallet`,
     );
   }
-  // Private to this entry point: no productive export reaches signTypedData without
-  // the validation above.
   const signature = await signer.signTypedData({
-    domain: unsignedArtifact.domain,
-    types: unsignedArtifact.types,
-    primaryType: unsignedArtifact.primary_type,
-    message: unsignedArtifact.message,
+    domain: validated.typedData.domain,
+    types: validated.typedData.types,
+    primaryType: validated.typedData.primaryType,
+    message: validated.typedData.message,
   });
   if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
     throw new Error(

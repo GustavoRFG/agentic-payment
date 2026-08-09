@@ -1,0 +1,12 @@
+{
+  "schema_version": "trustforge_signer_activation_policy.v1",
+  "signer_adapter_installed": true,
+  "real_signing_enabled": false,
+  "automatic_wallet_discovery": false,
+  "wallet_env_loading_enabled": false,
+  "credential_provider_enabled": false,
+  "payment_bearing_send_enabled": false,
+  "settlement_enabled": false,
+  "retry_enabled": false,
+  "effect": "B.3 signer boundary ready and inactive; no real key, signature, payment header, send, or settlement"
+}

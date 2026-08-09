@@ -162,6 +162,7 @@ describe("GUARD_NO_PRODUCTIVE_TEST_SUPPORT_DEPENDENCY", () => {
 describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
   const ALLOWED_SIGN_TYPED_DATA = new Set([
     "tools/trustforge/buyer-eip3009-authorization.ts",
+    "tools/trustforge/buyer-authorization-signer.ts",
   ]);
   const BYPASS_EXPORT =
     /^\s*export\s+(?:async\s+)?(?:function|const)\s+(?:signUnsignedPayload|signTypedDataWithoutValidation|__unsafeSign|rawSignUnsigned)/;
@@ -203,20 +204,30 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     ).toEqual([]);
   });
 
-  it("signUnsignedAuthorization source mandates pre-sign validation before signer", () => {
+  it("signUnsignedAuthorization accepts only ValidatedBuyerAuthorizationForSigning", () => {
     const source = readFileSync("tools/trustforge/buyer-eip3009-authorization.ts", "utf8");
     const fnStart = source.indexOf("export async function signUnsignedAuthorization");
     expect(fnStart).toBeGreaterThanOrEqual(0);
     const body = source.slice(fnStart, fnStart + 1200);
-    expect(body).toMatch(/validateBuyerAuthorizationBeforeSigning/);
-    expect(body).toMatch(/unsignedArtifact/);
-    expect(body).toMatch(/humanAuthorization/);
-    expect(body.indexOf("validateBuyerAuthorizationBeforeSigning")).toBeLessThan(
-      body.indexOf("signTypedData"),
-    );
-    // No productive overload that accepts only unsigned + signer.
+    expect(body).toMatch(/ValidatedBuyerAuthorizationForSigning/);
+    expect(body).toMatch(/validated\.typedData/);
+    // No productive overload that accepts only raw unsigned + signer.
     expect(source).not.toMatch(
       /signUnsignedAuthorization\(input:\s*\{\s*readonly unsigned:\s*UnsignedBuyerAuthorization/,
     );
+    expect(source).not.toMatch(
+      /readonly unsignedArtifact:\s*UnsignedArtifact[\s\S]{0,200}readonly signer:/,
+    );
+  });
+
+  it("GUARD_NO_PRODUCTIVE_RAW_BUYER_SIGNING_BYPASS: B.3 path requires validated factory", () => {
+    const signerSource = readFileSync("tools/trustforge/buyer-authorization-signer.ts", "utf8");
+    expect(signerSource).toMatch(/prepareValidatedBuyerAuthorizationForSigning/);
+    expect(signerSource).toMatch(/ValidatedBuyerTypedData/);
+    expect(signerSource).toMatch(/assertB3PaymentBearingSendNotAuthorized|BLOCKED_B3_PAYMENT_BEARING_SEND_NOT_AUTHORIZED/);
+    expect(signerSource).toMatch(/BLOCKED_B3_REAL_SIGNER_CREDENTIAL_PROVIDER_NOT_AUTHORIZED/);
+    // Credential provider has no env/key loader.
+    expect(signerSource).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(signerSource).not.toMatch(/privateKeyToAccount/);
   });
 });
