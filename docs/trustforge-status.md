@@ -41,6 +41,10 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   `credential_access_enabled=false` → `BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED`)
 - B.3.1 credential-access authorization: contract implemented; no operational
   credential-access authorization for a live candidate
+- B.3.2 signer mechanism registry: ready and inactive
+  (explicit provider IDs; `real_backend_activation=false`,
+  `selected_productive_provider_id=NONE`; real adapters terminate at
+  `BLOCKED_B32_REAL_CREDENTIAL_BACKEND_INACTIVE`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

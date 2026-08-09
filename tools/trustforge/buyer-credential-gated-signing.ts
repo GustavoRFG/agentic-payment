@@ -1,19 +1,20 @@
 /**
- * buyer-credential-gated-signing — B.3.1 path through credential provider.
+ * buyer-credential-gated-signing — B.3.1/B.3.2 path through credential provider.
  *
  * Sequence:
  *   validate unsigned + signing auth
- *   → credential policy
+ *   → credential policy + explicit provider registry
  *   → expected signer binding
  *   → credential-access authorization (when access enabled)
  *   → CREDENTIAL ACCESS GATE
- *   → [future/synthetic acquire]
+ *   → signer-provider adapter (inactive real backends)
  *   → fresh pre-sign revalidation
  *   → signer
  *   → signed persistence
  *   → SEND GATE
  *
- * Production policy keeps credential_access_enabled=false and stops at
+ * Production policy keeps credential_access_enabled=false and
+ * real_backend_activation=false; stops at
  * BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED with zero provider acquire calls.
  */
 
@@ -23,6 +24,7 @@ import {
   BLOCKED_B31_PROVIDER_MISMATCH,
   assertB31CredentialAccessNotAuthorized,
 } from "./b31-execution-gates";
+import { BLOCKED_B32_ACTUAL_SIGNER_IDENTITY_MISMATCH } from "./b32-execution-gates";
 import { loadB31CredentialProviderPolicy } from "./b31-credential-provider-policy";
 import { loadB3SignerActivationPolicy } from "./b3-signer-activation-policy";
 import type { UnsignedArtifact } from "./buyer-authorization-artifacts";
@@ -38,16 +40,18 @@ import {
 } from "./buyer-credential-access-authorization";
 import { BuyerCredentialAccessLedger } from "./buyer-credential-access-ledger";
 import {
-  createInactiveProductionCredentialProvider,
   stampAuthorizedCredentialAccessRequest,
   type BuyerCredentialProvider,
   type CredentialProviderContext,
 } from "./buyer-credential-provider";
+import {
+  assertExplicitProviderSelection,
+  resolveProductiveCredentialProvider,
+} from "./buyer-credential-provider-registry";
 import type { PreSignAttemptArtifact } from "./buyer-pre-sign-validation";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
 import { prepareValidatedBuyerAuthorizationForSigning } from "./buyer-validated-signing";
 import type { HumanPaymentAuthorization } from "./validate-human-payment-authorization";
-import { BLOCKED_BUYER_SIGNER_ADDRESS_MISMATCH } from "./buyer-eip3009-authorization";
 
 function sameAddress(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
@@ -93,6 +97,8 @@ export async function runCredentialGatedBuyerSigning(
     input.cwd,
   );
 
+  // B.3.2: explicit registry selection — no implicit fallback / discovery.
+  assertExplicitProviderSelection({ policy: credentialPolicy });
   if (credentialPolicy.automatic_discovery_enabled !== false) {
     throw new Error(
       `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: automatic credential discovery is forbidden`,
@@ -101,6 +107,16 @@ export async function runCredentialGatedBuyerSigning(
   if (credentialPolicy.fallback_provider_enabled !== false) {
     throw new Error(
       `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: fallback credential providers are forbidden`,
+    );
+  }
+  if (credentialPolicy.real_backend_activation !== false) {
+    throw new Error(
+      `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: real credential backend activation is forbidden`,
+    );
+  }
+  if (credentialPolicy.credential_caching_enabled !== false) {
+    throw new Error(
+      `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: credential caching is forbidden`,
     );
   }
 
@@ -151,12 +167,7 @@ export async function runCredentialGatedBuyerSigning(
   }
 
   const provider =
-    input.provider ??
-    createInactiveProductionCredentialProvider({
-      providerId: credentialPolicy.provider_id,
-      credentialKind: credentialPolicy.credential_kind,
-      policyExpectedSignerAddress: credentialPolicy.expected_signer_address,
-    });
+    input.provider ?? resolveProductiveCredentialProvider(credentialPolicy);
 
   if (provider.providerId !== credentialPolicy.provider_id) {
     throw new Error(
@@ -170,6 +181,10 @@ export async function runCredentialGatedBuyerSigning(
   }
 
   // Validate credential-access authorization before any provider call.
+  assertExplicitProviderSelection({
+    policy: credentialPolicy,
+    authorizationProviderId: input.credentialAccessAuthorization?.provider_id,
+  });
   const accessAuth = validateBuyerCredentialAccessAuthorization({
     authorization: input.credentialAccessAuthorization,
     signingAuthorization: validated.signingAuthorization,
@@ -238,7 +253,7 @@ export async function runCredentialGatedBuyerSigning(
   if (!sameAddress(signer.address, expectedFromAuth)) {
     credentialLedger.markAmbiguous(accessAuth.decision_id, validated.unsignedArtifactSha256);
     throw new Error(
-      `${BLOCKED_BUYER_SIGNER_ADDRESS_MISMATCH}: acquired signer is not the expected buyer wallet`,
+      `${BLOCKED_B32_ACTUAL_SIGNER_IDENTITY_MISMATCH}: acquired signer is not the expected buyer wallet`,
     );
   }
 

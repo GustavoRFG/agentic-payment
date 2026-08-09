@@ -2,7 +2,8 @@
  * buyer-credential-provider — selection vs privileged credential access.
  *
  * resolveSignerIdentity must not require secrets.
- * acquireSigner is privileged and hard-blocked in production during B.3.1.
+ * acquireSigner is privileged and hard-blocked in production during B.3.1/B.3.2.
+ * Credential implementation (adapters) is independent of this interface.
  */
 
 import {
@@ -15,6 +16,7 @@ import type {
   HexAddress,
 } from "./buyer-authorization-signer";
 import type { ValidatedBuyerAuthorizationForSigning } from "./buyer-validated-signing";
+import type { CredentialBackendInput } from "./buyer-credential-backend-types";
 
 export interface BuyerSignerIdentity {
   readonly address: HexAddress;
@@ -50,8 +52,13 @@ export interface BuyerCredentialProvider {
   resolveSignerIdentity(
     context: CredentialProviderContext,
   ): Promise<BuyerSignerIdentity>;
+  /**
+   * Privileged. `credentialInput` may only be supplied by an operational layer
+   * after credential-access authorization — never from process.env defaults.
+   */
   acquireSigner(
     request: AuthorizedCredentialAccessRequest,
+    credentialInput?: CredentialBackendInput,
   ): Promise<BuyerAuthorizationSigner>;
 }
 
@@ -87,7 +94,9 @@ export function createInactiveProductionCredentialProvider(input: {
     },
     async acquireSigner(
       _request: AuthorizedCredentialAccessRequest,
+      _credentialInput?: CredentialBackendInput,
     ): Promise<BuyerAuthorizationSigner> {
+      void _credentialInput;
       assertB31CredentialAccessNotAuthorized();
     },
   };

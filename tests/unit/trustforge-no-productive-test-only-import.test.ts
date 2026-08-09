@@ -263,4 +263,42 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     }
     expect(productiveHits).toEqual([]);
   });
+
+  it("GUARD_NO_PRODUCTIVE_IMPLICIT_CREDENTIAL_PROVIDER_FALLBACK", () => {
+    const registry = readFileSync(
+      "tools/trustforge/buyer-credential-provider-registry.ts",
+      "utf8",
+    );
+    expect(registry).toMatch(/BLOCKED_B32_CREDENTIAL_PROVIDER_UNKNOWN/);
+    expect(registry).toMatch(/BLOCKED_B32_CREDENTIAL_PROVIDER_AMBIGUOUS/);
+    expect(registry).toMatch(/assertExplicitProviderSelection/);
+    expect(registry).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(registry).not.toMatch(/BUYER_PRIVATE_KEY/);
+    expect(registry).not.toMatch(/fallback.*=.*true/);
+
+    const gated = readFileSync("tools/trustforge/buyer-credential-gated-signing.ts", "utf8");
+    expect(gated).toMatch(/assertExplicitProviderSelection/);
+    expect(gated).toMatch(/resolveProductiveCredentialProvider/);
+    expect(gated).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+  });
+
+  it("GUARD_NO_PRODUCTIVE_GENERAL_PURPOSE_BUYER_SIGNER", () => {
+    const adapters = readFileSync(
+      "tools/trustforge/buyer-credential-provider-adapters.ts",
+      "utf8",
+    );
+    expect(adapters).toMatch(/RestrictedBuyerAuthorizationSigner/);
+    expect(adapters).toMatch(/BLOCKED_B32_REAL_CREDENTIAL_BACKEND_INACTIVE/);
+    expect(adapters).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(adapters).not.toMatch(/privateKeyToAccount/);
+    expect(adapters).not.toMatch(/createWalletClient/);
+    expect(adapters).not.toMatch(/signMessage\s*\(/);
+    expect(adapters).not.toMatch(/signTransaction\s*\(/);
+
+    const signer = readFileSync("tools/trustforge/buyer-authorization-signer.ts", "utf8");
+    expect(signer).toMatch(/ValidatedBuyerTypedData/);
+    // Productive BuyerAuthorizationSigner must not advertise general-purpose APIs.
+    expect(signer).not.toMatch(/signMessage\s*\(/);
+    expect(signer).not.toMatch(/signTransaction\s*\(/);
+  });
 });

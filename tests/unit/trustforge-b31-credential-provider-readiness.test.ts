@@ -26,6 +26,7 @@ import {
   BLOCKED_B31_EXPECTED_SIGNER_IDENTITY_MISMATCH,
   BLOCKED_B31_PROVIDER_MISMATCH,
 } from "../../tools/trustforge/b31-execution-gates";
+import { BLOCKED_B32_CREDENTIAL_PROVIDER_AMBIGUOUS } from "../../tools/trustforge/b32-execution-gates";
 import {
   loadB31CredentialProviderPolicy,
   validateB31CredentialProviderPolicy,
@@ -228,12 +229,16 @@ function writeAccessEnabledPolicy(dir: string, overrides: Record<string, unknown
     path,
     `${JSON.stringify(
       {
-        schema_version: "trustforge_buyer_credential_provider_policy.v1",
+        schema_version: "trustforge_buyer_credential_provider_policy.v2",
         credential_provider_configured: true,
+        allowed_provider_ids: [SYNTHETIC_CREDENTIAL_PROVIDER_ID],
+        selected_productive_provider_id: "NONE",
         provider_id: SYNTHETIC_CREDENTIAL_PROVIDER_ID,
         credential_kind: SYNTHETIC_CREDENTIAL_KIND,
         expected_signer_address: BUYER,
         credential_access_enabled: true,
+        real_backend_activation: false,
+        credential_caching_enabled: false,
         automatic_discovery_enabled: false,
         fallback_provider_enabled: false,
         real_signing_enabled: false,
@@ -262,6 +267,8 @@ describe("B.3.1 credential provider policy", () => {
     expect(policy.credential_access_enabled).toBe(false);
     expect(policy.automatic_discovery_enabled).toBe(false);
     expect(policy.fallback_provider_enabled).toBe(false);
+    expect(policy.real_backend_activation).toBe(false);
+    expect(policy.selected_productive_provider_id).toBe("NONE");
   });
 
   it("rejects automatic discovery", () => {
@@ -378,7 +385,11 @@ describe("B.3.1 synthetic credential provider gates", () => {
         provider,
         credentialPolicyPath: policyPath,
       }),
-    ).rejects.toThrow(new RegExp(`${BLOCKED_B31_PROVIDER_MISMATCH}|${BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID}`));
+    ).rejects.toThrow(
+      new RegExp(
+        `${BLOCKED_B32_CREDENTIAL_PROVIDER_AMBIGUOUS}|${BLOCKED_B31_PROVIDER_MISMATCH}|${BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID}`,
+      ),
+    );
     expect(provider.acquireCalls).toBe(0);
     expect(provider.signerCalls).toBe(0);
   });

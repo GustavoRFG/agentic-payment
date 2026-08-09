@@ -48,9 +48,11 @@ export function createSyntheticBuyerCredentialProvider(input: {
     },
     async acquireSigner(
       request: AuthorizedCredentialAccessRequest,
+      _credentialInput?: unknown,
     ): Promise<BuyerAuthorizationSigner> {
       provider.acquireCalls += 1;
       void request;
+      void _credentialInput;
       return {
         address: input.address,
         async signTypedData(_typed: ValidatedBuyerTypedData): Promise<HexSignature> {
