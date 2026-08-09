@@ -52,7 +52,8 @@ export interface BuyerAuthorizationSigner {
 }
 
 /**
- * Future credential acquisition seam. Every productive implementation is blocked.
+ * Legacy B.3 stub. Prefer `buyer-credential-provider.ts` + B.3.1 gated path.
+ * Every productive implementation remains blocked.
  */
 export interface BuyerCredentialProvider {
   readonly kind: "unauthorized" | "future";

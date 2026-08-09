@@ -36,6 +36,11 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
 - B.3 signing authorization: contract implemented; no operational signing
   authorization for a live candidate
 - B.3 post-sign send gate: `BLOCKED_B3_PAYMENT_BEARING_SEND_NOT_AUTHORIZED`
+- B.3.1 credential provider: configured and inactive
+  (`config/trustforge_buyer_credential_provider_policy.json`;
+  `credential_access_enabled=false` → `BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED`)
+- B.3.1 credential-access authorization: contract implemented; no operational
+  credential-access authorization for a live candidate
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

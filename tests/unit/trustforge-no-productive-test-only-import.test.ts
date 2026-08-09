@@ -230,4 +230,37 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     expect(signerSource).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
     expect(signerSource).not.toMatch(/privateKeyToAccount/);
   });
+
+  it("GUARD_NO_PRODUCTIVE_UNAUTHORIZED_BUYER_CREDENTIAL_ACCESS", () => {
+    const gated = readFileSync("tools/trustforge/buyer-credential-gated-signing.ts", "utf8");
+    expect(gated).toMatch(/BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED/);
+    expect(gated).toMatch(/prepareValidatedBuyerAuthorizationForSigning/);
+    expect(gated).toMatch(/validateBuyerCredentialAccessAuthorization/);
+    expect(gated).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(gated).not.toMatch(/privateKeyToAccount/);
+    expect(gated).not.toMatch(/dotenv/);
+    expect(gated).not.toMatch(/createWalletClient/);
+    expect(gated).not.toMatch(/mnemonic/);
+
+    const provider = readFileSync("tools/trustforge/buyer-credential-provider.ts", "utf8");
+    expect(provider).toMatch(/assertB31CredentialAccessNotAuthorized/);
+    expect(provider).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(provider).not.toMatch(/privateKeyToAccount/);
+    expect(provider).not.toMatch(/readFileSync/);
+
+    // Synthetic provider must stay under tests/support.
+    const supportImport =
+      /(?:from\s+["'][^"']*trustforge-synthetic-credential-provider[^"']*["']|import\s*\(\s*["'][^"']*trustforge-synthetic-credential-provider[^"']*["']\s*\))/;
+    const productiveHits: string[] = [];
+    for (const root of PRODUCTIVE_ROOTS) {
+      for (const file of sourceFiles(root)) {
+        const relativePath = relative(process.cwd(), file).split(sep).join("/");
+        if (/(^|\/)(tests?|__tests__|support)\//.test(relativePath)) continue;
+        if (/\.(test|spec)\.[cm]?tsx?$/.test(relativePath)) continue;
+        const text = readFileSync(file, "utf8");
+        if (supportImport.test(text)) productiveHits.push(relativePath);
+      }
+    }
+    expect(productiveHits).toEqual([]);
+  });
 });
