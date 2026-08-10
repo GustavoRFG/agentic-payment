@@ -359,4 +359,76 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     expect(adapter).not.toMatch(/JSON\.stringify\([^\)]*privateKey/);
     expect(adapter).not.toMatch(/console\.(log|error|warn|debug)/);
   });
+
+  it("GUARD_NO_SECRET_TRANSPORT_THROUGH_SHELL", () => {
+    const pipe = readFileSync(
+      "tools/trustforge/buyer-credential-transport-pipe.ts",
+      "utf8",
+    );
+    const parent = readFileSync(
+      "tools/trustforge/buyer-credential-transport-parent.ts",
+      "utf8",
+    );
+    expect(pipe).toMatch(/shell:\s*false/);
+    expect(pipe).not.toMatch(/shell:\s*true/);
+    expect(pipe).not.toMatch(/shell:\s*['"]true['"]/);
+    expect(parent).not.toMatch(/shell:\s*true/);
+    // No shell-host spawn helpers in transport modules.
+    expect(pipe).not.toMatch(/execSync\(/);
+    expect(parent).not.toMatch(/execSync\(/);
+  });
+
+  it("GUARD_NO_RUNTIME_KEY_TRANSPORT_FALLBACK", () => {
+    const transport = readFileSync(
+      "tools/trustforge/buyer-credential-transport.ts",
+      "utf8",
+    );
+    const gated = readFileSync("tools/trustforge/buyer-credential-gated-signing.ts", "utf8");
+    expect(transport).toMatch(/assertB34NoTransportFallback|rejectRuntimeKeyTransportFallback/);
+    expect(transport).toMatch(/BLOCKED_B34_CREDENTIAL_TRANSPORT_FALLBACK_FORBIDDEN|assertB34NoTransportFallback/);
+    expect(gated).toMatch(/credentialTransport/);
+    expect(gated).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(gated).not.toMatch(/process\.argv/);
+  });
+
+  it("GUARD_RUNTIME_KEY_TRANSPORT_ONE_SHOT", () => {
+    const transport = readFileSync(
+      "tools/trustforge/buyer-credential-transport.ts",
+      "utf8",
+    );
+    expect(transport).toMatch(/TRANSPORT_UNREAD/);
+    expect(transport).toMatch(/TRANSPORT_READ_INVOKED/);
+    expect(transport).toMatch(/TRANSPORT_CONSUMED/);
+    expect(transport).toMatch(/BLOCKED_B34_CREDENTIAL_TRANSPORT_CONSUMED/);
+    expect(transport).toMatch(/markReadInvoked/);
+  });
+
+  it("GUARD_NO_RUNTIME_KEY_IN_ARGV_OR_ENV", () => {
+    const pipe = readFileSync(
+      "tools/trustforge/buyer-credential-transport-pipe.ts",
+      "utf8",
+    );
+    const parent = readFileSync(
+      "tools/trustforge/buyer-credential-transport-parent.ts",
+      "utf8",
+    );
+    expect(pipe).toMatch(/buildMinimalChildEnv|forbidden/);
+    expect(pipe).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY\s*=/);
+    expect(pipe).not.toMatch(/--private-key/);
+    expect(parent).not.toMatch(/--private-key/);
+    expect(parent).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+
+    const supportImport =
+      /trustforge-synthetic-credential-transport-source|b34-credential-transport-child\.mjs/;
+    const hits: string[] = [];
+    for (const root of PRODUCTIVE_ROOTS) {
+      for (const file of sourceFiles(root)) {
+        const relativePath = relative(process.cwd(), file).split(sep).join("/");
+        if (/(^|\/)(tests?|__tests__|support)\//.test(relativePath)) continue;
+        if (/\.(test|spec)\.[cm]?tsx?$/.test(relativePath)) continue;
+        if (supportImport.test(readFileSync(file, "utf8"))) hits.push(relativePath);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
 });

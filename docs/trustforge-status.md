@@ -47,6 +47,9 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   (`provider_id=explicit-runtime-key`, `adapter_installed=true`,
   `credential_access_enabled=false` → `BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED`
   before credential input; no env/file key discovery)
+- B.3.4 secure credential pipe transport: installed, access disabled
+  (`transport_adapter_installed=true`; one-shot anonymous pipe; no shell/argv/env
+  secret transport; human→parent secret-entry not implemented)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

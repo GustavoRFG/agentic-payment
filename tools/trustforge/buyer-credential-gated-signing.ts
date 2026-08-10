@@ -49,10 +49,19 @@ import {
   assertExplicitProviderSelection,
   resolveProductiveCredentialProvider,
 } from "./buyer-credential-provider-registry";
+import {
+  rejectRuntimeKeyTransportFallback,
+  stampAuthorizedCredentialTransportRead,
+  type OneShotCredentialTransport,
+} from "./buyer-credential-transport";
+import { zeroCredentialBytes } from "./buyer-credential-transport-frame";
 import type { PreSignAttemptArtifact } from "./buyer-pre-sign-validation";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
 import { prepareValidatedBuyerAuthorizationForSigning } from "./buyer-validated-signing";
 import type { HumanPaymentAuthorization } from "./validate-human-payment-authorization";
+import {
+  EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
+} from "./explicit-runtime-key-credential-provider";
 
 function sameAddress(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
@@ -82,6 +91,11 @@ export interface CredentialGatedSigningInput {
    * before this is consumed. No interactive prompt in this phase.
    */
   readonly credentialInput?: CredentialBackendInput | null;
+  /**
+   * Optional one-shot pipe transport. Used only when credentialInput is absent.
+   * Never falls back to env/argv/file on failure.
+   */
+  readonly credentialTransport?: OneShotCredentialTransport | null;
   readonly credentialPolicyPath?: string;
   readonly signerPolicyPath?: string;
   readonly cwd?: string;
@@ -248,15 +262,51 @@ export async function runCredentialGatedBuyerSigning(
     input.now,
   );
 
+  let credentialInput: CredentialBackendInput | undefined =
+    input.credentialInput ?? undefined;
+  let transportBytes: Uint8Array | null = null;
+
+  if (!credentialInput && input.credentialTransport) {
+    if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      rejectRuntimeKeyTransportFallback("transport requires explicit-runtime-key");
+    }
+    const transportAuth = stampAuthorizedCredentialTransportRead({
+      transportId: input.credentialTransport.transportId,
+      authorizedRequest: stamped,
+    });
+    try {
+      transportBytes = await input.credentialTransport.readOnce(transportAuth);
+      credentialInput = {
+        kind: "explicit-runtime-key",
+        privateKey: transportBytes,
+      };
+    } catch (error) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      zeroCredentialBytes(transportBytes);
+      throw error;
+    }
+  } else if (!credentialInput && !input.credentialTransport) {
+    // No discovery / no env / no argv fallback.
+    // Adapter will raise BLOCKED_B33_RUNTIME_KEY_CREDENTIAL_MISSING.
+  }
+
   let signer: BuyerAuthorizationSigner;
   try {
-    signer = await provider.acquireSigner(
-      stamped,
-      input.credentialInput ?? undefined,
-    );
+    signer = await provider.acquireSigner(stamped, credentialInput);
   } catch (error) {
     credentialLedger.markAmbiguous(accessAuth.decision_id, validated.unsignedArtifactSha256);
+    zeroCredentialBytes(transportBytes);
     throw error;
+  } finally {
+    zeroCredentialBytes(transportBytes);
+    transportBytes = null;
   }
 
   if (!sameAddress(signer.address, expectedFromAuth)) {

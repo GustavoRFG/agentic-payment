@@ -35,6 +35,8 @@ export interface B31CredentialProviderPolicy {
   readonly credential_kind: string;
   /** When true, the selected provider adapter module is installed (may still be access-disabled). */
   readonly adapter_installed: boolean;
+  /** When true, one-shot credential pipe transport is installed (access may still be disabled). */
+  readonly transport_adapter_installed: boolean;
   /** Optional non-secret public address binding from policy; may be null. */
   readonly expected_signer_address: string | null;
   readonly credential_access_enabled: boolean;
@@ -147,6 +149,16 @@ export function validateB31CredentialProviderPolicy(
       reason: `${BLOCKED_B32_CREDENTIAL_PROVIDER_POLICY_INVALID}: adapter_installed must be boolean when present`,
     };
   }
+  const transportAdapterInstalled =
+    value.transport_adapter_installed === undefined
+      ? false
+      : value.transport_adapter_installed;
+  if (typeof transportAdapterInstalled !== "boolean") {
+    return {
+      ok: false,
+      reason: `${BLOCKED_B32_CREDENTIAL_PROVIDER_POLICY_INVALID}: transport_adapter_installed must be boolean when present`,
+    };
+  }
 
   const allowed = normalizeAllowedProviderIds(value.allowed_provider_ids, value.provider_id);
   if (!allowed.ok) {
@@ -237,6 +249,7 @@ export function validateB31CredentialProviderPolicy(
     provider_id: value.provider_id,
     credential_kind: value.credential_kind,
     adapter_installed: adapterInstalled,
+    transport_adapter_installed: transportAdapterInstalled,
     expected_signer_address: value.expected_signer_address as string | null,
     credential_access_enabled: value.credential_access_enabled,
     real_backend_activation: false,
