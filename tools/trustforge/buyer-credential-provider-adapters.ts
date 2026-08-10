@@ -68,44 +68,21 @@ function assertExpectedAddress(
 }
 
 /**
- * Documented future acquire shape for explicit-runtime-key.
- * Inactive implementation never reads credentialInput.privateKeyHex.
+ * @deprecated B.3.3 — use createExplicitRuntimeKeyCredentialProvider from
+ * explicit-runtime-key-credential-provider.ts. Kept only for type/export stability
+ * of inactive-shell naming; delegates to the real adapter (still blocked without
+ * authorized credential input).
  */
+export { createExplicitRuntimeKeyCredentialProvider as createInactiveExplicitRuntimeKeyProvider } from "./explicit-runtime-key-credential-provider";
+
 export async function acquireExplicitRuntimeKeySignerInactive(input: {
   readonly authorizedRequest: AuthorizedCredentialAccessRequest;
   readonly credentialInput?: ExplicitRuntimeKeyCredentialInput;
 }): Promise<RestrictedBuyerAuthorizationSigner> {
   void input.credentialInput;
   void input.authorizedRequest;
+  // Legacy inactive shell — real adapter lives in explicit-runtime-key-credential-provider.ts
   assertB32RealCredentialBackendInactive("explicit-runtime-key");
-}
-
-export function createInactiveExplicitRuntimeKeyProvider(): BuyerCredentialProvider {
-  const providerId = "explicit-runtime-key";
-  const credentialKind = "explicit_runtime_private_key";
-  return {
-    providerId,
-    credentialKind,
-    async resolveSignerIdentity(
-      context: CredentialProviderContext,
-    ): Promise<BuyerSignerIdentity> {
-      return identityFromContext(providerId, credentialKind, context);
-    },
-    async acquireSigner(
-      request: AuthorizedCredentialAccessRequest,
-      credentialInput?: CredentialBackendInput,
-    ): Promise<BuyerAuthorizationSigner> {
-      if (credentialInput != null && credentialInput.kind !== "explicit-runtime-key") {
-        throw new Error(
-          `${BLOCKED_B32_ACTUAL_SIGNER_IDENTITY_MISMATCH}: credentialInput.kind must be explicit-runtime-key`,
-        );
-      }
-      return acquireExplicitRuntimeKeySignerInactive({
-        authorizedRequest: request,
-        credentialInput: credentialInput as ExplicitRuntimeKeyCredentialInput | undefined,
-      });
-    },
-  };
 }
 
 export function createInactiveEncryptedLocalKeystoreProvider(): BuyerCredentialProvider {

@@ -328,7 +328,9 @@ describe("B.3.2 production policy", () => {
     expect(policy.credential_access_enabled).toBe(false);
     expect(policy.real_backend_activation).toBe(false);
     expect(policy.credential_caching_enabled).toBe(false);
-    expect(policy.selected_productive_provider_id).toBe("NONE");
+    expect(policy.selected_productive_provider_id).toBe("explicit-runtime-key");
+    expect(policy.provider_id).toBe("explicit-runtime-key");
+    expect(policy.adapter_installed).toBe(true);
     expect(policy.allowed_provider_ids).toContain("explicit-runtime-key");
     expect(policy.fallback_provider_enabled).toBe(false);
   });
@@ -369,17 +371,16 @@ describe("B.3.2 provider registry", () => {
     ).toThrow(BLOCKED_B32_CREDENTIAL_PROVIDER_AMBIGUOUS);
   });
 
-  it("resolves inactive adapters for each real provider id", async () => {
-    const cases: Array<{
+  it("resolves adapters; non-runtime-key stay inactive; runtime-key needs credential", async () => {
+    const inactiveCases: Array<{
       provider_id: string;
       credential_kind: string;
     }> = [
-      { provider_id: "explicit-runtime-key", credential_kind: "explicit_runtime_private_key" },
       { provider_id: "encrypted-local-keystore", credential_kind: "encrypted_local_keystore" },
       { provider_id: "external-signer", credential_kind: "external_signer" },
       { provider_id: "secure-signing-provider", credential_kind: "secure_signing_provider" },
     ];
-    for (const c of cases) {
+    for (const c of inactiveCases) {
       const provider = resolveProductiveCredentialProvider(
         basePolicy({
           provider_id: c.provider_id,
@@ -388,19 +389,13 @@ describe("B.3.2 provider registry", () => {
         }),
       );
       expect(provider.providerId).toBe(c.provider_id);
-      const identity = await provider.resolveSignerIdentity({
-        expectedSignerAddress: BUYER,
-        attemptId: "a",
-        runId: "r",
-        unsignedArtifactSha256: "u",
-        signingAuthorizationSha256: "s",
-      });
-      expect(identity.address).toBe(BUYER);
-      expect(identity.identityResolvedWithoutSecret).toBe(true);
       await expect(
         provider.acquireSigner(
           stampAuthorizedCredentialAccessRequest({
-            accessAuthorization: {} as BuyerCredentialAccessAuthorization,
+            accessAuthorization: {
+              provider_id: c.provider_id,
+              credential_kind: c.credential_kind,
+            } as BuyerCredentialAccessAuthorization,
             accessAuthorizationSha256: "x",
             context: {
               expectedSignerAddress: BUYER,
@@ -419,6 +414,41 @@ describe("B.3.2 provider registry", () => {
         ),
       ).rejects.toThrow(BLOCKED_B32_REAL_CREDENTIAL_BACKEND_INACTIVE);
     }
+
+    const runtime = resolveProductiveCredentialProvider(
+      basePolicy({
+        provider_id: "explicit-runtime-key",
+        credential_kind: "explicit_runtime_private_key",
+        selected_productive_provider_id: "explicit-runtime-key",
+        adapter_installed: true,
+      }),
+    );
+    const bundle = buildBundle();
+    await expect(
+      runtime.acquireSigner(
+        stampAuthorizedCredentialAccessRequest({
+          accessAuthorization: {
+            ...bundle.credentialAccessAuthorization,
+            provider_id: "explicit-runtime-key",
+            credential_kind: "explicit_runtime_private_key",
+          },
+          accessAuthorizationSha256: "x",
+          context: {
+            expectedSignerAddress: BUYER,
+            attemptId: "a",
+            runId: "r",
+            unsignedArtifactSha256: bundle.unsignedHash,
+            signingAuthorizationSha256: bundle.signingAuthorizationSha256,
+          },
+          validated: fakeValidated(
+            bundle.unsignedArtifact,
+            bundle.unsignedHash,
+            bundle.signingAuthorization,
+            bundle.signingAuthorizationSha256,
+          ),
+        }),
+      ),
+    ).rejects.toThrow(/BLOCKED_B33_RUNTIME_KEY_CREDENTIAL_MISSING|BLOCKED_B33_RUNTIME_KEY_UNAUTHORIZED_ACCESS/);
   });
 
   it("assertRealBackendActivationAllowed blocks while inactive", () => {
@@ -462,7 +492,7 @@ describe("B.3.2 inactive adapters never touch secrets", () => {
           }),
           credentialInput: {
             kind: "explicit-runtime-key",
-            privateKeyHex: ("0x" + "cd".repeat(32)) as `0x${string}`,
+            privateKey: ("0x" + "cd".repeat(32)) as `0x${string}`,
           },
         }),
       ).rejects.toThrow(BLOCKED_B32_REAL_CREDENTIAL_BACKEND_INACTIVE);

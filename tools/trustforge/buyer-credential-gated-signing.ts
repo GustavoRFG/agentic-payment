@@ -39,6 +39,7 @@ import {
   type BuyerCredentialAccessAuthorization,
 } from "./buyer-credential-access-authorization";
 import { BuyerCredentialAccessLedger } from "./buyer-credential-access-ledger";
+import type { CredentialBackendInput } from "./buyer-credential-backend-types";
 import {
   stampAuthorizedCredentialAccessRequest,
   type BuyerCredentialProvider,
@@ -76,6 +77,11 @@ export interface CredentialGatedSigningInput {
   readonly nowAtSign?: Date;
   readonly expectedUnsignedHash?: string | null;
   readonly provider?: BuyerCredentialProvider;
+  /**
+   * Explicit credential only — never discovered. Production stops at B.3.1
+   * before this is consumed. No interactive prompt in this phase.
+   */
+  readonly credentialInput?: CredentialBackendInput | null;
   readonly credentialPolicyPath?: string;
   readonly signerPolicyPath?: string;
   readonly cwd?: string;
@@ -244,7 +250,10 @@ export async function runCredentialGatedBuyerSigning(
 
   let signer: BuyerAuthorizationSigner;
   try {
-    signer = await provider.acquireSigner(stamped);
+    signer = await provider.acquireSigner(
+      stamped,
+      input.credentialInput ?? undefined,
+    );
   } catch (error) {
     credentialLedger.markAmbiguous(accessAuth.decision_id, validated.unsignedArtifactSha256);
     throw error;

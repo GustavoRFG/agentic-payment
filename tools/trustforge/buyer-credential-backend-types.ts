@@ -1,12 +1,16 @@
 /**
- * buyer-credential-backend-types — credential input shapes for future backends.
+ * buyer-credential-backend-types — credential input shapes for backends.
  * No secrets are loaded by this module.
  */
 
-/** Explicit runtime key — supplied only after authorization; never from process.env. */
+/**
+ * Explicit runtime key — supplied only after authorization; never from process.env.
+ * Prefer mutable Uint8Array so callers can zero buffers after use.
+ * Immutable hex strings cannot be securely erased by the JS runtime.
+ */
 export interface ExplicitRuntimeKeyCredentialInput {
   readonly kind: "explicit-runtime-key";
-  readonly privateKeyHex: `0x${string}`;
+  readonly privateKey: Uint8Array | `0x${string}`;
 }
 
 /** Encrypted local keystore — exact path + password only after authorization. */

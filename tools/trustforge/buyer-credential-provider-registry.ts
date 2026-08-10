@@ -20,10 +20,10 @@ import {
 import type { B31CredentialProviderPolicy } from "./b31-credential-provider-policy";
 import {
   createInactiveEncryptedLocalKeystoreProvider,
-  createInactiveExplicitRuntimeKeyProvider,
   createInactiveExternalSignerProvider,
   createInactiveSecureSigningProvider,
 } from "./buyer-credential-provider-adapters";
+import { createExplicitRuntimeKeyCredentialProvider } from "./explicit-runtime-key-credential-provider";
 import type { CredentialBackendInput } from "./buyer-credential-backend-types";
 import {
   createInactiveProductionCredentialProvider,
@@ -109,7 +109,7 @@ export function resolveProductiveCredentialProvider(
         policyExpectedSignerAddress: policy.expected_signer_address,
       });
     case "explicit-runtime-key":
-      return createInactiveExplicitRuntimeKeyProvider();
+      return createExplicitRuntimeKeyCredentialProvider();
     case "encrypted-local-keystore":
       return createInactiveEncryptedLocalKeystoreProvider();
     case "external-signer":

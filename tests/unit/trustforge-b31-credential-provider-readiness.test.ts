@@ -268,7 +268,8 @@ describe("B.3.1 credential provider policy", () => {
     expect(policy.automatic_discovery_enabled).toBe(false);
     expect(policy.fallback_provider_enabled).toBe(false);
     expect(policy.real_backend_activation).toBe(false);
-    expect(policy.selected_productive_provider_id).toBe("NONE");
+    expect(policy.selected_productive_provider_id).toBe("explicit-runtime-key");
+    expect(policy.adapter_installed).toBe(true);
   });
 
   it("rejects automatic discovery", () => {

@@ -163,6 +163,7 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
   const ALLOWED_SIGN_TYPED_DATA = new Set([
     "tools/trustforge/buyer-eip3009-authorization.ts",
     "tools/trustforge/buyer-authorization-signer.ts",
+    "tools/trustforge/explicit-runtime-key-credential-provider.ts",
   ]);
   const BYPASS_EXPORT =
     /^\s*export\s+(?:async\s+)?(?:function|const)\s+(?:signUnsignedPayload|signTypedDataWithoutValidation|__unsafeSign|rawSignUnsigned)/;
@@ -300,5 +301,62 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     // Productive BuyerAuthorizationSigner must not advertise general-purpose APIs.
     expect(signer).not.toMatch(/signMessage\s*\(/);
     expect(signer).not.toMatch(/signTransaction\s*\(/);
+
+    const runtimeKey = readFileSync(
+      "tools/trustforge/explicit-runtime-key-credential-provider.ts",
+      "utf8",
+    );
+    expect(runtimeKey).not.toMatch(/signMessage\s*\(/);
+    expect(runtimeKey).not.toMatch(/signTransaction\s*\(/);
+    expect(runtimeKey).not.toMatch(/sendTransaction/);
+    expect(runtimeKey).not.toMatch(/writeContract/);
+    expect(runtimeKey).not.toMatch(/createWalletClient/);
+  });
+
+  it("GUARD_EXPLICIT_RUNTIME_KEY_ACCESS_ONLY_IN_AUTHORIZED_PROVIDER", () => {
+    const allowed = new Set([
+      "tools/trustforge/explicit-runtime-key-credential-provider.ts",
+    ]);
+    const buyerBoundary =
+      /(^|\/)(buyer-|b31-|b32-|b33-|explicit-runtime-key)/;
+    const hits: string[] = [];
+    for (const root of PRODUCTIVE_ROOTS) {
+      for (const file of sourceFiles(root)) {
+        const relativePath = relative(process.cwd(), file).split(sep).join("/");
+        if (/(^|\/)(tests?|__tests__|support)\//.test(relativePath)) continue;
+        if (/\.(test|spec)\.[cm]?tsx?$/.test(relativePath)) continue;
+        if (!buyerBoundary.test(relativePath.split("/").pop() ?? "")) continue;
+        if (allowed.has(relativePath)) continue;
+        const text = readFileSync(file, "utf8");
+        if (/privateKeyToAccount/.test(text)) {
+          hits.push(relativePath);
+        }
+      }
+    }
+    expect(hits).toEqual([]);
+
+    const adapter = readFileSync(
+      "tools/trustforge/explicit-runtime-key-credential-provider.ts",
+      "utf8",
+    );
+    expect(adapter).toMatch(/privateKeyToAccount/);
+    expect(adapter).toMatch(/AuthorizedExplicitRuntimeCredentialAccess/);
+    expect(adapter).not.toMatch(/process\.env\./);
+    expect(adapter).not.toMatch(/BUYER_PRIVATE_KEY/);
+    expect(adapter).not.toMatch(/dotenv/);
+    expect(adapter).not.toMatch(/readFileSync/);
+  });
+
+  it("GUARD_NO_BUYER_RUNTIME_KEY_SECRET_LEAKAGE", () => {
+    const adapter = readFileSync(
+      "tools/trustforge/explicit-runtime-key-credential-provider.ts",
+      "utf8",
+    );
+    // Errors must use stable helper/codes; never interpolate privateKey into messages.
+    expect(adapter).toMatch(/assertB33RuntimeKeyCredentialInvalid/);
+    expect(adapter).toMatch(/assertB33RuntimeKeyCredentialMissing/);
+    expect(adapter).not.toMatch(/\$\{[^}]*privateKey/);
+    expect(adapter).not.toMatch(/JSON\.stringify\([^\)]*privateKey/);
+    expect(adapter).not.toMatch(/console\.(log|error|warn|debug)/);
   });
 });
