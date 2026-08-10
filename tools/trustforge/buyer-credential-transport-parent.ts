@@ -2,7 +2,7 @@
  * buyer-credential-transport-parent — synthetic-only parent launcher.
  *
  * Solves parent → child transport only.
- * Does NOT implement human → parent secret entry.
+ * Human → parent hidden TTY entry lives in buyer-hidden-tty-secret-entry.ts (B.3.5).
  *
  * Production invocation without an authorized synthetic credential source
  * blocks before creating a secret frame.

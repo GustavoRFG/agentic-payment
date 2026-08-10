@@ -265,6 +265,7 @@ describe("B.3.3 production policy", () => {
     expect(policy.selected_productive_provider_id).toBe(EXPLICIT_RUNTIME_KEY_PROVIDER_ID);
     expect(policy.adapter_installed).toBe(true);
     expect(policy.transport_adapter_installed).toBe(true);
+    expect(policy.secret_entry_adapter_installed).toBe(true);
     expect(policy.credential_access_enabled).toBe(false);
     expect(policy.real_backend_activation).toBe(false);
     expect(policy.real_signing_enabled).toBe(false);

@@ -54,7 +54,19 @@ import {
   stampAuthorizedCredentialTransportRead,
   type OneShotCredentialTransport,
 } from "./buyer-credential-transport";
-import { zeroCredentialBytes } from "./buyer-credential-transport-frame";
+import {
+  encodeCredentialTransportFrame,
+  zeroCredentialBytes,
+} from "./buyer-credential-transport-frame";
+import { Readable } from "node:stream";
+import { randomUUID } from "node:crypto";
+import { createPipeCredentialTransport } from "./buyer-credential-transport-pipe";
+import type { HiddenTtyTerminal } from "./buyer-hidden-tty-terminal";
+import { readHiddenParentTtySecret } from "./buyer-hidden-tty-secret-entry";
+import {
+  SecretEntryLedger,
+  stampAuthorizedSecretEntry,
+} from "./buyer-secret-entry-authorization";
 import type { PreSignAttemptArtifact } from "./buyer-pre-sign-validation";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
 import { prepareValidatedBuyerAuthorizationForSigning } from "./buyer-validated-signing";
@@ -96,6 +108,13 @@ export interface CredentialGatedSigningInput {
    * Never falls back to env/argv/file on failure.
    */
   readonly credentialTransport?: OneShotCredentialTransport | null;
+  /**
+   * Optional hidden TTY secret entry (B.3.5). Used only when credentialInput and
+   * credentialTransport are absent. Requires credential_access_enabled.
+   * Delivers bytes through an in-process B.3.4 one-shot pipe.
+   */
+  readonly secretEntryTerminal?: HiddenTtyTerminal | null;
+  readonly secretEntryLedger?: SecretEntryLedger;
   readonly credentialPolicyPath?: string;
   readonly signerPolicyPath?: string;
   readonly cwd?: string;
@@ -265,8 +284,56 @@ export async function runCredentialGatedBuyerSigning(
   let credentialInput: CredentialBackendInput | undefined =
     input.credentialInput ?? undefined;
   let transportBytes: Uint8Array | null = null;
+  let activeTransport = input.credentialTransport ?? null;
 
-  if (!credentialInput && input.credentialTransport) {
+  // B.3.5: hidden TTY → B.3.4 in-process pipe (only when no explicit input/transport).
+  if (!credentialInput && !activeTransport && input.secretEntryTerminal) {
+    if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      rejectRuntimeKeyTransportFallback("secret entry requires explicit-runtime-key");
+    }
+    const secretAuth = stampAuthorizedSecretEntry({
+      authorizedRequest: stamped,
+      credentialAccessEnabled: credentialPolicy.credential_access_enabled,
+    });
+    const secretLedger = input.secretEntryLedger ?? new SecretEntryLedger();
+    secretLedger.reserve(secretAuth.decisionId, secretAuth.unsignedArtifactSha256);
+    let entryBytes: Uint8Array | null = null;
+    let framed: Uint8Array | null = null;
+    try {
+      const entered = await readHiddenParentTtySecret({
+        authorization: secretAuth,
+        terminal: input.secretEntryTerminal,
+        ledger: secretLedger,
+      });
+      entryBytes = entered.credentialBytes;
+      // B.3.4 framing then one-shot Readable pipe (avoids PassThrough race after end).
+      framed = encodeCredentialTransportFrame(entryBytes);
+      zeroCredentialBytes(entryBytes);
+      entryBytes = null;
+      const transportId = `tty_pipe_${randomUUID()}`;
+      const readable = Readable.from([Buffer.from(framed)]);
+      zeroCredentialBytes(framed);
+      framed = null;
+      activeTransport = createPipeCredentialTransport({
+        transportId,
+        readable,
+      });
+    } catch (error) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      zeroCredentialBytes(entryBytes);
+      zeroCredentialBytes(framed);
+      throw error;
+    }
+  }
+
+  if (!credentialInput && activeTransport) {
     if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
       credentialLedger.markAmbiguous(
         accessAuth.decision_id,
@@ -275,11 +342,11 @@ export async function runCredentialGatedBuyerSigning(
       rejectRuntimeKeyTransportFallback("transport requires explicit-runtime-key");
     }
     const transportAuth = stampAuthorizedCredentialTransportRead({
-      transportId: input.credentialTransport.transportId,
+      transportId: activeTransport.transportId,
       authorizedRequest: stamped,
     });
     try {
-      transportBytes = await input.credentialTransport.readOnce(transportAuth);
+      transportBytes = await activeTransport.readOnce(transportAuth);
       credentialInput = {
         kind: "explicit-runtime-key",
         privateKey: transportBytes,
@@ -292,8 +359,8 @@ export async function runCredentialGatedBuyerSigning(
       zeroCredentialBytes(transportBytes);
       throw error;
     }
-  } else if (!credentialInput && !input.credentialTransport) {
-    // No discovery / no env / no argv fallback.
+  } else if (!credentialInput && !activeTransport) {
+    // No discovery / no env / no argv / no TTY fallback.
     // Adapter will raise BLOCKED_B33_RUNTIME_KEY_CREDENTIAL_MISSING.
   }
 

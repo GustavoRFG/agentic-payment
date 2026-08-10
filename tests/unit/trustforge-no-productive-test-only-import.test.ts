@@ -419,7 +419,7 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     expect(parent).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
 
     const supportImport =
-      /trustforge-synthetic-credential-transport-source|b34-credential-transport-child\.mjs/;
+      /trustforge-synthetic-credential-transport-source|b34-credential-transport-child\.mjs|trustforge-synthetic-hidden-tty/;
     const hits: string[] = [];
     for (const root of PRODUCTIVE_ROOTS) {
       for (const file of sourceFiles(root)) {
@@ -430,5 +430,71 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
       }
     }
     expect(hits).toEqual([]);
+  });
+
+  it("GUARD_NO_PRODUCTIVE_SECRET_ENTRY_BEFORE_CREDENTIAL_GATE", () => {
+    const entry = readFileSync(
+      "tools/trustforge/buyer-hidden-tty-secret-entry.ts",
+      "utf8",
+    );
+    const gated = readFileSync("tools/trustforge/buyer-credential-gated-signing.ts", "utf8");
+    const auth = readFileSync(
+      "tools/trustforge/buyer-secret-entry-authorization.ts",
+      "utf8",
+    );
+    expect(auth).toMatch(/BLOCKED_B35_SECRET_ENTRY_BEFORE_GATE/);
+    expect(auth).toMatch(/credentialAccessEnabled/);
+    expect(gated).toMatch(/assertB31CredentialAccessNotAuthorized/);
+    expect(gated).toMatch(/stampAuthorizedSecretEntry/);
+    expect(entry).toMatch(/AuthorizedSecretEntry/);
+  });
+
+  it("GUARD_NO_HIDDEN_TTY_SECRET_LEAKAGE", () => {
+    const entry = readFileSync(
+      "tools/trustforge/buyer-hidden-tty-secret-entry.ts",
+      "utf8",
+    );
+    expect(entry).not.toMatch(/console\.(log|error|warn|debug)/);
+    expect(entry).not.toMatch(/JSON\.stringify\([^\)]*ascii/);
+    expect(entry).not.toMatch(/\$\{[^}]*ascii/);
+    expect(entry).toMatch(/Credential entry required/);
+    expect(entry).toMatch(/Credential received/);
+    expect(entry).toMatch(/Credential rejected/);
+    expect(entry).toMatch(/Credential entry aborted/);
+  });
+
+  it("GUARD_HIDDEN_TTY_INPUT_BOUNDED", () => {
+    const entry = readFileSync(
+      "tools/trustforge/buyer-hidden-tty-secret-entry.ts",
+      "utf8",
+    );
+    expect(entry).toMatch(/B35_SECRET_ENTRY_MAX_ASCII/);
+    expect(entry).toMatch(/BLOCKED_B35_SECRET_ENTRY_OVERSIZED/);
+    expect(entry).not.toMatch(/let key\s*=\s*""/);
+    expect(entry).toMatch(/Uint8Array/);
+  });
+
+  it("GUARD_HIDDEN_TTY_ALWAYS_RESTORES_MODE", () => {
+    const entry = readFileSync(
+      "tools/trustforge/buyer-hidden-tty-secret-entry.ts",
+      "utf8",
+    );
+    expect(entry).toMatch(/finally/);
+    expect(entry).toMatch(/setRawMode\(priorRaw\)/);
+    expect(entry).toMatch(/raw_mode_restored/);
+  });
+
+  it("GUARD_NO_SECRET_ENTRY_FALLBACK", () => {
+    const entry = readFileSync(
+      "tools/trustforge/buyer-hidden-tty-secret-entry.ts",
+      "utf8",
+    );
+    const gates = readFileSync("tools/trustforge/b35-execution-gates.ts", "utf8");
+    expect(gates).toMatch(/BLOCKED_B35_SECRET_ENTRY_FALLBACK_FORBIDDEN/);
+    expect(entry).toMatch(/rejectSecretEntryFallback|assertB35NoSecretEntryFallback/);
+    expect(entry).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(entry).not.toMatch(/process\.argv/);
+    expect(entry).not.toMatch(/navigator\.clipboard|ClipboardItem/);
+    expect(entry).not.toMatch(/readFileSync/);
   });
 });

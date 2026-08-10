@@ -37,6 +37,8 @@ export interface B31CredentialProviderPolicy {
   readonly adapter_installed: boolean;
   /** When true, one-shot credential pipe transport is installed (access may still be disabled). */
   readonly transport_adapter_installed: boolean;
+  /** When true, hidden TTY secret-entry adapter is installed (access may still be disabled). */
+  readonly secret_entry_adapter_installed: boolean;
   /** Optional non-secret public address binding from policy; may be null. */
   readonly expected_signer_address: string | null;
   readonly credential_access_enabled: boolean;
@@ -159,6 +161,16 @@ export function validateB31CredentialProviderPolicy(
       reason: `${BLOCKED_B32_CREDENTIAL_PROVIDER_POLICY_INVALID}: transport_adapter_installed must be boolean when present`,
     };
   }
+  const secretEntryAdapterInstalled =
+    value.secret_entry_adapter_installed === undefined
+      ? false
+      : value.secret_entry_adapter_installed;
+  if (typeof secretEntryAdapterInstalled !== "boolean") {
+    return {
+      ok: false,
+      reason: `${BLOCKED_B32_CREDENTIAL_PROVIDER_POLICY_INVALID}: secret_entry_adapter_installed must be boolean when present`,
+    };
+  }
 
   const allowed = normalizeAllowedProviderIds(value.allowed_provider_ids, value.provider_id);
   if (!allowed.ok) {
@@ -250,6 +262,7 @@ export function validateB31CredentialProviderPolicy(
     credential_kind: value.credential_kind,
     adapter_installed: adapterInstalled,
     transport_adapter_installed: transportAdapterInstalled,
+    secret_entry_adapter_installed: secretEntryAdapterInstalled,
     expected_signer_address: value.expected_signer_address as string | null,
     credential_access_enabled: value.credential_access_enabled,
     real_backend_activation: false,

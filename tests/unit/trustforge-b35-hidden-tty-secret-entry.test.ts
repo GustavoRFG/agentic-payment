@@ -1,49 +1,27 @@
 /**
- * B.3.4 secure credential transport — synthetic only; no real keys; no payment.
+ * B.3.5 hidden TTY secret entry — synthetic only; no real keys; no payment.
  */
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED } from "../../tools/trustforge/b31-execution-gates";
 import {
-  BLOCKED_B34_CREDENTIAL_TRANSPORT_AMBIGUOUS,
-  BLOCKED_B34_CREDENTIAL_TRANSPORT_CONSUMED,
-  BLOCKED_B34_CREDENTIAL_TRANSPORT_FRAME_INVALID,
-  BLOCKED_B34_CREDENTIAL_TRANSPORT_SOURCE_UNAUTHORIZED,
-  BLOCKED_B34_CREDENTIAL_TRANSPORT_UNAUTHORIZED,
-  BLOCKED_B34_CREDENTIAL_TRANSPORT_UNAVAILABLE,
-} from "../../tools/trustforge/b34-execution-gates";
+  BLOCKED_B35_INTERACTIVE_TTY_REQUIRED,
+  BLOCKED_B35_SECRET_ENTRY_ABORTED,
+  BLOCKED_B35_SECRET_ENTRY_INVALID,
+  BLOCKED_B35_SECRET_ENTRY_OVERSIZED,
+  BLOCKED_B35_SECRET_ENTRY_TIMEOUT,
+} from "../../tools/trustforge/b35-execution-gates";
 import { BLOCKED_B3_PAYMENT_BEARING_SEND_NOT_AUTHORIZED } from "../../tools/trustforge/b3-execution-gates";
 import type { UnsignedArtifact } from "../../tools/trustforge/buyer-authorization-artifacts";
 import { UNSIGNED_ARTIFACT } from "../../tools/trustforge/buyer-authorization-artifacts";
 import { buildSyntheticBuyerCredentialAccessAuthorization } from "../../tools/trustforge/buyer-credential-access-authorization";
 import { runCredentialGatedBuyerSigning } from "../../tools/trustforge/buyer-credential-gated-signing";
 import { loadB31CredentialProviderPolicy } from "../../tools/trustforge/b31-credential-provider-policy";
-import {
-  encodeCredentialTransportFrame,
-  decodeCredentialTransportFrame,
-  B34_TRANSPORT_MAX_FRAME_LENGTH,
-} from "../../tools/trustforge/buyer-credential-transport-frame";
-import {
-  CredentialTransportLedger,
-  createAuthorizedOneShotTransport,
-  stampAuthorizedCredentialTransportRead,
-} from "../../tools/trustforge/buyer-credential-transport";
-import {
-  createInProcessCredentialPipe,
-  createPipeCredentialTransport,
-  spawnCredentialTransportChild,
-  writeCredentialFrameToPipe,
-} from "../../tools/trustforge/buyer-credential-transport-pipe";
-import {
-  assertProductionCredentialTransportParentInactive,
-  launchSyntheticCredentialTransportChild,
-} from "../../tools/trustforge/buyer-credential-transport-parent";
 import {
   buildUnsignedBuyerAuthorization,
   canonicalJsonSha256,
@@ -56,14 +34,20 @@ import {
   EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
 } from "../../tools/trustforge/explicit-runtime-key-credential-provider";
 import { stampAuthorizedCredentialAccessRequest } from "../../tools/trustforge/buyer-credential-provider";
+import { readHiddenParentTtySecret } from "../../tools/trustforge/buyer-hidden-tty-secret-entry";
+import {
+  SecretEntryLedger,
+  stampAuthorizedSecretEntry,
+} from "../../tools/trustforge/buyer-secret-entry-authorization";
 import type { HumanPaymentAuthorization } from "../../tools/trustforge/validate-human-payment-authorization";
 import type { SellerRequirementsObservation } from "../../tools/trustforge/x402-seller-requirements-binding";
 import type { ValidatedBuyerAuthorizationForSigning } from "../../tools/trustforge/buyer-validated-signing";
 import {
   SYNTHETIC_B33_RUNTIME_ADDRESS,
   SYNTHETIC_B33_RUNTIME_KEY,
+  SYNTHETIC_B33_WRONG_RUNTIME_KEY,
 } from "../support/trustforge-synthetic-runtime-key";
-import { createSyntheticCredentialTransportSource } from "../support/trustforge-synthetic-credential-transport-source";
+import { createSyntheticHiddenTty } from "../support/trustforge-synthetic-hidden-tty";
 
 const BUYER = SYNTHETIC_B33_RUNTIME_ADDRESS;
 const PAY_TO = "0x2222222222222222222222222222222222222222";
@@ -82,7 +66,7 @@ const REF_ATTEMPT_DIR = join(
 
 const temporaryDirs: string[] = [];
 function workDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "b34-xf-"));
+  const dir = mkdtempSync(join(tmpdir(), "b35-tty-"));
   temporaryDirs.push(dir);
   return dir;
 }
@@ -93,15 +77,6 @@ afterEach(() => {
     if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   }
 });
-
-function hexToBytes(hex: `0x${string}`): Uint8Array {
-  const body = hex.slice(2);
-  const out = new Uint8Array(32);
-  for (let i = 0; i < 32; i += 1) {
-    out[i] = Number.parseInt(body.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
 
 function assertNoSecretLeak(text: string): void {
   expect(text.includes(SYNTHETIC_B33_RUNTIME_KEY)).toBe(false);
@@ -268,6 +243,7 @@ function writeAccessEnabledPolicy(dir: string) {
         credential_kind: EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND,
         adapter_installed: true,
         transport_adapter_installed: true,
+        secret_entry_adapter_installed: true,
         expected_signer_address: BUYER,
         credential_access_enabled: true,
         real_backend_activation: false,
@@ -278,7 +254,7 @@ function writeAccessEnabledPolicy(dir: string) {
         payment_bearing_send_enabled: false,
         settlement_enabled: false,
         retry_enabled: false,
-        effect: "b34 synthetic",
+        effect: "b35 synthetic",
       },
       null,
       2,
@@ -288,166 +264,55 @@ function writeAccessEnabledPolicy(dir: string) {
   return path;
 }
 
-function fakeValidated(
-  bundle: ReturnType<typeof buildBundle>,
-): ValidatedBuyerAuthorizationForSigning {
-  return {
-    __brand: "ValidatedBuyerAuthorizationForSigning",
-    unsignedArtifact: bundle.unsignedArtifact,
-    unsignedArtifactSha256: bundle.unsignedHash,
-    signingAuthorization: bundle.signingAuthorization,
-    signingAuthorizationSha256: bundle.signingAuthorizationSha256,
-    typedData: {
-      domain: bundle.unsignedArtifact.domain,
-      types: bundle.unsignedArtifact.types,
-      primaryType: bundle.unsignedArtifact.primary_type,
-      message: bundle.unsignedArtifact.message,
+function authBundle() {
+  const bundle = buildBundle();
+  const stamped = stampAuthorizedCredentialAccessRequest({
+    accessAuthorization: bundle.credentialAccessAuthorization,
+    accessAuthorizationSha256: canonicalJsonSha256(bundle.credentialAccessAuthorization),
+    context: {
+      expectedSignerAddress: BUYER,
+      attemptId: "attempt",
+      runId: "run",
+      unsignedArtifactSha256: bundle.unsignedHash,
+      signingAuthorizationSha256: bundle.signingAuthorizationSha256,
     },
-  } as unknown as ValidatedBuyerAuthorizationForSigning;
+    validated: {
+      __brand: "ValidatedBuyerAuthorizationForSigning",
+      unsignedArtifact: bundle.unsignedArtifact,
+      unsignedArtifactSha256: bundle.unsignedHash,
+      signingAuthorization: bundle.signingAuthorization,
+      signingAuthorizationSha256: bundle.signingAuthorizationSha256,
+      typedData: {
+        domain: bundle.unsignedArtifact.domain,
+        types: bundle.unsignedArtifact.types,
+        primaryType: bundle.unsignedArtifact.primary_type,
+        message: bundle.unsignedArtifact.message,
+      },
+    } as unknown as ValidatedBuyerAuthorizationForSigning,
+  });
+  const authorization = stampAuthorizedSecretEntry({
+    authorizedRequest: stamped,
+    credentialAccessEnabled: true,
+  });
+  return { bundle, authorization };
 }
 
-describe("B.3.4 production policy", () => {
-  it("transport installed with credential access disabled", () => {
+describe("B.3.5 production policy", () => {
+  it("secret-entry adapter installed with access disabled", () => {
     const policy = loadB31CredentialProviderPolicy();
-    expect(policy.transport_adapter_installed).toBe(true);
     expect(policy.secret_entry_adapter_installed).toBe(true);
-    expect(policy.adapter_installed).toBe(true);
+    expect(policy.transport_adapter_installed).toBe(true);
     expect(policy.credential_access_enabled).toBe(false);
-    expect(policy.real_signing_enabled).toBe(false);
   });
 });
 
-describe("B.3.4 framing", () => {
-  it("round-trips exact 32-byte payload and rejects bad frames", () => {
-    const payload = hexToBytes(SYNTHETIC_B33_RUNTIME_KEY);
-    const frame = encodeCredentialTransportFrame(payload);
-    expect(frame.byteLength).toBe(B34_TRANSPORT_MAX_FRAME_LENGTH);
-    const decoded = decodeCredentialTransportFrame(frame);
-    expect(Buffer.from(decoded).equals(Buffer.from(payload))).toBe(true);
-
-    expect(() => decodeCredentialTransportFrame(new Uint8Array(0))).toThrow(
-      BLOCKED_B34_CREDENTIAL_TRANSPORT_FRAME_INVALID,
-    );
-    expect(() => decodeCredentialTransportFrame(frame.subarray(0, 10))).toThrow(
-      BLOCKED_B34_CREDENTIAL_TRANSPORT_FRAME_INVALID,
-    );
-    const oversized = new Uint8Array(frame.byteLength + 1);
-    oversized.set(frame);
-    expect(() => decodeCredentialTransportFrame(oversized)).toThrow(
-      BLOCKED_B34_CREDENTIAL_TRANSPORT_FRAME_INVALID,
-    );
-    const trailing = new Uint8Array([...frame, 0x00]);
-    expect(() => decodeCredentialTransportFrame(trailing)).toThrow(
-      BLOCKED_B34_CREDENTIAL_TRANSPORT_FRAME_INVALID,
-    );
-  });
-});
-
-describe("B.3.4 one-shot transport", () => {
-  it("requires authorization brand and forbids second read", async () => {
-    const pipe = createInProcessCredentialPipe();
-    const ledger = new CredentialTransportLedger();
-    const transport = createPipeCredentialTransport({
-      transportId: pipe.transportId,
-      readable: pipe.readable,
-      ledger,
-    });
-    const bundle = buildBundle();
-    const stamped = stampAuthorizedCredentialAccessRequest({
-      accessAuthorization: bundle.credentialAccessAuthorization,
-      accessAuthorizationSha256: canonicalJsonSha256(bundle.credentialAccessAuthorization),
-      context: {
-        expectedSignerAddress: BUYER,
-        attemptId: "attempt",
-        runId: "run",
-        unsignedArtifactSha256: bundle.unsignedHash,
-        signingAuthorizationSha256: bundle.signingAuthorizationSha256,
-      },
-      validated: fakeValidated(bundle),
-    });
-    const auth = stampAuthorizedCredentialTransportRead({
-      transportId: pipe.transportId,
-      authorizedRequest: stamped,
-    });
-
-    await expect(
-      transport.readOnce({ ...(auth as object), __brand: "nope" } as typeof auth),
-    ).rejects.toThrow(BLOCKED_B34_CREDENTIAL_TRANSPORT_UNAUTHORIZED);
-
-    const writePromise = writeCredentialFrameToPipe(
-      pipe.writable,
-      hexToBytes(SYNTHETIC_B33_RUNTIME_KEY),
-    );
-    const bytes = await transport.readOnce(auth);
-    await writePromise;
-    expect(bytes.byteLength).toBe(32);
-
-    await expect(transport.readOnce(auth)).rejects.toThrow(
-      /BLOCKED_B34_CREDENTIAL_TRANSPORT_CONSUMED|BLOCKED_B34_CREDENTIAL_TRANSPORT_AMBIGUOUS/,
-    );
-  });
-
-  it("malformed empty frame consumes transport and does not expose secret", async () => {
-    const readable = new PassThrough();
-    const ledger = new CredentialTransportLedger();
-    const transport = createPipeCredentialTransport({
-      transportId: "t-empty",
-      readable,
-      ledger,
-      timeoutMs: 1000,
-    });
-    const bundle = buildBundle();
-    const stamped = stampAuthorizedCredentialAccessRequest({
-      accessAuthorization: bundle.credentialAccessAuthorization,
-      accessAuthorizationSha256: canonicalJsonSha256(bundle.credentialAccessAuthorization),
-      context: {
-        expectedSignerAddress: BUYER,
-        attemptId: "attempt",
-        runId: "run",
-        unsignedArtifactSha256: bundle.unsignedHash,
-        signingAuthorizationSha256: bundle.signingAuthorizationSha256,
-      },
-      validated: fakeValidated(bundle),
-    });
-    const auth = stampAuthorizedCredentialTransportRead({
-      transportId: "t-empty",
-      authorizedRequest: stamped,
-    });
-    const readPromise = transport.readOnce(auth);
-    readable.end(Buffer.alloc(0));
-    let thrown = "";
-    try {
-      await readPromise;
-    } catch (error) {
-      thrown = error instanceof Error ? error.message : String(error);
-    }
-    expect(thrown).toMatch(/BLOCKED_B34_/);
-    assertNoSecretLeak(thrown);
-    expect(ledger.getState("t-empty", auth.decisionId, bundle.unsignedHash)).toMatch(
-      /CONSUMED|AMBIGUOUS/,
-    );
-  });
-});
-
-describe("B.3.4 production inactive gate", () => {
-  it("blocks before pipe read when credential access disabled", async () => {
+describe("B.3.5 production inactive gate", () => {
+  it("blocks before prompt / raw mode / reads", async () => {
     const bundle = buildBundle();
     const dir = workDir();
     writeFileSync(join(dir, UNSIGNED_ARTIFACT), `${JSON.stringify(bundle.unsignedArtifact)}\n`);
-    const pipe = createInProcessCredentialPipe();
-    const transport = createPipeCredentialTransport({
-      transportId: pipe.transportId,
-      readable: pipe.readable,
-    });
-    let reads = 0;
-    const counting = createAuthorizedOneShotTransport({
-      transportId: pipe.transportId,
-      readBytes: async () => {
-        reads += 1;
-        return hexToBytes(SYNTHETIC_B33_RUNTIME_KEY);
-      },
-    });
-    void transport;
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueHexKeyThenEnter(SYNTHETIC_B33_RUNTIME_KEY);
     const provider = createExplicitRuntimeKeyCredentialProvider();
     await expect(
       runCredentialGatedBuyerSigning({
@@ -459,52 +324,127 @@ describe("B.3.4 production inactive gate", () => {
         credentialAccessAuthorization: bundle.credentialAccessAuthorization,
         now: SIGNING_TIME,
         provider,
-        credentialTransport: counting,
+        secretEntryTerminal: tty.terminal,
       }),
     ).rejects.toThrow(BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED);
-    expect(reads).toBe(0);
+    expect(tty.rawModeEnableCount.value).toBe(0);
+    expect(tty.safeOutput.join("")).not.toContain("Credential entry required");
     expect(provider.acquireCalls).toBe(0);
-  });
-
-  it("parent without synthetic source is unauthorized", async () => {
-    expect(() => assertProductionCredentialTransportParentInactive()).toThrow(
-      BLOCKED_B34_CREDENTIAL_TRANSPORT_SOURCE_UNAUTHORIZED,
-    );
-    await expect(
-      launchSyntheticCredentialTransportChild({
-        source: null,
-        scriptPath: "x.js",
-      }),
-    ).rejects.toThrow(BLOCKED_B34_CREDENTIAL_TRANSPORT_SOURCE_UNAUTHORIZED);
   });
 });
 
-describe("B.3.4 synthetic end-to-end via pipe", () => {
-  it("parent pipe → transport → runtime-key → send gate", async () => {
+describe("B.3.5 TTY reader adversarial", () => {
+  it("non-TTY fails closed with zero raw-mode activations", async () => {
+    const { authorization } = authBundle();
+    const tty = createSyntheticHiddenTty({ isTTY: false });
+    const ledger = new SecretEntryLedger();
+    ledger.reserve(authorization.decisionId, authorization.unsignedArtifactSha256);
+    await expect(
+      readHiddenParentTtySecret({
+        authorization,
+        terminal: tty.terminal,
+        ledger,
+      }),
+    ).rejects.toThrow(BLOCKED_B35_INTERACTIVE_TTY_REQUIRED);
+    expect(tty.rawModeEnableCount.value).toBe(0);
+  });
+
+  it("Ctrl+C restores TTY and aborts", async () => {
+    const { authorization } = authBundle();
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueCtrlC();
+    const ledger = new SecretEntryLedger();
+    ledger.reserve(authorization.decisionId, authorization.unsignedArtifactSha256);
+    await expect(
+      readHiddenParentTtySecret({
+        authorization,
+        terminal: tty.terminal,
+        ledger,
+      }),
+    ).rejects.toThrow(BLOCKED_B35_SECRET_ENTRY_ABORTED);
+    expect(tty.terminal.getRawMode()).toBe(false);
+    expect(tty.rawModeEnableCount.value).toBe(1);
+    expect(tty.rawModeDisableCount.value).toBe(1);
+    assertNoSecretLeak(tty.safeOutput.join(""));
+  });
+
+  it("Escape after partial secret aborts and restores", async () => {
+    const { authorization } = authBundle();
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueBytes([0x61, 0x62, 0x63]);
+    tty.enqueueEscape();
+    const ledger = new SecretEntryLedger();
+    ledger.reserve(authorization.decisionId, authorization.unsignedArtifactSha256);
+    await expect(
+      readHiddenParentTtySecret({
+        authorization,
+        terminal: tty.terminal,
+        ledger,
+      }),
+    ).rejects.toThrow(BLOCKED_B35_SECRET_ENTRY_ABORTED);
+    expect(tty.terminal.getRawMode()).toBe(false);
+  });
+
+  it("timeout / EOF / invalid / oversized restore TTY", async () => {
+    for (const setup of [
+      (t: ReturnType<typeof createSyntheticHiddenTty>) => t.failNextReadWithTimeout(),
+      (t: ReturnType<typeof createSyntheticHiddenTty>) => t.close(),
+      (t: ReturnType<typeof createSyntheticHiddenTty>) => {
+        t.enqueueBytes([0x20]); // space
+        t.enqueueBytes([0x0d]);
+      },
+      (t: ReturnType<typeof createSyntheticHiddenTty>) => {
+        t.enqueueHexKeyThenEnter("0x" + "ab".repeat(34)); // too long
+      },
+      (t: ReturnType<typeof createSyntheticHiddenTty>) => {
+        t.enqueueBytes([0x61, 0x0d]); // too short
+      },
+    ]) {
+      const { authorization } = authBundle();
+      const tty = createSyntheticHiddenTty();
+      setup(tty);
+      const ledger = new SecretEntryLedger();
+      ledger.reserve(authorization.decisionId, authorization.unsignedArtifactSha256);
+      await expect(
+        readHiddenParentTtySecret({
+          authorization,
+          terminal: tty.terminal,
+          ledger,
+        }),
+      ).rejects.toThrow(/BLOCKED_B35_/);
+      expect(tty.terminal.getRawMode()).toBe(false);
+      expect(tty.rawModeDisableCount.value).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("valid synthetic key returns 32 bytes and restores TTY", async () => {
+    const { authorization } = authBundle();
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueHexKeyThenEnter(SYNTHETIC_B33_RUNTIME_KEY);
+    const ledger = new SecretEntryLedger();
+    ledger.reserve(authorization.decisionId, authorization.unsignedArtifactSha256);
+    const result = await readHiddenParentTtySecret({
+      authorization,
+      terminal: tty.terminal,
+      ledger,
+    });
+    expect(result.credentialBytes.byteLength).toBe(32);
+    expect(result.evidence.raw_mode_restored).toBe(true);
+    expect(result.evidence.pasteboard_api_accessed).toBe(false);
+    expect(tty.terminal.getRawMode()).toBe(false);
+    assertNoSecretLeak(tty.safeOutput.join(""));
+  });
+});
+
+describe("B.3.5 synthetic end-to-end", () => {
+  it("TTY → pipe → runtime-key → send gate", async () => {
     const bundle = buildBundle();
     const dir = workDir();
     const policyPath = writeAccessEnabledPolicy(dir);
     writeFileSync(join(dir, UNSIGNED_ARTIFACT), `${JSON.stringify(bundle.unsignedArtifact)}\n`);
-    const pipe = createInProcessCredentialPipe();
-    const ledger = new CredentialTransportLedger();
-    let transportReads = 0;
-    const base = createPipeCredentialTransport({
-      transportId: pipe.transportId,
-      readable: pipe.readable,
-      ledger,
-    });
-    const transport = {
-      transportId: pipe.transportId,
-      async readOnce(auth: Parameters<typeof base.readOnce>[0]) {
-        transportReads += 1;
-        return base.readOnce(auth);
-      },
-    };
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueHexKeyThenEnter(SYNTHETIC_B33_RUNTIME_KEY);
     const provider = createExplicitRuntimeKeyCredentialProvider();
-    const writePromise = writeCredentialFrameToPipe(
-      pipe.writable,
-      hexToBytes(SYNTHETIC_B33_RUNTIME_KEY),
-    );
     await expect(
       runCredentialGatedBuyerSigning({
         directory: dir,
@@ -517,35 +457,56 @@ describe("B.3.4 synthetic end-to-end via pipe", () => {
         nowAtSign: SIGNING_TIME,
         provider,
         credentialPolicyPath: policyPath,
-        credentialTransport: transport,
+        secretEntryTerminal: tty.terminal,
       }),
     ).rejects.toThrow(BLOCKED_B3_PAYMENT_BEARING_SEND_NOT_AUTHORIZED);
-    await writePromise;
-    expect(transportReads).toBe(1);
+    expect(tty.rawModeEnableCount.value).toBe(1);
+    expect(tty.rawModeDisableCount.value).toBe(1);
     expect(provider.acquireCalls).toBe(1);
     expect(provider.accountDerivations).toBe(1);
     expect(provider.signerCalls).toBe(1);
     const signed = readFileSync(join(dir, "buyer_authorization_signed.json"), "utf8");
     assertNoSecretLeak(signed);
+    assertNoSecretLeak(tty.safeOutput.join(""));
   });
 
-  it("T1 valid, T2 expired after transport: signer 0", async () => {
+  it("wrong key address: signer 0 after entry consumed", async () => {
     const bundle = buildBundle();
     const dir = workDir();
     const policyPath = writeAccessEnabledPolicy(dir);
     writeFileSync(join(dir, UNSIGNED_ARTIFACT), `${JSON.stringify(bundle.unsignedArtifact)}\n`);
-    const pipe = createInProcessCredentialPipe();
-    const transport = createPipeCredentialTransport({
-      transportId: pipe.transportId,
-      readable: pipe.readable,
-    });
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueHexKeyThenEnter(SYNTHETIC_B33_WRONG_RUNTIME_KEY);
+    const provider = createExplicitRuntimeKeyCredentialProvider();
+    await expect(
+      runCredentialGatedBuyerSigning({
+        directory: dir,
+        unsignedArtifact: bundle.unsignedArtifact,
+        attempt: bundle.attempt,
+        humanAuthorization: bundle.human,
+        signingAuthorization: bundle.signingAuthorization,
+        credentialAccessAuthorization: bundle.credentialAccessAuthorization,
+        now: SIGNING_TIME,
+        nowAtSign: SIGNING_TIME,
+        provider,
+        credentialPolicyPath: policyPath,
+        secretEntryTerminal: tty.terminal,
+      }),
+    ).rejects.toThrow(/BLOCKED_B32_ACTUAL_SIGNER_IDENTITY_MISMATCH/);
+    expect(provider.signerCalls).toBe(0);
+    expect(tty.terminal.getRawMode()).toBe(false);
+  });
+
+  it("T2 expiry after entry: signer 0", async () => {
+    const bundle = buildBundle();
+    const dir = workDir();
+    const policyPath = writeAccessEnabledPolicy(dir);
+    writeFileSync(join(dir, UNSIGNED_ARTIFACT), `${JSON.stringify(bundle.unsignedArtifact)}\n`);
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueHexKeyThenEnter(SYNTHETIC_B33_RUNTIME_KEY);
     const provider = createExplicitRuntimeKeyCredentialProvider();
     const after = new Date(bundle.unsignedArtifact.effective_signing_deadline);
     after.setUTCSeconds(after.getUTCSeconds() + 5);
-    const writePromise = writeCredentialFrameToPipe(
-      pipe.writable,
-      hexToBytes(SYNTHETIC_B33_RUNTIME_KEY),
-    );
     await expect(
       runCredentialGatedBuyerSigning({
         directory: dir,
@@ -558,29 +519,22 @@ describe("B.3.4 synthetic end-to-end via pipe", () => {
         nowAtSign: after,
         provider,
         credentialPolicyPath: policyPath,
-        credentialTransport: transport,
+        secretEntryTerminal: tty.terminal,
       }),
     ).rejects.toThrow();
-    await writePromise;
     expect(provider.acquireCalls).toBe(1);
     expect(provider.signerCalls).toBe(0);
   });
 
-  it("stale OneSource: zero transport/provider calls", async () => {
+  it("stale OneSource: zero TTY activations", async () => {
     if (!existsSync(REF_ATTEMPT_DIR)) return;
     const unsignedArtifact = JSON.parse(
       readFileSync(join(REF_ATTEMPT_DIR, UNSIGNED_ARTIFACT), "utf8"),
     ) as UnsignedArtifact;
     const dir = workDir();
     const policyPath = writeAccessEnabledPolicy(dir);
-    let reads = 0;
-    const transport = createAuthorizedOneShotTransport({
-      transportId: "stale",
-      readBytes: async () => {
-        reads += 1;
-        return hexToBytes(SYNTHETIC_B33_RUNTIME_KEY);
-      },
-    });
+    const tty = createSyntheticHiddenTty();
+    tty.enqueueHexKeyThenEnter(SYNTHETIC_B33_RUNTIME_KEY);
     const provider = createExplicitRuntimeKeyCredentialProvider();
     await expect(
       runCredentialGatedBuyerSigning({
@@ -610,52 +564,30 @@ describe("B.3.4 synthetic end-to-end via pipe", () => {
         now: new Date(),
         provider,
         credentialPolicyPath: policyPath,
-        credentialTransport: transport,
+        secretEntryTerminal: tty.terminal,
       }),
     ).rejects.toThrow();
-    expect(reads).toBe(0);
+    expect(tty.rawModeEnableCount.value).toBe(0);
     expect(provider.acquireCalls).toBe(0);
   });
 });
 
-describe("B.3.4 spawn child (no shell / no argv secret)", () => {
-  it("delivers synthetic frame on fd3 without argv/env leakage", async () => {
-    const source = createSyntheticCredentialTransportSource();
-    // Plain .mjs so Node inherits fd 3 directly (no TS loader child).
-    const childScript = join(
-      process.cwd(),
-      "tests/support/b34-credential-transport-child.mjs",
+describe("B.3.5 structural source guards smoke", () => {
+  it("productive modules forbid clipboard / shell / env secret paths", () => {
+    const src = readFileSync(
+      "tools/trustforge/buyer-hidden-tty-secret-entry.ts",
+      "utf8",
     );
-    const result = await spawnCredentialTransportChild({
-      nodeExecutable: process.execPath,
-      scriptPath: childScript,
-      syntheticCredentialBytes: source.bytes,
-      timeoutMs: 20_000,
-      env: {
-        ...process.env,
-        BUYER_PRIVATE_KEY: "should-be-stripped",
-      },
-    });
-    expect(result.usedShell).toBe(false);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("transport_ok");
-    expect(result.argv.join(" ")).not.toContain(SYNTHETIC_B33_RUNTIME_KEY);
-    expect(result.envKeys).not.toContain("BUYER_PRIVATE_KEY");
-    assertNoSecretLeak(result.stdout);
-    assertNoSecretLeak(result.stderr);
-    assertNoSecretLeak(result.argv.join(" "));
+    expect(src).toMatch(/HIDDEN_PARENT_TTY_ONE_SHOT/);
+    expect(src).not.toMatch(/navigator\.clipboard|ClipboardItem|readText\(/);
+    expect(src).not.toMatch(/shell:\s*true/);
+    expect(src).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
+    expect(src).not.toMatch(/process\.argv/);
+    expect(src).not.toMatch(/let key = ""/);
   });
 });
 
-describe("B.3.4 structural guards smoke", () => {
-  it("pipe module forbids shell and env key loading", () => {
-    const src = readFileSync(
-      "tools/trustforge/buyer-credential-transport-pipe.ts",
-      "utf8",
-    );
-    expect(src).toMatch(/shell:\s*false/);
-    expect(src).not.toMatch(/shell:\s*true/);
-    expect(src).not.toMatch(/process\.env\.BUYER_PRIVATE_KEY/);
-    expect(src).not.toMatch(/--private-key/);
-  });
-});
+// silence unused import warnings for timeout/oversized constants used in regexes
+void BLOCKED_B35_SECRET_ENTRY_INVALID;
+void BLOCKED_B35_SECRET_ENTRY_OVERSIZED;
+void BLOCKED_B35_SECRET_ENTRY_TIMEOUT;
