@@ -22,6 +22,7 @@ import {
   type Eip3009Message,
   type Eip712Domain,
 } from "./buyer-eip3009-authorization";
+import { assertNotHumanOneShotSigningMandate } from "./buyer-one-shot-signing-mandate";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 
 /** Runtime brand token — only the factory may stamp this field. */
@@ -60,6 +61,7 @@ export function prepareValidatedBuyerAuthorizationForSigning(input: {
   readonly now: Date;
   readonly expectedUnsignedHash?: string | null;
 }): ValidatedBuyerAuthorizationForSigning {
+  assertNotHumanOneShotSigningMandate(input.signingAuthorization);
   const preSign = validateBuyerAuthorizationBeforeSigning({
     unsignedArtifact: input.unsignedArtifact,
     attempt: input.attempt,

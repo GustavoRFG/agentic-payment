@@ -11,11 +11,15 @@ import {
   BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
   BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_MISSING,
 } from "./b3-execution-gates";
+import { assertNotHumanOneShotSigningMandate } from "./buyer-one-shot-signing-mandate";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 import type { UnsignedArtifact } from "./buyer-authorization-artifacts";
 
 export const BUYER_SIGNING_AUTHORIZATION_SCHEMA_VERSION =
   "trustforge_buyer_signing_authorization.v1" as const;
+
+export const DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE =
+  "DETERMINISTIC_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE" as const;
 
 export interface BuyerSigningAuthorization {
   readonly authorization_schema_version: typeof BUYER_SIGNING_AUTHORIZATION_SCHEMA_VERSION;
@@ -43,6 +47,12 @@ export interface BuyerSigningAuthorization {
   readonly real_signing_authorized: true;
   readonly payment_bearing_send_authorized: false;
   readonly settlement_authorized: false;
+  /**
+   * Present only for B.3.6.1 machine-derived authorizations.
+   * Human mandates themselves are never accepted here.
+   */
+  readonly parent_human_one_shot_signing_mandate_sha256?: string;
+  readonly derivation_type?: typeof DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,6 +84,7 @@ export function validateBuyerSigningAuthorization(input: {
   readonly prepareAuthorizationSha256: string;
   readonly now: Date;
 }): BuyerSigningAuthorization {
+  assertNotHumanOneShotSigningMandate(input.authorization);
   const auth = input.authorization;
   if (!auth || !isRecord(auth as unknown)) {
     fail(
@@ -194,6 +205,31 @@ export function validateBuyerSigningAuthorization(input: {
       `signing authorization expired at ${auth.signing_authorization_expires_at}`,
     );
   }
+  const hasParent = typeof auth.parent_human_one_shot_signing_mandate_sha256 === "string";
+  const hasDerivation = auth.derivation_type !== undefined;
+  if (hasParent !== hasDerivation) {
+    fail(
+      BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
+      "parent_human_one_shot_signing_mandate_sha256 and derivation_type must be set together",
+    );
+  }
+  if (hasDerivation) {
+    if (auth.derivation_type !== DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE) {
+      fail(
+        BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
+        "unsupported derivation_type",
+      );
+    }
+    if (
+      typeof auth.parent_human_one_shot_signing_mandate_sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/.test(auth.parent_human_one_shot_signing_mandate_sha256)
+    ) {
+      fail(
+        BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
+        "parent_human_one_shot_signing_mandate_sha256 must be a 64-char lowercase hex digest",
+      );
+    }
+  }
   return auth;
 }
 
@@ -235,5 +271,31 @@ export function buildSyntheticBuyerSigningAuthorization(input: {
     real_signing_authorized: true,
     payment_bearing_send_authorized: false,
     settlement_authorized: false,
+  };
+}
+
+/**
+ * Machine-derived exact signing authorization from a human one-shot mandate.
+ * Does not broaden mandate constraints. Does not authorize credential access.
+ */
+export function buildDerivedBuyerSigningAuthorizationFromMandate(input: {
+  readonly decisionId: string;
+  readonly prepareAuthorizationSha256: string;
+  readonly parentMandateSha256: string;
+  readonly unsignedArtifact: UnsignedArtifact;
+  readonly unsignedArtifactSha256: string;
+  readonly signingAuthorizationExpiresAt: string;
+}): BuyerSigningAuthorization {
+  const base = buildSyntheticBuyerSigningAuthorization({
+    decisionId: input.decisionId,
+    prepareAuthorizationSha256: input.prepareAuthorizationSha256,
+    unsignedArtifact: input.unsignedArtifact,
+    unsignedArtifactSha256: input.unsignedArtifactSha256,
+    signingAuthorizationExpiresAt: input.signingAuthorizationExpiresAt,
+  });
+  return {
+    ...base,
+    parent_human_one_shot_signing_mandate_sha256: input.parentMandateSha256,
+    derivation_type: DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE,
   };
 }

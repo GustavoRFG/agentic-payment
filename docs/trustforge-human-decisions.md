@@ -43,6 +43,19 @@ decision. Phase 6 must read the approved hash and summary from the resulting
 human artifact; it may canonicalize them for validation, but it must never use
 the runtime planner's own hash as the authorized value.
 
+## B.3.6.1 JIT one-shot signing mandate (offline)
+
+A human one-shot signing mandate may authorize deterministic derivation of at
+most one exact B.3 signing authorization after a fresh unpaid 402 matches the
+mandate exactly. The mandate itself is never accepted by the signer. Derived
+signing authorization does not authorize credential access, payment-bearing
+send, or settlement. No operational mandate is created until a separate human
+decision; B.3.6.1 proves the contract offline with synthetic fixtures only.
+
+The prior B.3.6 prepare run
+`D:\trustforge\artifacts\runs\b36-fresh-signing-candidate-prepare\run_20260810_175224`
+is evidence-only: its unsigned artifact expired and must not be signed or reused.
+
 ## Seller requirements / buyer authorization separation (B.1)
 
 The human decision `ACCEPT_X402_CHALLENGE_MODEL_ALIGNMENT_AUDIT` establishes

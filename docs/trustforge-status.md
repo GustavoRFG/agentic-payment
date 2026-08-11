@@ -54,6 +54,12 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   (`secret_entry_adapter_installed=true`; `HIDDEN_PARENT_TTY_ONE_SHOT`;
   non-TTY fail-closed; no clipboard/env/argv/file fallback; productive access
   still blocked at `BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED`)
+- B.3.6.1 JIT one-shot signing mandate: ready and inactive (offline synthetic)
+  (`HumanOneShotSigningMandate` → exact fresh requirements gate → at most one
+  attempt/nonce/unsigned → machine-derived exact `BuyerSigningAuthorization`
+  with `derivation_type=DETERMINISTIC_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE`;
+  mandate cannot reach the signer; credential access remains an independent
+  B.3.1 gate; 300s freshness cap preserved; no operational mandate issued)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an
