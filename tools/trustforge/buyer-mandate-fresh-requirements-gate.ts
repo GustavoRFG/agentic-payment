@@ -7,11 +7,27 @@
  */
 
 import { BLOCKED_B361_FRESH_REQUIREMENTS_OUTSIDE_HUMAN_MANDATE } from "./b361-execution-gates";
-import {
-  mandateAddressesEqual,
-  type HumanOneShotSigningMandate,
-} from "./buyer-one-shot-signing-mandate";
+import { BLOCKED_B363_FRESH_REQUIREMENTS_OUTSIDE_CONDITIONAL_MANDATE } from "./b363-execution-gates";
 import type { SellerRequirementsObservation } from "./x402-seller-requirements-binding";
+
+/** Shared exact-match surface for B.3.6.1 / B.3.6.3 human mandates. */
+export interface MandateExactMatchBinding {
+  readonly endpoint: string;
+  readonly method: string;
+  readonly request_query: ReadonlyArray<readonly [string, string]>;
+  readonly request_body: unknown | null;
+  readonly request_binding_sha256: string;
+  readonly x402_version: number;
+  readonly scheme: string;
+  readonly seller_network_raw: string;
+  readonly canonical_network_caip2: string;
+  readonly asset: string;
+  readonly pay_to: string;
+  readonly amount_atomic: string;
+  readonly maximum_authorized_amount_atomic: string;
+  readonly canonical_requirements_sha256: string;
+  readonly canonical_envelope_sha256: string;
+}
 
 export interface MandateFreshRequirementsGateResult {
   readonly ok: true;
@@ -19,13 +35,17 @@ export interface MandateFreshRequirementsGateResult {
   readonly compared_fields: readonly string[];
 }
 
-function fail(detail: string): never {
-  throw new Error(`${BLOCKED_B361_FRESH_REQUIREMENTS_OUTSIDE_HUMAN_MANDATE}: ${detail}`);
+function fail(code: string, detail: string): never {
+  throw new Error(`${code}: ${detail}`);
+}
+
+function sameAddress(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
 }
 
 function queryEqual(
-  a: HumanOneShotSigningMandate["request_query"],
-  b: HumanOneShotSigningMandate["request_query"] | undefined,
+  a: MandateExactMatchBinding["request_query"],
+  b: MandateExactMatchBinding["request_query"] | undefined,
 ): boolean {
   if (!b || a.length !== b.length) return false;
   return a.every((pair, i) => pair[0] === b[i][0] && pair[1] === b[i][1]);
@@ -36,13 +56,16 @@ function queryEqual(
  * attempt reservation / nonce generation.
  */
 export function assertFreshRequirementsExactMatchMandate(input: {
-  readonly mandate: HumanOneShotSigningMandate;
+  readonly mandate: MandateExactMatchBinding;
   readonly freshObservation: SellerRequirementsObservation;
   readonly freshEndpoint: string;
   readonly freshMethod: string;
-  readonly freshRequestQuery?: HumanOneShotSigningMandate["request_query"];
+  readonly freshRequestQuery?: MandateExactMatchBinding["request_query"];
   readonly freshRequestBody?: unknown | null;
+  readonly blockerCode?: string;
 }): MandateFreshRequirementsGateResult {
+  const blocker =
+    input.blockerCode ?? BLOCKED_B361_FRESH_REQUIREMENTS_OUTSIDE_HUMAN_MANDATE;
   const m = input.mandate;
   const b = input.freshObservation.binding;
   const compared: string[] = [];
@@ -50,7 +73,10 @@ export function assertFreshRequirementsExactMatchMandate(input: {
   const check = (label: string, actual: unknown, expected: unknown) => {
     compared.push(label);
     if (actual !== expected) {
-      fail(`${label} mismatch: mandate=${JSON.stringify(expected)} fresh=${JSON.stringify(actual)}`);
+      fail(
+        blocker,
+        `${label} mismatch: mandate=${JSON.stringify(expected)} fresh=${JSON.stringify(actual)}`,
+      );
     }
   };
 
@@ -59,13 +85,13 @@ export function assertFreshRequirementsExactMatchMandate(input: {
   if (input.freshRequestQuery !== undefined) {
     compared.push("request_query");
     if (!queryEqual(m.request_query, input.freshRequestQuery)) {
-      fail("request_query mismatch");
+      fail(blocker, "request_query mismatch");
     }
   }
   if (input.freshRequestBody !== undefined) {
     compared.push("request_body");
     if (JSON.stringify(input.freshRequestBody) !== JSON.stringify(m.request_body)) {
-      fail("request_body mismatch");
+      fail(blocker, "request_body mismatch");
     }
   }
   check("request_binding_sha256", b.request_binding_sha256, m.request_binding_sha256);
@@ -74,15 +100,15 @@ export function assertFreshRequirementsExactMatchMandate(input: {
   check("seller_network_raw", b.seller_network_raw, m.seller_network_raw);
   check("canonical_network_caip2", b.canonical_network_caip2, m.canonical_network_caip2);
   compared.push("asset");
-  if (!mandateAddressesEqual(b.asset, m.asset)) fail("asset mismatch");
+  if (!sameAddress(b.asset, m.asset)) fail(blocker, "asset mismatch");
   compared.push("pay_to");
-  if (!mandateAddressesEqual(b.pay_to, m.pay_to)) fail("pay_to mismatch");
+  if (!sameAddress(b.pay_to, m.pay_to)) fail(blocker, "pay_to mismatch");
   check("amount_atomic", b.amount_atomic, m.amount_atomic);
   if (b.amount_atomic === "0" || BigInt(b.amount_atomic) <= 0n) {
-    fail("amount_atomic must be positive");
+    fail(blocker, "amount_atomic must be positive");
   }
   if (BigInt(b.amount_atomic) > BigInt(m.maximum_authorized_amount_atomic)) {
-    fail("fresh amount exceeds mandate maximum_authorized_amount_atomic");
+    fail(blocker, "fresh amount exceeds mandate maximum_authorized_amount_atomic");
   }
   // Strongest R1: exact reviewed requirements/envelope hashes.
   check(
@@ -101,4 +127,19 @@ export function assertFreshRequirementsExactMatchMandate(input: {
     policy: "EXACT_MATCH_REQUIRED",
     compared_fields: compared,
   };
+}
+
+/** B.3.6.3 alias with conditional-mandate blocker code. */
+export function assertFreshRequirementsExactMatchConditionalMandate(input: {
+  readonly mandate: MandateExactMatchBinding;
+  readonly freshObservation: SellerRequirementsObservation;
+  readonly freshEndpoint: string;
+  readonly freshMethod: string;
+  readonly freshRequestQuery?: MandateExactMatchBinding["request_query"];
+  readonly freshRequestBody?: unknown | null;
+}): MandateFreshRequirementsGateResult {
+  return assertFreshRequirementsExactMatchMandate({
+    ...input,
+    blockerCode: BLOCKED_B363_FRESH_REQUIREMENTS_OUTSIDE_CONDITIONAL_MANDATE,
+  });
 }

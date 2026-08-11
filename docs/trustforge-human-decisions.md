@@ -43,6 +43,20 @@ decision. Phase 6 must read the approved hash and summary from the resulting
 human artifact; it may canonicalize them for validation, but it must never use
 the runtime planner's own hash as the authorized value.
 
+## B.3.6.3 conditional credential+signing mandate (offline)
+
+A human conditional credential+signing mandate may authorize deterministic
+derivation of at most one exact B.3 signing authorization and one exact B.3.1
+credential-access authorization after a fresh unpaid 402 matches the mandate.
+The mandate itself cannot acquire credentials or invoke the signer. Derived
+signing authorization still does not authorize payment-bearing send. No
+operational conditional mandate is created until a separate human decision;
+B.3.6.3 proves the contract offline with synthetic fixtures only.
+
+The prior B.3.6.2 operational JIT run
+`D:\trustforge\artifacts\runs\b362-operational-jit-mandate\run_20260811_002106`
+is evidence-only and must not be signed or reused.
+
 ## B.3.6.1 JIT one-shot signing mandate (offline)
 
 A human one-shot signing mandate may authorize deterministic derivation of at

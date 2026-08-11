@@ -60,6 +60,14 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   with `derivation_type=DETERMINISTIC_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE`;
   mandate cannot reach the signer; credential access remains an independent
   B.3.1 gate; 300s freshness cap preserved; no operational mandate issued)
+- B.3.6.3 conditional credential+signing mandate: ready and inactive (offline)
+  (`HumanConditionalCredentialSigningMandate` may conditionally authorize at
+  most one credential acquisition and one signer invocation after exact JIT
+  derivation of `BuyerSigningAuthorization` + `CredentialAccessAuthorization`;
+  mandate cannot directly acquire credentials or invoke the signer; provider
+  locked to `explicit-runtime-key` + `HIDDEN_PARENT_TTY_ONE_SHOT` + B.3.4 pipe;
+  signing does not authorize payment send; 300s cap preserved; no operational
+  conditional mandate issued)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

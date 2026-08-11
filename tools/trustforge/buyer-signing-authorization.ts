@@ -11,15 +11,21 @@ import {
   BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
   BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_MISSING,
 } from "./b3-execution-gates";
+import { assertNotHumanConditionalMandateForSigner } from "./buyer-conditional-credential-signing-mandate";
 import { assertNotHumanOneShotSigningMandate } from "./buyer-one-shot-signing-mandate";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 import type { UnsignedArtifact } from "./buyer-authorization-artifacts";
-
 export const BUYER_SIGNING_AUTHORIZATION_SCHEMA_VERSION =
   "trustforge_buyer_signing_authorization.v1" as const;
 
 export const DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE =
   "DETERMINISTIC_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE" as const;
+export const DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE =
+  "DETERMINISTIC_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE" as const;
+
+export type BuyerSigningAuthorizationDerivationType =
+  | typeof DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE
+  | typeof DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE;
 
 export interface BuyerSigningAuthorization {
   readonly authorization_schema_version: typeof BUYER_SIGNING_AUTHORIZATION_SCHEMA_VERSION;
@@ -52,7 +58,8 @@ export interface BuyerSigningAuthorization {
    * Human mandates themselves are never accepted here.
    */
   readonly parent_human_one_shot_signing_mandate_sha256?: string;
-  readonly derivation_type?: typeof DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE;
+  readonly parent_human_conditional_credential_signing_mandate_sha256?: string;
+  readonly derivation_type?: BuyerSigningAuthorizationDerivationType;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,6 +92,7 @@ export function validateBuyerSigningAuthorization(input: {
   readonly now: Date;
 }): BuyerSigningAuthorization {
   assertNotHumanOneShotSigningMandate(input.authorization);
+  assertNotHumanConditionalMandateForSigner(input.authorization);
   const auth = input.authorization;
   if (!auth || !isRecord(auth as unknown)) {
     fail(
@@ -205,28 +213,43 @@ export function validateBuyerSigningAuthorization(input: {
       `signing authorization expired at ${auth.signing_authorization_expires_at}`,
     );
   }
-  const hasParent = typeof auth.parent_human_one_shot_signing_mandate_sha256 === "string";
+  const parentOneShot = auth.parent_human_one_shot_signing_mandate_sha256;
+  const parentConditional = auth.parent_human_conditional_credential_signing_mandate_sha256;
   const hasDerivation = auth.derivation_type !== undefined;
-  if (hasParent !== hasDerivation) {
+  const parentCount =
+    (typeof parentOneShot === "string" ? 1 : 0) + (typeof parentConditional === "string" ? 1 : 0);
+  if (hasDerivation !== (parentCount === 1)) {
     fail(
       BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
-      "parent_human_one_shot_signing_mandate_sha256 and derivation_type must be set together",
+      "exactly one parent mandate hash must accompany derivation_type",
     );
   }
   if (hasDerivation) {
-    if (auth.derivation_type !== DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE) {
+    if (
+      auth.derivation_type !== DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE &&
+      auth.derivation_type !== DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE
+    ) {
       fail(
         BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
         "unsupported derivation_type",
       );
     }
     if (
-      typeof auth.parent_human_one_shot_signing_mandate_sha256 !== "string" ||
-      !/^[0-9a-f]{64}$/.test(auth.parent_human_one_shot_signing_mandate_sha256)
+      auth.derivation_type === DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE &&
+      (typeof parentOneShot !== "string" || !/^[0-9a-f]{64}$/.test(parentOneShot))
     ) {
       fail(
         BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
         "parent_human_one_shot_signing_mandate_sha256 must be a 64-char lowercase hex digest",
+      );
+    }
+    if (
+      auth.derivation_type === DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE &&
+      (typeof parentConditional !== "string" || !/^[0-9a-f]{64}$/.test(parentConditional))
+    ) {
+      fail(
+        BLOCKED_B3_REAL_SIGNING_AUTHORIZATION_INVALID,
+        "parent_human_conditional_credential_signing_mandate_sha256 must be a 64-char lowercase hex digest",
       );
     }
   }
@@ -297,5 +320,32 @@ export function buildDerivedBuyerSigningAuthorizationFromMandate(input: {
     ...base,
     parent_human_one_shot_signing_mandate_sha256: input.parentMandateSha256,
     derivation_type: DERIVATION_TYPE_FROM_HUMAN_ONE_SHOT_SIGNING_MANDATE,
+  };
+}
+
+/**
+ * Machine-derived exact signing authorization from a conditional credential+signing mandate.
+ * Does not authorize payment-bearing send.
+ */
+export function buildDerivedBuyerSigningAuthorizationFromConditionalMandate(input: {
+  readonly decisionId: string;
+  readonly prepareAuthorizationSha256: string;
+  readonly parentConditionalMandateSha256: string;
+  readonly unsignedArtifact: UnsignedArtifact;
+  readonly unsignedArtifactSha256: string;
+  readonly signingAuthorizationExpiresAt: string;
+}): BuyerSigningAuthorization {
+  const base = buildSyntheticBuyerSigningAuthorization({
+    decisionId: input.decisionId,
+    prepareAuthorizationSha256: input.prepareAuthorizationSha256,
+    unsignedArtifact: input.unsignedArtifact,
+    unsignedArtifactSha256: input.unsignedArtifactSha256,
+    signingAuthorizationExpiresAt: input.signingAuthorizationExpiresAt,
+  });
+  return {
+    ...base,
+    parent_human_conditional_credential_signing_mandate_sha256:
+      input.parentConditionalMandateSha256,
+    derivation_type: DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE,
   };
 }

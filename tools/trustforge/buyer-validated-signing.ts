@@ -22,6 +22,7 @@ import {
   type Eip3009Message,
   type Eip712Domain,
 } from "./buyer-eip3009-authorization";
+import { assertNotHumanConditionalMandateForSigner } from "./buyer-conditional-credential-signing-mandate";
 import { assertNotHumanOneShotSigningMandate } from "./buyer-one-shot-signing-mandate";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 
@@ -62,6 +63,7 @@ export function prepareValidatedBuyerAuthorizationForSigning(input: {
   readonly expectedUnsignedHash?: string | null;
 }): ValidatedBuyerAuthorizationForSigning {
   assertNotHumanOneShotSigningMandate(input.signingAuthorization);
+  assertNotHumanConditionalMandateForSigner(input.signingAuthorization);
   const preSign = validateBuyerAuthorizationBeforeSigning({
     unsignedArtifact: input.unsignedArtifact,
     attempt: input.attempt,
