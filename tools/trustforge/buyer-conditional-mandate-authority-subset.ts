@@ -17,10 +17,6 @@ import {
 } from "./buyer-conditional-credential-signing-mandate";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
 import { DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE } from "./buyer-signing-authorization";
-import {
-  EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND,
-  EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
-} from "./explicit-runtime-key-credential-provider";
 import type { SellerRequirementsObservation } from "./x402-seller-requirements-binding";
 
 export interface DualAuthoritySubsetProof {
@@ -140,9 +136,8 @@ export function verifyDerivedCredentialAccessAuthorizationIsSubsetOfConditionalM
     c.unsigned_artifact_sha256 === input.unsignedArtifactSha256 &&
       c.attempt_id === input.unsignedArtifact.attempt_id,
   );
-  check("provider", c.provider_id === EXPLICIT_RUNTIME_KEY_PROVIDER_ID);
   check("provider_matches_mandate", c.provider_id === m.credential_provider_id);
-  check("credential_kind", c.credential_kind === EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND);
+  check("credential_kind_matches_mandate", c.credential_kind === m.credential_kind);
   check(
     "secret_entry",
     c.required_secret_entry_mechanism === m.secret_entry_mechanism,

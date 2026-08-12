@@ -164,6 +164,7 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
     "tools/trustforge/buyer-eip3009-authorization.ts",
     "tools/trustforge/buyer-authorization-signer.ts",
     "tools/trustforge/explicit-runtime-key-credential-provider.ts",
+    "tools/trustforge/windows-dpapi-local-signer.ts",
   ]);
   const BYPASS_EXPORT =
     /^\s*export\s+(?:async\s+)?(?:function|const)\s+(?:signUnsignedPayload|signTypedDataWithoutValidation|__unsafeSign|rawSignUnsigned)/;
@@ -316,9 +317,10 @@ describe("GUARD_NO_PRODUCTIVE_UNVALIDATED_BUYER_SIGNING_ENTRYPOINT", () => {
   it("GUARD_EXPLICIT_RUNTIME_KEY_ACCESS_ONLY_IN_AUTHORIZED_PROVIDER", () => {
     const allowed = new Set([
       "tools/trustforge/explicit-runtime-key-credential-provider.ts",
+      "tools/trustforge/windows-dpapi-local-signer.ts",
     ]);
     const buyerBoundary =
-      /(^|\/)(buyer-|b31-|b32-|b33-|explicit-runtime-key)/;
+      /(^|\/)(buyer-|b31-|b32-|b33-|b4-|explicit-runtime-key|windows-dpapi)/;
     const hits: string[] = [];
     for (const root of PRODUCTIVE_ROOTS) {
       for (const file of sourceFiles(root)) {

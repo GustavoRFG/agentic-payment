@@ -8,6 +8,7 @@ export const B32_PRODUCTIVE_PROVIDER_IDS = [
   "encrypted-local-keystore",
   "external-signer",
   "secure-signing-provider",
+  "windows-dpapi-local-signer",
 ] as const;
 
 export type B32ProductiveProviderId = (typeof B32_PRODUCTIVE_PROVIDER_IDS)[number];
@@ -20,6 +21,7 @@ export const B32_PROVIDER_CREDENTIAL_KINDS: Record<B32ProductiveProviderId, stri
   "encrypted-local-keystore": "encrypted_local_keystore",
   "external-signer": "external_signer",
   "secure-signing-provider": "secure_signing_provider",
+  "windows-dpapi-local-signer": "windows_dpapi_protected_private_key",
 };
 
 const PRODUCTIVE_ID_SET = new Set<string>(B32_PRODUCTIVE_PROVIDER_IDS);

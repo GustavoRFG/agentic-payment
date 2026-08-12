@@ -79,6 +79,11 @@ import type { HumanPaymentAuthorization } from "./validate-human-payment-authori
 import {
   EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
 } from "./explicit-runtime-key-credential-provider";
+import {
+  B4_PROTECTED_SIGNER_PROVIDER_ID,
+  B4_PROTECTED_VAULT_SECRET_ENTRY,
+  GUARD_NO_NORMAL_PAYMENT_PRIVATE_KEY_PROMPT,
+} from "./b4-execution-gates";
 
 function sameAddress(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
@@ -296,157 +301,171 @@ export async function runCredentialGatedBuyerSigning(
   let transportBytes: Uint8Array | null = null;
   let activeTransport = input.credentialTransport ?? null;
 
-  if (
-    !credentialInput &&
-    !activeTransport &&
-    input.secretEntryTerminal &&
-    input.windowsMaskedSecretDialog
-  ) {
-    throw new Error(
-      `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: secretEntryTerminal and windowsMaskedSecretDialog are mutually exclusive`,
-    );
-  }
+  const isDpapiVaultPath =
+    provider.providerId === B4_PROTECTED_SIGNER_PROVIDER_ID &&
+    accessAuth.required_secret_entry_mechanism === B4_PROTECTED_VAULT_SECRET_ENTRY;
 
-  // B.3.5.2: Windows masked dialog → B.3.4 in-process pipe.
-  if (!credentialInput && !activeTransport && input.windowsMaskedSecretDialog) {
-    if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
-      rejectRuntimeKeyTransportFallback("secret entry requires explicit-runtime-key");
-    }
+  if (isDpapiVaultPath) {
+    // B.4: protected vault — never prompt for private key; ignore dialog/TTY if passed.
+    void GUARD_NO_NORMAL_PAYMENT_PRIVATE_KEY_PROMPT;
+    credentialInput = undefined;
+    activeTransport = null;
+  } else {
     if (
-      accessAuth.required_secret_entry_mechanism &&
-      accessAuth.required_secret_entry_mechanism !== B352_SECRET_ENTRY_MECHANISM
+      !credentialInput &&
+      !activeTransport &&
+      input.secretEntryTerminal &&
+      input.windowsMaskedSecretDialog
     ) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
       throw new Error(
-        `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: credential auth requires ${accessAuth.required_secret_entry_mechanism}, not Windows dialog`,
+        `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: secretEntryTerminal and windowsMaskedSecretDialog are mutually exclusive`,
       );
     }
-    const secretAuth = stampAuthorizedSecretEntry({
-      authorizedRequest: stamped,
-      credentialAccessEnabled: credentialPolicy.credential_access_enabled,
-    });
-    const secretLedger = input.secretEntryLedger ?? new SecretEntryLedger();
-    secretLedger.reserve(secretAuth.decisionId, secretAuth.unsignedArtifactSha256);
-    let entryBytes: Uint8Array | null = null;
-    let framed: Uint8Array | null = null;
-    try {
-      const entered = await readWindowsMaskedSecretDialog({
-        authorization: secretAuth,
-        dialog: input.windowsMaskedSecretDialog,
-        ledger: secretLedger,
-        expectedWallet: expectedFromAuth,
-      });
-      entryBytes = entered.credentialBytes;
-      framed = encodeCredentialTransportFrame(entryBytes);
-      zeroCredentialBytes(entryBytes);
-      entryBytes = null;
-      const transportId = `win_dialog_pipe_${randomUUID()}`;
-      const readable = Readable.from([Buffer.from(framed)]);
-      zeroCredentialBytes(framed);
-      framed = null;
-      activeTransport = createPipeCredentialTransport({
-        transportId,
-        readable,
-      });
-    } catch (error) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
-      zeroCredentialBytes(entryBytes);
-      zeroCredentialBytes(framed);
-      throw error;
-    }
-  }
 
-  // B.3.5: hidden TTY → B.3.4 in-process pipe (only when no explicit input/transport).
-  if (!credentialInput && !activeTransport && input.secretEntryTerminal) {
-    if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
-      rejectRuntimeKeyTransportFallback("secret entry requires explicit-runtime-key");
-    }
-    const secretAuth = stampAuthorizedSecretEntry({
-      authorizedRequest: stamped,
-      credentialAccessEnabled: credentialPolicy.credential_access_enabled,
-    });
-    const secretLedger = input.secretEntryLedger ?? new SecretEntryLedger();
-    secretLedger.reserve(secretAuth.decisionId, secretAuth.unsignedArtifactSha256);
-    let entryBytes: Uint8Array | null = null;
-    let framed: Uint8Array | null = null;
-    try {
-      const entered = await readHiddenParentTtySecret({
-        authorization: secretAuth,
-        terminal: input.secretEntryTerminal,
-        ledger: secretLedger,
+    // B.3.5.2: Windows masked dialog → B.3.4 in-process pipe.
+    if (!credentialInput && !activeTransport && input.windowsMaskedSecretDialog) {
+      if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        rejectRuntimeKeyTransportFallback("secret entry requires explicit-runtime-key");
+      }
+      if (
+        accessAuth.required_secret_entry_mechanism &&
+        accessAuth.required_secret_entry_mechanism !== B352_SECRET_ENTRY_MECHANISM
+      ) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        throw new Error(
+          `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: credential auth requires ${accessAuth.required_secret_entry_mechanism}, not Windows dialog`,
+        );
+      }
+      const secretAuth = stampAuthorizedSecretEntry({
+        authorizedRequest: stamped,
+        credentialAccessEnabled: credentialPolicy.credential_access_enabled,
       });
-      entryBytes = entered.credentialBytes;
-      // B.3.4 framing then one-shot Readable pipe (avoids PassThrough race after end).
-      framed = encodeCredentialTransportFrame(entryBytes);
-      zeroCredentialBytes(entryBytes);
-      entryBytes = null;
-      const transportId = `tty_pipe_${randomUUID()}`;
-      const readable = Readable.from([Buffer.from(framed)]);
-      zeroCredentialBytes(framed);
-      framed = null;
-      activeTransport = createPipeCredentialTransport({
-        transportId,
-        readable,
-      });
-    } catch (error) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
-      zeroCredentialBytes(entryBytes);
-      zeroCredentialBytes(framed);
-      throw error;
+      const secretLedger = input.secretEntryLedger ?? new SecretEntryLedger();
+      secretLedger.reserve(secretAuth.decisionId, secretAuth.unsignedArtifactSha256);
+      let entryBytes: Uint8Array | null = null;
+      let framed: Uint8Array | null = null;
+      try {
+        const entered = await readWindowsMaskedSecretDialog({
+          authorization: secretAuth,
+          dialog: input.windowsMaskedSecretDialog,
+          ledger: secretLedger,
+          expectedWallet: expectedFromAuth,
+        });
+        entryBytes = entered.credentialBytes;
+        framed = encodeCredentialTransportFrame(entryBytes);
+        zeroCredentialBytes(entryBytes);
+        entryBytes = null;
+        const transportId = `win_dialog_pipe_${randomUUID()}`;
+        const readable = Readable.from([Buffer.from(framed)]);
+        zeroCredentialBytes(framed);
+        framed = null;
+        activeTransport = createPipeCredentialTransport({
+          transportId,
+          readable,
+        });
+      } catch (error) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        zeroCredentialBytes(entryBytes);
+        zeroCredentialBytes(framed);
+        throw error;
+      }
     }
-  }
 
-  if (!credentialInput && activeTransport) {
-    if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
-      rejectRuntimeKeyTransportFallback("transport requires explicit-runtime-key");
+    // B.3.5: hidden TTY → B.3.4 in-process pipe (only when no explicit input/transport).
+    if (!credentialInput && !activeTransport && input.secretEntryTerminal) {
+      if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        rejectRuntimeKeyTransportFallback("secret entry requires explicit-runtime-key");
+      }
+      const secretAuth = stampAuthorizedSecretEntry({
+        authorizedRequest: stamped,
+        credentialAccessEnabled: credentialPolicy.credential_access_enabled,
+      });
+      const secretLedger = input.secretEntryLedger ?? new SecretEntryLedger();
+      secretLedger.reserve(secretAuth.decisionId, secretAuth.unsignedArtifactSha256);
+      let entryBytes: Uint8Array | null = null;
+      let framed: Uint8Array | null = null;
+      try {
+        const entered = await readHiddenParentTtySecret({
+          authorization: secretAuth,
+          terminal: input.secretEntryTerminal,
+          ledger: secretLedger,
+        });
+        entryBytes = entered.credentialBytes;
+        // B.3.4 framing then one-shot Readable pipe (avoids PassThrough race after end).
+        framed = encodeCredentialTransportFrame(entryBytes);
+        zeroCredentialBytes(entryBytes);
+        entryBytes = null;
+        const transportId = `tty_pipe_${randomUUID()}`;
+        const readable = Readable.from([Buffer.from(framed)]);
+        zeroCredentialBytes(framed);
+        framed = null;
+        activeTransport = createPipeCredentialTransport({
+          transportId,
+          readable,
+        });
+      } catch (error) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        zeroCredentialBytes(entryBytes);
+        zeroCredentialBytes(framed);
+        throw error;
+      }
     }
-    const transportAuth = stampAuthorizedCredentialTransportRead({
-      transportId: activeTransport.transportId,
-      authorizedRequest: stamped,
-    });
-    try {
-      transportBytes = await activeTransport.readOnce(transportAuth);
-      credentialInput = {
-        kind: "explicit-runtime-key",
-        privateKey: transportBytes,
-      };
-    } catch (error) {
-      credentialLedger.markAmbiguous(
-        accessAuth.decision_id,
-        validated.unsignedArtifactSha256,
-      );
-      zeroCredentialBytes(transportBytes);
-      throw error;
+
+    if (!credentialInput && activeTransport) {
+      if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        rejectRuntimeKeyTransportFallback("transport requires explicit-runtime-key");
+      }
+      const transportAuth = stampAuthorizedCredentialTransportRead({
+        transportId: activeTransport.transportId,
+        authorizedRequest: stamped,
+      });
+      try {
+        transportBytes = await activeTransport.readOnce(transportAuth);
+        credentialInput = {
+          kind: "explicit-runtime-key",
+          privateKey: transportBytes,
+        };
+      } catch (error) {
+        credentialLedger.markAmbiguous(
+          accessAuth.decision_id,
+          validated.unsignedArtifactSha256,
+        );
+        zeroCredentialBytes(transportBytes);
+        throw error;
+      }
+    } else if (!credentialInput && !activeTransport) {
+      // No discovery / no env / no argv / no TTY fallback.
+      // Adapter will raise BLOCKED_B33_RUNTIME_KEY_CREDENTIAL_MISSING.
     }
-  } else if (!credentialInput && !activeTransport) {
-    // No discovery / no env / no argv / no TTY fallback.
-    // Adapter will raise BLOCKED_B33_RUNTIME_KEY_CREDENTIAL_MISSING.
   }
 
   let signer: BuyerAuthorizationSigner;
   try {
-    signer = await provider.acquireSigner(stamped, credentialInput);
+    signer = await provider.acquireSigner(
+      stamped,
+      isDpapiVaultPath ? undefined : credentialInput,
+    );
   } catch (error) {
     credentialLedger.markAmbiguous(accessAuth.decision_id, validated.unsignedArtifactSha256);
     zeroCredentialBytes(transportBytes);

@@ -29,6 +29,7 @@ import {
   createInactiveProductionCredentialProvider,
   type BuyerCredentialProvider,
 } from "./buyer-credential-provider";
+import { createWindowsDpapiLocalSignerProvider } from "./windows-dpapi-local-signer";
 
 export {
   B32_PRODUCTIVE_PROVIDER_IDS,
@@ -116,6 +117,8 @@ export function resolveProductiveCredentialProvider(
       return createInactiveExternalSignerProvider();
     case "secure-signing-provider":
       return createInactiveSecureSigningProvider();
+    case "windows-dpapi-local-signer":
+      return createWindowsDpapiLocalSignerProvider();
     default: {
       const _exhaustive: never = id;
       throw new Error(

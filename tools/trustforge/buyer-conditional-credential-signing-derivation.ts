@@ -322,6 +322,8 @@ export function deriveConditionalCredentialSigningArtifacts(
         unsignedArtifactSha256: unsignedSha256,
         accessExpiresAt,
         secretEntryMechanism: mandate.secret_entry_mechanism,
+        providerId: mandate.credential_provider_id,
+        credentialKind: mandate.credential_kind,
       });
     const credentialSha = buyerCredentialAccessAuthorizationSha256(derivedCredential);
     writeArtifactOnce(

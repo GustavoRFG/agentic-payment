@@ -12,10 +12,14 @@ import {
   BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_MISSING,
   BLOCKED_B31_PROVIDER_MISMATCH,
 } from "./b31-execution-gates";
-import { assertNotHumanConditionalMandateForCredential } from "./buyer-conditional-credential-signing-mandate";
-import { B34_ONE_SHOT_PIPE_TRANSPORT } from "./buyer-conditional-credential-signing-mandate";
 import {
-  isAllowedSecretEntryMechanism,
+  assertNotHumanConditionalMandateForCredential,
+  assertValidConditionalCredentialMode,
+  B34_ONE_SHOT_PIPE_TRANSPORT,
+  type ConditionalCredentialKind,
+  type ConditionalCredentialProviderId,
+} from "./buyer-conditional-credential-signing-mandate";
+import {
   type SecretEntryMechanism,
 } from "./buyer-secret-entry-mechanism";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
@@ -218,22 +222,17 @@ export function validateBuyerCredentialAccessAuthorization(input: {
         "parent_human_conditional_credential_signing_mandate_sha256 must be a 64-char lowercase hex digest",
       );
     }
-    if (auth.provider_id !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+    try {
+      assertValidConditionalCredentialMode({
+        providerId: auth.provider_id,
+        credentialKind: auth.credential_kind,
+        secretEntryMechanism: auth.required_secret_entry_mechanism,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       fail(
         BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID,
-        "derived credential auth requires explicit-runtime-key",
-      );
-    }
-    if (auth.credential_kind !== EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND) {
-      fail(
-        BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID,
-        "derived credential auth credential_kind mismatch",
-      );
-    }
-    if (!isAllowedSecretEntryMechanism(auth.required_secret_entry_mechanism)) {
-      fail(
-        BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID,
-        "derived credential auth requires an allowed secret-entry mechanism",
+        message.includes(":") ? message.split(":").slice(1).join(":").trim() : message,
       );
     }
     if (auth.required_credential_transport !== B34_ONE_SHOT_PIPE_TRANSPORT) {
@@ -298,21 +297,24 @@ export function buildDerivedBuyerCredentialAccessAuthorizationFromConditionalMan
   readonly unsignedArtifactSha256: string;
   readonly accessExpiresAt: string;
   readonly secretEntryMechanism: SecretEntryMechanism;
+  readonly providerId?: ConditionalCredentialProviderId;
+  readonly credentialKind?: ConditionalCredentialKind;
 }): BuyerCredentialAccessAuthorization {
-  if (!isAllowedSecretEntryMechanism(input.secretEntryMechanism)) {
-    fail(
-      BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID,
-      "secretEntryMechanism is not allowed",
-    );
-  }
+  const providerId = input.providerId ?? EXPLICIT_RUNTIME_KEY_PROVIDER_ID;
+  const credentialKind = input.credentialKind ?? EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND;
+  assertValidConditionalCredentialMode({
+    providerId,
+    credentialKind,
+    secretEntryMechanism: input.secretEntryMechanism,
+  });
   const base = buildSyntheticBuyerCredentialAccessAuthorization({
     decisionId: input.decisionId,
     signingAuthorization: input.signingAuthorization,
     signingAuthorizationSha256: input.signingAuthorizationSha256,
     unsignedArtifact: input.unsignedArtifact,
     unsignedArtifactSha256: input.unsignedArtifactSha256,
-    providerId: EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
-    credentialKind: EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND,
+    providerId,
+    credentialKind,
     expectedSignerAddress: input.unsignedArtifact.buyer_wallet,
     accessExpiresAt: input.accessExpiresAt,
   });

@@ -14,6 +14,11 @@ import {
   GUARD_HUMAN_CONDITIONAL_MANDATE_NOT_DIRECTLY_SIGNABLE,
 } from "./b363-execution-gates";
 import {
+  B4_PROTECTED_SIGNER_CREDENTIAL_KIND,
+  B4_PROTECTED_SIGNER_PROVIDER_ID,
+  B4_PROTECTED_VAULT_SECRET_ENTRY,
+} from "./b4-execution-gates";
+import {
   B35_SECRET_ENTRY_MECHANISM,
   B352_SECRET_ENTRY_MECHANISM,
   isAllowedSecretEntryMechanism,
@@ -35,6 +40,14 @@ export const REQUIREMENTS_CHANGE_POLICY_EXACT_MATCH_REQUIRED =
   "EXACT_MATCH_REQUIRED" as const;
 
 export const B34_ONE_SHOT_PIPE_TRANSPORT = "B34_ONE_SHOT_PIPE" as const;
+
+export type ConditionalCredentialProviderId =
+  | typeof EXPLICIT_RUNTIME_KEY_PROVIDER_ID
+  | typeof B4_PROTECTED_SIGNER_PROVIDER_ID;
+
+export type ConditionalCredentialKind =
+  | typeof EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND
+  | typeof B4_PROTECTED_SIGNER_CREDENTIAL_KIND;
 
 export type CanonicalQueryPairs = ReadonlyArray<readonly [string, string]>;
 
@@ -75,9 +88,10 @@ export interface HumanConditionalCredentialSigningMandate {
   readonly credential_access_conditionally_authorized: true;
   /** Conditional privilege — still requires derived BuyerSigningAuthorization. */
   readonly real_signing_conditionally_authorized: true;
-  readonly credential_provider_id: typeof EXPLICIT_RUNTIME_KEY_PROVIDER_ID;
-  readonly credential_kind: typeof EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND;
+  readonly credential_provider_id: ConditionalCredentialProviderId;
+  readonly credential_kind: ConditionalCredentialKind;
   readonly secret_entry_mechanism: SecretEntryMechanism;
+  /** Kept for schema stability; B.4 DPAPI vault path does not open a pipe. */
   readonly credential_transport: typeof B34_ONE_SHOT_PIPE_TRANSPORT;
   readonly payment_bearing_send_authorized: false;
   readonly settlement_authorized: false;
@@ -107,6 +121,51 @@ function requireAtomicAmount(value: unknown, label: string): string {
     fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, `${label} must be a positive integer string`);
   }
   return s;
+}
+
+/** Accept explicit-runtime-key + TTY/dialog, or windows-dpapi + vault one-shot. */
+export function assertValidConditionalCredentialMode(input: {
+  readonly providerId: string;
+  readonly credentialKind: string;
+  readonly secretEntryMechanism: unknown;
+}): void {
+  if (!isAllowedSecretEntryMechanism(input.secretEntryMechanism)) {
+    fail(
+      BLOCKED_B363_CONDITIONAL_MANDATE_INVALID,
+      "secret entry must be HIDDEN_PARENT_TTY_ONE_SHOT, WINDOWS_MASKED_SECRET_DIALOG_ONE_SHOT, or WINDOWS_DPAPI_VAULT_ONE_SHOT",
+    );
+  }
+  if (
+    input.providerId === EXPLICIT_RUNTIME_KEY_PROVIDER_ID &&
+    input.credentialKind === EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND
+  ) {
+    if (
+      input.secretEntryMechanism !== B35_SECRET_ENTRY_MECHANISM &&
+      input.secretEntryMechanism !== B352_SECRET_ENTRY_MECHANISM
+    ) {
+      fail(
+        BLOCKED_B363_CONDITIONAL_MANDATE_INVALID,
+        "explicit-runtime-key requires TTY or Windows masked dialog secret entry",
+      );
+    }
+    return;
+  }
+  if (
+    input.providerId === B4_PROTECTED_SIGNER_PROVIDER_ID &&
+    input.credentialKind === B4_PROTECTED_SIGNER_CREDENTIAL_KIND
+  ) {
+    if (input.secretEntryMechanism !== B4_PROTECTED_VAULT_SECRET_ENTRY) {
+      fail(
+        BLOCKED_B363_CONDITIONAL_MANDATE_INVALID,
+        "windows-dpapi-local-signer requires WINDOWS_DPAPI_VAULT_ONE_SHOT",
+      );
+    }
+    return;
+  }
+  fail(
+    BLOCKED_B363_CONDITIONAL_MANDATE_INVALID,
+    "credential provider/kind must be explicit-runtime-key or windows-dpapi-local-signer",
+  );
 }
 
 export function isHumanConditionalCredentialSigningMandate(
@@ -214,18 +273,11 @@ export function validateHumanConditionalCredentialSigningMandate(input: {
       "conditional credential and signing privileges must be explicitly true",
     );
   }
-  if (mandate.credential_provider_id !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
-    fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, "credential provider must be explicit-runtime-key");
-  }
-  if (mandate.credential_kind !== EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND) {
-    fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, "credential kind mismatch");
-  }
-  if (!isAllowedSecretEntryMechanism(mandate.secret_entry_mechanism)) {
-    fail(
-      BLOCKED_B363_CONDITIONAL_MANDATE_INVALID,
-      "secret entry must be HIDDEN_PARENT_TTY_ONE_SHOT or WINDOWS_MASKED_SECRET_DIALOG_ONE_SHOT",
-    );
-  }
+  assertValidConditionalCredentialMode({
+    providerId: mandate.credential_provider_id,
+    credentialKind: mandate.credential_kind,
+    secretEntryMechanism: mandate.secret_entry_mechanism,
+  });
   if (mandate.credential_transport !== B34_ONE_SHOT_PIPE_TRANSPORT) {
     fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, "credential transport must be B34_ONE_SHOT_PIPE");
   }
@@ -281,8 +333,23 @@ export function buildSyntheticHumanConditionalCredentialSigningMandate(input: {
   readonly decidedAt: string;
   readonly mandateExpiresAt: string;
   readonly secretEntryMechanism?: SecretEntryMechanism;
+  readonly credentialProviderId?: ConditionalCredentialProviderId;
+  readonly credentialKind?: ConditionalCredentialKind;
 }): HumanConditionalCredentialSigningMandate {
   const amount = input.amountAtomic ?? "1000";
+  const credential_provider_id =
+    input.credentialProviderId ?? EXPLICIT_RUNTIME_KEY_PROVIDER_ID;
+  const credential_kind = input.credentialKind ?? EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND;
+  const secret_entry_mechanism =
+    input.secretEntryMechanism ??
+    (credential_provider_id === B4_PROTECTED_SIGNER_PROVIDER_ID
+      ? B4_PROTECTED_VAULT_SECRET_ENTRY
+      : B35_SECRET_ENTRY_MECHANISM);
+  assertValidConditionalCredentialMode({
+    providerId: credential_provider_id,
+    credentialKind: credential_kind,
+    secretEntryMechanism: secret_entry_mechanism,
+  });
   return {
     schema_version: HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE_SCHEMA_VERSION,
     decision: HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE_DECISION,
@@ -318,10 +385,11 @@ export function buildSyntheticHumanConditionalCredentialSigningMandate(input: {
     allow_resign: false,
     credential_access_conditionally_authorized: true,
     real_signing_conditionally_authorized: true,
-    credential_provider_id: EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
-    credential_kind: EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND,
-    // Synthetic default remains TTY for legacy fixtures; Windows operational uses B352.
-    secret_entry_mechanism: input.secretEntryMechanism ?? B35_SECRET_ENTRY_MECHANISM,
+    credential_provider_id,
+    credential_kind,
+    // Synthetic default remains TTY for legacy fixtures; Windows operational uses B352;
+    // B.4 DPAPI uses WINDOWS_DPAPI_VAULT_ONE_SHOT.
+    secret_entry_mechanism,
     credential_transport: B34_ONE_SHOT_PIPE_TRANSPORT,
     payment_bearing_send_authorized: false,
     settlement_authorized: false,
