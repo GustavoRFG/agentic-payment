@@ -54,6 +54,10 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   (`secret_entry_adapter_installed=true`; `HIDDEN_PARENT_TTY_ONE_SHOT`;
   non-TTY fail-closed; no clipboard/env/argv/file fallback; productive access
   still blocked at `BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED`)
+- B.3.5.1 Windows hidden input UX corrective: ready (no payment)
+  (masked `*` feedback; raw Ctrl+V `0x16` never appended as credential material;
+  host paste injects hex chars; sanitized Enter diagnostics; no app clipboard
+  API; `BLOCKED_B351_PASTE_SHORTCUT_NOT_SUPPORTED` when only control-byte Ctrl+V)
 - B.3.6.1 JIT one-shot signing mandate: ready and inactive (offline synthetic)
   (`HumanOneShotSigningMandate` → exact fresh requirements gate → at most one
   attempt/nonce/unsigned → machine-derived exact `BuyerSigningAuthorization`

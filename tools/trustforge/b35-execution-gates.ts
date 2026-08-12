@@ -23,6 +23,9 @@ export const BLOCKED_B35_SECRET_ENTRY_FALLBACK_FORBIDDEN =
   "BLOCKED_B35_SECRET_ENTRY_FALLBACK_FORBIDDEN" as const;
 export const BLOCKED_B35_SECRET_ENTRY_BEFORE_GATE =
   "BLOCKED_B35_SECRET_ENTRY_BEFORE_GATE" as const;
+/** Ctrl+V arrived as raw control byte 0x16 (not host-injected paste text). */
+export const BLOCKED_B351_PASTE_SHORTCUT_NOT_SUPPORTED =
+  "BLOCKED_B351_PASTE_SHORTCUT_NOT_SUPPORTED" as const;
 
 export function assertB35InteractiveTtyRequired(): never {
   throw new Error(

@@ -12,6 +12,9 @@ export interface SyntheticHiddenTtyControls {
   readonly rawModeDisableCount: { value: number };
   enqueueBytes(bytes: Iterable<number>): void;
   enqueueHexKeyThenEnter(hex: string): void;
+  /** Simulate Windows host paste: hex chars then Enter (not Ctrl+V 0x16). */
+  enqueueHostPasteHexThenEnter(hex: string): void;
+  enqueueCtrlVControlByte(): void;
   enqueueCtrlC(): void;
   enqueueEscape(): void;
   close(): void;
@@ -84,6 +87,16 @@ export function createSyntheticHiddenTty(options?: {
         push(ch.charCodeAt(0));
       }
       push(0x0d);
+    },
+    enqueueHostPasteHexThenEnter(hex) {
+      // Same byte path as typed hex — models ConPTY/host paste injection.
+      for (const ch of hex) {
+        push(ch.charCodeAt(0));
+      }
+      push(0x0d);
+    },
+    enqueueCtrlVControlByte() {
+      push(0x16);
     },
     enqueueCtrlC() {
       push(0x03);
