@@ -26,6 +26,7 @@ export const PAYMENT_SEND_LIFECYCLE_ARTIFACT = "buyer_payment_send_lifecycle.jso
 
 export type PaymentSendLifecycleState =
   | "SEND_AUTHORIZATION_DERIVED"
+  | "SEND_VALIDATED_CURRENT"
   | "SEND_COMMITTED_NO_RETRY"
   | "PAYMENT_REQUEST_INVOKED"
   | "RESPONSE_OBSERVED"
@@ -34,7 +35,12 @@ export type PaymentSendLifecycleState =
 const LEGAL: Readonly<
   Record<PaymentSendLifecycleState, readonly PaymentSendLifecycleState[]>
 > = {
-  SEND_AUTHORIZATION_DERIVED: ["SEND_COMMITTED_NO_RETRY", "AMBIGUOUS_SEND_TERMINAL_RECONCILE"],
+  SEND_AUTHORIZATION_DERIVED: [
+    "SEND_VALIDATED_CURRENT",
+    "SEND_COMMITTED_NO_RETRY",
+    "AMBIGUOUS_SEND_TERMINAL_RECONCILE",
+  ],
+  SEND_VALIDATED_CURRENT: ["SEND_COMMITTED_NO_RETRY", "AMBIGUOUS_SEND_TERMINAL_RECONCILE"],
   SEND_COMMITTED_NO_RETRY: ["PAYMENT_REQUEST_INVOKED", "AMBIGUOUS_SEND_TERMINAL_RECONCILE"],
   PAYMENT_REQUEST_INVOKED: ["RESPONSE_OBSERVED", "AMBIGUOUS_SEND_TERMINAL_RECONCILE"],
   RESPONSE_OBSERVED: [],
@@ -107,9 +113,27 @@ export class BuyerPaymentSendLedger {
     return record;
   }
 
+  markValidatedCurrent(input: {
+    readonly sendAuthorizationSha256: string;
+    readonly now: Date;
+  }): PaymentSendLifecycleRecord {
+    const existing = this.require(input.sendAuthorizationSha256);
+    assertTransition(existing.state, "SEND_VALIDATED_CURRENT");
+    const next: PaymentSendLifecycleRecord = {
+      ...existing,
+      state: "SEND_VALIDATED_CURRENT",
+      updated_at: input.now.toISOString(),
+      notes: "SEND_VALIDATED_CURRENT before commit",
+    };
+    this.records.set(input.sendAuthorizationSha256, next);
+    return next;
+  }
+
   commitNoRetry(input: {
     readonly sendAuthorizationSha256: string;
     readonly now: Date;
+    readonly signedArtifactSha256?: string;
+    readonly requestBindingSha256?: string;
   }): PaymentSendLifecycleRecord {
     const existing = this.require(input.sendAuthorizationSha256);
     assertTransition(existing.state, "SEND_COMMITTED_NO_RETRY");
@@ -117,7 +141,9 @@ export class BuyerPaymentSendLedger {
       ...existing,
       state: "SEND_COMMITTED_NO_RETRY",
       updated_at: input.now.toISOString(),
-      notes: "SEND_COMMITTED_NO_RETRY persisted before network invocation",
+      notes: `SEND_COMMITTED_NO_RETRY persisted before network invocation; signed=${
+        input.signedArtifactSha256 ?? "n/a"
+      }; rb=${input.requestBindingSha256 ?? "n/a"}; ordinal=1`,
     };
     this.records.set(input.sendAuthorizationSha256, next);
     return next;
@@ -283,12 +309,12 @@ export function evaluatePaymentSendCrashRecovery(input: {
       reason: "already terminal ambiguous",
     };
   }
-  if (state === "SEND_AUTHORIZATION_DERIVED") {
+  if (state === "SEND_AUTHORIZATION_DERIVED" || state === "SEND_VALIDATED_CURRENT") {
     return {
       disposition: "CLEAN",
       may_retry: false,
       may_resend: false,
-      reason: "derived but not committed; may continue to commit once",
+      reason: "derived/validated but not committed; may continue to commit once",
     };
   }
   // SEND_COMMITTED_NO_RETRY or PAYMENT_REQUEST_INVOKED after crash → ambiguous.

@@ -43,6 +43,28 @@ decision. Phase 6 must read the approved hash and summary from the resulting
 human artifact; it may canonicalize them for validation, but it must never use
 the runtime planner's own hash as the authorized value.
 
+## B.3.7.1 productive one-shot authorized send bridge (inactive / no payment)
+
+The productive send bridge (`sendAuthorizedPaymentOnce`) may perform at most one
+payment-bearing HTTP request only when given an exact current
+`PaymentSendAuthorization` plus a matching persisted signed artifact. It never
+accepts a private key, signer, or wallet client. Payment headers are reconstructed
+from the persisted signature (serialize-only). `SEND_COMMITTED_NO_RETRY` is
+persisted before the network call; second send and automatic retry are forbidden.
+Ambiguous outcomes (timeout, redirect, crash after commit) are terminal
+reconcile. Bridge readiness does not authorize payment. No operational SEND
+mandate or payment run is active after B.3.7.1 engineering.
+
+Evidence:
+`D:\trustforge\artifacts\runs\b371-productive-send-bridge\run_20260812_024002`
+→ `B371_PRODUCTIVE_ONE_SHOT_SEND_BRIDGE_READY_INACTIVE_NO_PAYMENT`.
+
+The first real payment attempt
+`D:\trustforge\artifacts\runs\first-real-payment\run_20260812_012234` correctly
+stopped at `BLOCKED_FIRST_PAYMENT_PRODUCTIVE_SEND_PATH_MISSING_NO_PAYMENT` and
+did not consume authorization. That human authorization must not be reused after
+these engineering changes; a new human authorization is required later.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation
