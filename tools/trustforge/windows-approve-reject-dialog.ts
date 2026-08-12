@@ -8,8 +8,6 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   B4_APPROVE_REJECT_DECISION_PROVIDER_ID,
@@ -26,10 +24,13 @@ import {
   type HumanPaymentDecisionSource,
   type PaymentApprovalCandidateView,
 } from "./human-payment-decision-provider";
+import {
+  assertWindowsApproveRejectDialogScriptEncodingSafe,
+  defaultWindowsApproveRejectDialogScriptPath,
+} from "./windows-approve-reject-dialog-ps51-encoding";
 
 function defaultScriptPath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, "windows-approve-reject-dialog.ps1");
+  return defaultWindowsApproveRejectDialogScriptPath();
 }
 
 function parseDialogProcessOutput(stdout: string, exitCode: number): {
@@ -92,6 +93,9 @@ export function createWindowsApproveRejectDialogProvider(options?: {
           `${BLOCKED_B4_HUMAN_DECISION_UI_FAILED}: approve/reject dialog requires win32`,
         );
       }
+
+      // Fail closed before spawn if the launcher is not PS 5.1-safe.
+      assertWindowsApproveRejectDialogScriptEncodingSafe(scriptPath);
 
       const decided_at = new Date().toISOString();
       const human_decision_id = `paydec_${randomUUID()}`;

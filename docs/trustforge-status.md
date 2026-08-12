@@ -108,6 +108,12 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   historical canary write-once preserved with
   `CORRECTIVE_INTERPRETATION_B41.json`; see
   `docs/trustforge-b41-approval-ui-explicit-decision.md`)
+- B.4.1.1 Windows PowerShell 5.1 approval UI encoding corrective: ready (no
+  payment)
+  (ASCII-only `windows-approve-reject-dialog.ps1`;
+  `WINDOWS_PS51_APPROVAL_SCRIPT_ENCODING_SAFE=PASS`; `powershell.exe` 5.1
+  parse-proven; harness-only UI probes; no canary relaunch; see
+  `docs/trustforge-b411-ps51-approval-ui-encoding.md`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

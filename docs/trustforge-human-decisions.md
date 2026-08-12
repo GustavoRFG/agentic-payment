@@ -85,6 +85,13 @@ or Reject button activation; window close is `ABORT` (fail-closed, not Reject);
 no approval-dialog timeout; approval remains before the fresh unpaid 402.
 See `docs/trustforge-b41-approval-ui-explicit-decision.md`.
 
+## B.4.1.1 Windows PowerShell 5.1 approval UI encoding (ready / no payment)
+
+Probe `run_20260812_174124` failed at UI parse (`UI_FAILED`) due to UTF-8
+typography in the approval `.ps1` under PowerShell 5.1. Encoding corrective
+makes the launcher ASCII-safe; no payment authorization and no canary relaunch
+in that task. See `docs/trustforge-b411-ps51-approval-ui-encoding.md`.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

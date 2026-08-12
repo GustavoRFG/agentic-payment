@@ -55,6 +55,13 @@ sharing one `human_decision_id` — not a bare `authorized=true` flag.
 - Decision artifact includes `decision`, `decision_source`, and
   `explicit_human_decision`
 
+### B.4.1.1 PowerShell 5.1 encoding
+
+Production `windows-approve-reject-dialog.ps1` is ASCII-only so
+`powershell.exe` 5.1 can `-File` parse it under the legacy code page. Encoding
+guard: `WINDOWS_PS51_APPROVAL_SCRIPT_ENCODING_SAFE`. See
+`docs/trustforge-b411-ps51-approval-ui-encoding.md`.
+
 ## CLI
 
 - `npm run trustforge:secure-signer-setup` — one-time protect for expected buyer

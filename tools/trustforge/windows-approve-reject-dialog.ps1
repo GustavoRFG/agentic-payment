@@ -1,14 +1,18 @@
-# TRUSTFORGE B.4.1 — Approve / Reject payment dialog (explicit decisions only)
+# TRUSTFORGE B.4.1 / B.4.1.1 - Approve / Reject payment dialog (explicit decisions only)
 # Args are public economics only. Never pass secrets.
 #
-# Exit codes (stdout line is the machine token):
-#   0 APPROVE          — APPROVE button only
-#   2 REJECT           — REJECT button only
-#   3 ABORT            — window X / Alt+F4 / Esc / non-button close
-#   4 UI_FAILED        — unexpected UI/process failure
+# This file MUST remain ASCII-only (bytes 0x00-0x7F) so Windows PowerShell 5.1
+# can parse it under the legacy system code page without a UTF-8 BOM.
 #
-# No automatic timeout. No auto-close. No auto-submit.
+# Exit codes (stdout line is the machine token):
+#   0 APPROVE          - APPROVE button only
+#   2 REJECT           - REJECT button only
+#   3 ABORT            - window X / Alt+F4 / Esc / non-button close
+#   4 UI_FAILED        - unexpected UI/process failure
+#
+# No automatic timeout. Never closes or submits without a human click.
 # ShowDialog blocks until an explicit human interaction.
+# Production has no harness flags and no synthetic decision callbacks.
 
 param(
   [Parameter(Mandatory = $true)][string]$ServiceLabel,
@@ -27,7 +31,7 @@ Add-Type -AssemblyName System.Drawing
 $script:explicitSource = "none"
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "TRUSTFORGE — Payment Approval"
+$form.Text = "TRUSTFORGE - Payment Approval"
 $form.Size = New-Object System.Drawing.Size(560, 440)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -36,7 +40,7 @@ $form.MinimizeBox = $false
 $form.TopMost = $true
 $form.ShowInTaskbar = $true
 $form.KeyPreview = $true
-# Do NOT set AcceptButton / CancelButton — Enter/Esc must not synthesize Approve/Reject.
+# Do NOT set AcceptButton / CancelButton - Enter/Esc must not synthesize Approve/Reject.
 $form.AcceptButton = $null
 $form.CancelButton = $null
 
@@ -55,27 +59,29 @@ function Add-Label([string]$text, [int]$height = 20, [bool]$bold = $false) {
   $script:y += ($height + 6)
 }
 
-Add-Label "TRUSTFORGE — Payment Approval" 24 $true
+Add-Label "TRUSTFORGE - Payment Approval" 24 $true
 Add-Label "Service:`r`n$ServiceLabel" 36
 Add-Label "Network: $NetworkLabel" 20
 Add-Label "Buyer:`r`n$Buyer" 36
 Add-Label "Seller:`r`n$Seller" 36
 Add-Label "Amount: $AmountUsdc USDC" 24 $true
 Add-Label "Request:`r`n$RequestSummary" 36
-Add-Label "Policy: 1 attempt · 1 signature · 1 payment · NO RETRY · NO RESEND" 36
+Add-Label "Policy: 1 attempt | 1 signature | 1 payment | NO RETRY | NO RESEND" 36
 Add-Label "Close (X) aborts without approving or rejecting." 20
 
 $btnReject = New-Object System.Windows.Forms.Button
 $btnReject.Location = New-Object System.Drawing.Point(280, 360)
 $btnReject.Size = New-Object System.Drawing.Size(110, 32)
 $btnReject.Text = "REJECT"
-# No DialogResult — only Click handler may mark reject_button.
+# No DialogResult - only Click handler may mark reject_button.
 
 $btnApprove = New-Object System.Windows.Forms.Button
 $btnApprove.Location = New-Object System.Drawing.Point(406, 360)
 $btnApprove.Size = New-Object System.Drawing.Size(110, 32)
 $btnApprove.Text = "APPROVE"
-# No DialogResult — only Click handler may mark approve_button.
+$btnApprove.Enabled = $true
+$btnReject.Enabled = $true
+# No DialogResult - only Click handler may mark approve_button.
 
 $btnApprove.Add_Click({
   $script:explicitSource = "approve_button"
@@ -105,8 +111,8 @@ $form.Add_FormClosing({
 
 $form.Controls.Add($btnReject)
 $form.Controls.Add($btnApprove)
-# Do not focus REJECT (avoids Enter activating Reject). Neutral focus on form.
-$form.ActiveControl = $null
+# Focus a non-button label so Enter cannot activate APPROVE/REJECT.
+$form.ActiveControl = $script:label
 
 $form.Add_Shown({
   $form.Activate()
