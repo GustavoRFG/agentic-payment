@@ -65,6 +65,16 @@ stopped at `BLOCKED_FIRST_PAYMENT_PRODUCTIVE_SEND_PATH_MISSING_NO_PAYMENT` and
 did not consume authorization. That human authorization must not be reused after
 these engineering changes; a new human authorization is required later.
 
+## B.4 Windows operational mode (ready / inactive until vault setup)
+
+B.4 wires a thin mainnet runner over the existing payment core with pluggable
+custody (`windows-dpapi-local-signer`) and approve/reject UX. Payment still
+requires exact conditional signing + send mandates sharing one
+`human_decision_id`, fresh 402, derived PSA, and B.3.7.1 one-shot send. One-time
+`trustforge:secure-signer-setup` for expected buyer `0x4cf3…` is a separate human
+action; until the DPAPI vault exists and a human Approves, no payment runs.
+See `docs/trustforge-b4-windows-operational-mode.md`.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

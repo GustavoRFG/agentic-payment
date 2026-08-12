@@ -94,6 +94,13 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   fail-closed; restart after commit → `AMBIGUOUS_SEND_TERMINAL_RECONCILE` with no
   resend; cannot sign or use key-held live executors; loopback-proven only;
   `SEND IMPLEMENTATION AVAILABLE != SEND AUTHORIZED`; no operational payment)
+- B.4 unified mainnet operationalization: ready and inactive until vault setup
+  (thin runner + Windows approve/reject dialog + optional
+  `windows-dpapi-local-signer` / `WINDOWS_DPAPI_VAULT_ONE_SHOT`; payment core
+  unchanged; checked-in default policy still selects `explicit-runtime-key` with
+  `credential_access_enabled=false`; golden trace
+  `FIRST_REAL_MAINNET_PAYMENT_V1` `CONFIRMED`; no operational payment until
+  human vault setup + approve)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an
