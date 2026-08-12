@@ -67,6 +67,11 @@ import {
   SecretEntryLedger,
   stampAuthorizedSecretEntry,
 } from "./buyer-secret-entry-authorization";
+import { B352_SECRET_ENTRY_MECHANISM } from "./buyer-secret-entry-mechanism";
+import {
+  readWindowsMaskedSecretDialog,
+  type WindowsMaskedSecretDialog,
+} from "./buyer-windows-masked-secret-dialog";
 import type { PreSignAttemptArtifact } from "./buyer-pre-sign-validation";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
 import { prepareValidatedBuyerAuthorizationForSigning } from "./buyer-validated-signing";
@@ -114,6 +119,11 @@ export interface CredentialGatedSigningInput {
    * Delivers bytes through an in-process B.3.4 one-shot pipe.
    */
   readonly secretEntryTerminal?: HiddenTtyTerminal | null;
+  /**
+   * Optional Windows masked secret dialog (B.3.5.2). Preferred on Windows
+   * operational runs. Mutually exclusive with secretEntryTerminal for a given call.
+   */
+  readonly windowsMaskedSecretDialog?: WindowsMaskedSecretDialog | null;
   readonly secretEntryLedger?: SecretEntryLedger;
   readonly credentialPolicyPath?: string;
   readonly signerPolicyPath?: string;
@@ -285,6 +295,76 @@ export async function runCredentialGatedBuyerSigning(
     input.credentialInput ?? undefined;
   let transportBytes: Uint8Array | null = null;
   let activeTransport = input.credentialTransport ?? null;
+
+  if (
+    !credentialInput &&
+    !activeTransport &&
+    input.secretEntryTerminal &&
+    input.windowsMaskedSecretDialog
+  ) {
+    throw new Error(
+      `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: secretEntryTerminal and windowsMaskedSecretDialog are mutually exclusive`,
+    );
+  }
+
+  // B.3.5.2: Windows masked dialog → B.3.4 in-process pipe.
+  if (!credentialInput && !activeTransport && input.windowsMaskedSecretDialog) {
+    if (provider.providerId !== EXPLICIT_RUNTIME_KEY_PROVIDER_ID) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      rejectRuntimeKeyTransportFallback("secret entry requires explicit-runtime-key");
+    }
+    if (
+      accessAuth.required_secret_entry_mechanism &&
+      accessAuth.required_secret_entry_mechanism !== B352_SECRET_ENTRY_MECHANISM
+    ) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      throw new Error(
+        `${BLOCKED_B31_CREDENTIAL_ACCESS_NOT_AUTHORIZED}: credential auth requires ${accessAuth.required_secret_entry_mechanism}, not Windows dialog`,
+      );
+    }
+    const secretAuth = stampAuthorizedSecretEntry({
+      authorizedRequest: stamped,
+      credentialAccessEnabled: credentialPolicy.credential_access_enabled,
+    });
+    const secretLedger = input.secretEntryLedger ?? new SecretEntryLedger();
+    secretLedger.reserve(secretAuth.decisionId, secretAuth.unsignedArtifactSha256);
+    let entryBytes: Uint8Array | null = null;
+    let framed: Uint8Array | null = null;
+    try {
+      const entered = await readWindowsMaskedSecretDialog({
+        authorization: secretAuth,
+        dialog: input.windowsMaskedSecretDialog,
+        ledger: secretLedger,
+        expectedWallet: expectedFromAuth,
+      });
+      entryBytes = entered.credentialBytes;
+      framed = encodeCredentialTransportFrame(entryBytes);
+      zeroCredentialBytes(entryBytes);
+      entryBytes = null;
+      const transportId = `win_dialog_pipe_${randomUUID()}`;
+      const readable = Readable.from([Buffer.from(framed)]);
+      zeroCredentialBytes(framed);
+      framed = null;
+      activeTransport = createPipeCredentialTransport({
+        transportId,
+        readable,
+      });
+    } catch (error) {
+      credentialLedger.markAmbiguous(
+        accessAuth.decision_id,
+        validated.unsignedArtifactSha256,
+      );
+      zeroCredentialBytes(entryBytes);
+      zeroCredentialBytes(framed);
+      throw error;
+    }
+  }
 
   // B.3.5: hidden TTY → B.3.4 in-process pipe (only when no explicit input/transport).
   if (!credentialInput && !activeTransport && input.secretEntryTerminal) {

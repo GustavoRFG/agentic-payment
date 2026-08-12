@@ -58,6 +58,11 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   (masked `*` feedback; raw Ctrl+V `0x16` never appended as credential material;
   host paste injects hex chars; sanitized Enter diagnostics; no app clipboard
   API; `BLOCKED_B351_PASTE_SHORTCUT_NOT_SUPPORTED` when only control-byte Ctrl+V)
+- B.3.5.2 Windows masked secret dialog: ready (no payment)
+  (`WINDOWS_MASKED_SECRET_DIALOG_ONE_SHOT` via WinForms PasswordChar; preferred
+  Windows operational secret entry; no app clipboard API; Cancel/close fail-closed;
+  B34 pipe → B33 unchanged; B.3.6.3 may select TTY or Windows dialog mechanism;
+  send remains unauthorized)
 - B.3.6.1 JIT one-shot signing mandate: ready and inactive (offline synthetic)
   (`HumanOneShotSigningMandate` → exact fresh requirements gate → at most one
   attempt/nonce/unsigned → machine-derived exact `BuyerSigningAuthorization`

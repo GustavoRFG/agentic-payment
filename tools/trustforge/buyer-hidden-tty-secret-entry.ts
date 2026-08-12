@@ -28,6 +28,9 @@ import {
   type SecretEntryLedger,
 } from "./buyer-secret-entry-authorization";
 import { zeroCredentialBytes } from "./buyer-credential-transport-frame";
+import { B35_SECRET_ENTRY_MECHANISM } from "./buyer-secret-entry-mechanism";
+
+export { B35_SECRET_ENTRY_MECHANISM };
 
 const KEY_CTRL_C = 0x03;
 const KEY_ESCAPE = 0x1b;
@@ -40,7 +43,6 @@ const KEY_CTRL_V = 0x16;
 
 /** Max ASCII chars: optional "0x" + 64 hex. */
 export const B35_SECRET_ENTRY_MAX_ASCII = 66 as const;
-export const B35_SECRET_ENTRY_MECHANISM = "HIDDEN_PARENT_TTY_ONE_SHOT" as const;
 
 function isHexByte(byte: number): boolean {
   return (

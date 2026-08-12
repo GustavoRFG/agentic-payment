@@ -14,7 +14,10 @@ import {
 } from "./b31-execution-gates";
 import { assertNotHumanConditionalMandateForCredential } from "./buyer-conditional-credential-signing-mandate";
 import { B34_ONE_SHOT_PIPE_TRANSPORT } from "./buyer-conditional-credential-signing-mandate";
-import { B35_SECRET_ENTRY_MECHANISM } from "./buyer-hidden-tty-secret-entry";
+import {
+  isAllowedSecretEntryMechanism,
+  type SecretEntryMechanism,
+} from "./buyer-secret-entry-mechanism";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 import type { UnsignedArtifact } from "./buyer-authorization-artifacts";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
@@ -52,7 +55,7 @@ export interface BuyerCredentialAccessAuthorization {
   readonly settlement_authorized: false;
   readonly parent_human_conditional_credential_signing_mandate_sha256?: string;
   readonly derivation_type?: typeof DERIVATION_TYPE_CREDENTIAL_FROM_HUMAN_CONDITIONAL_MANDATE;
-  readonly required_secret_entry_mechanism?: typeof B35_SECRET_ENTRY_MECHANISM;
+  readonly required_secret_entry_mechanism?: SecretEntryMechanism;
   readonly required_credential_transport?: typeof B34_ONE_SHOT_PIPE_TRANSPORT;
   readonly allow_reacquisition?: false;
 }
@@ -227,10 +230,10 @@ export function validateBuyerCredentialAccessAuthorization(input: {
         "derived credential auth credential_kind mismatch",
       );
     }
-    if (auth.required_secret_entry_mechanism !== B35_SECRET_ENTRY_MECHANISM) {
+    if (!isAllowedSecretEntryMechanism(auth.required_secret_entry_mechanism)) {
       fail(
         BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID,
-        "derived credential auth requires HIDDEN_PARENT_TTY_ONE_SHOT",
+        "derived credential auth requires an allowed secret-entry mechanism",
       );
     }
     if (auth.required_credential_transport !== B34_ONE_SHOT_PIPE_TRANSPORT) {
@@ -294,7 +297,14 @@ export function buildDerivedBuyerCredentialAccessAuthorizationFromConditionalMan
   readonly unsignedArtifact: UnsignedArtifact;
   readonly unsignedArtifactSha256: string;
   readonly accessExpiresAt: string;
+  readonly secretEntryMechanism: SecretEntryMechanism;
 }): BuyerCredentialAccessAuthorization {
+  if (!isAllowedSecretEntryMechanism(input.secretEntryMechanism)) {
+    fail(
+      BLOCKED_B31_CREDENTIAL_ACCESS_AUTHORIZATION_INVALID,
+      "secretEntryMechanism is not allowed",
+    );
+  }
   const base = buildSyntheticBuyerCredentialAccessAuthorization({
     decisionId: input.decisionId,
     signingAuthorization: input.signingAuthorization,
@@ -311,7 +321,7 @@ export function buildDerivedBuyerCredentialAccessAuthorizationFromConditionalMan
     parent_human_conditional_credential_signing_mandate_sha256:
       input.parentConditionalMandateSha256,
     derivation_type: DERIVATION_TYPE_CREDENTIAL_FROM_HUMAN_CONDITIONAL_MANDATE,
-    required_secret_entry_mechanism: B35_SECRET_ENTRY_MECHANISM,
+    required_secret_entry_mechanism: input.secretEntryMechanism,
     required_credential_transport: B34_ONE_SHOT_PIPE_TRANSPORT,
     allow_reacquisition: false,
   };

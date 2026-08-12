@@ -13,7 +13,12 @@ import {
   GUARD_HUMAN_CONDITIONAL_MANDATE_NOT_DIRECTLY_CREDENTIAL_CAPABLE,
   GUARD_HUMAN_CONDITIONAL_MANDATE_NOT_DIRECTLY_SIGNABLE,
 } from "./b363-execution-gates";
-import { B35_SECRET_ENTRY_MECHANISM } from "./buyer-hidden-tty-secret-entry";
+import {
+  B35_SECRET_ENTRY_MECHANISM,
+  B352_SECRET_ENTRY_MECHANISM,
+  isAllowedSecretEntryMechanism,
+  type SecretEntryMechanism,
+} from "./buyer-secret-entry-mechanism";
 import {
   EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND,
   EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
@@ -72,7 +77,7 @@ export interface HumanConditionalCredentialSigningMandate {
   readonly real_signing_conditionally_authorized: true;
   readonly credential_provider_id: typeof EXPLICIT_RUNTIME_KEY_PROVIDER_ID;
   readonly credential_kind: typeof EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND;
-  readonly secret_entry_mechanism: typeof B35_SECRET_ENTRY_MECHANISM;
+  readonly secret_entry_mechanism: SecretEntryMechanism;
   readonly credential_transport: typeof B34_ONE_SHOT_PIPE_TRANSPORT;
   readonly payment_bearing_send_authorized: false;
   readonly settlement_authorized: false;
@@ -215,8 +220,11 @@ export function validateHumanConditionalCredentialSigningMandate(input: {
   if (mandate.credential_kind !== EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND) {
     fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, "credential kind mismatch");
   }
-  if (mandate.secret_entry_mechanism !== B35_SECRET_ENTRY_MECHANISM) {
-    fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, "secret entry must be HIDDEN_PARENT_TTY_ONE_SHOT");
+  if (!isAllowedSecretEntryMechanism(mandate.secret_entry_mechanism)) {
+    fail(
+      BLOCKED_B363_CONDITIONAL_MANDATE_INVALID,
+      "secret entry must be HIDDEN_PARENT_TTY_ONE_SHOT or WINDOWS_MASKED_SECRET_DIALOG_ONE_SHOT",
+    );
   }
   if (mandate.credential_transport !== B34_ONE_SHOT_PIPE_TRANSPORT) {
     fail(BLOCKED_B363_CONDITIONAL_MANDATE_INVALID, "credential transport must be B34_ONE_SHOT_PIPE");
@@ -272,6 +280,7 @@ export function buildSyntheticHumanConditionalCredentialSigningMandate(input: {
   readonly prepareAuthorizationSha256: string;
   readonly decidedAt: string;
   readonly mandateExpiresAt: string;
+  readonly secretEntryMechanism?: SecretEntryMechanism;
 }): HumanConditionalCredentialSigningMandate {
   const amount = input.amountAtomic ?? "1000";
   return {
@@ -311,7 +320,8 @@ export function buildSyntheticHumanConditionalCredentialSigningMandate(input: {
     real_signing_conditionally_authorized: true,
     credential_provider_id: EXPLICIT_RUNTIME_KEY_PROVIDER_ID,
     credential_kind: EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND,
-    secret_entry_mechanism: B35_SECRET_ENTRY_MECHANISM,
+    // Synthetic default remains TTY for legacy fixtures; Windows operational uses B352.
+    secret_entry_mechanism: input.secretEntryMechanism ?? B35_SECRET_ENTRY_MECHANISM,
     credential_transport: B34_ONE_SHOT_PIPE_TRANSPORT,
     payment_bearing_send_authorized: false,
     settlement_authorized: false,

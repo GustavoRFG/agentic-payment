@@ -45,6 +45,7 @@ import {
   type ConditionalMandateLifecycleRecord,
 } from "./buyer-conditional-mandate-lifecycle";
 import type { HiddenTtyTerminal } from "./buyer-hidden-tty-terminal";
+import type { WindowsMaskedSecretDialog } from "./buyer-windows-masked-secret-dialog";
 import { assertFreshRequirementsExactMatchConditionalMandate } from "./buyer-mandate-fresh-requirements-gate";
 import type { PreSignAttemptArtifact } from "./buyer-pre-sign-validation";
 import { validateBuyerAuthorizationBeforeSigning } from "./buyer-pre-sign-validation";
@@ -320,6 +321,7 @@ export function deriveConditionalCredentialSigningArtifacts(
         unsignedArtifact,
         unsignedArtifactSha256: unsignedSha256,
         accessExpiresAt,
+        secretEntryMechanism: mandate.secret_entry_mechanism,
       });
     const credentialSha = buyerCredentialAccessAuthorizationSha256(derivedCredential);
     writeArtifactOnce(
@@ -423,7 +425,8 @@ export async function runSyntheticConditionalMandateSignToSendGate(input: {
   readonly mandate: HumanConditionalCredentialSigningMandate;
   readonly now: Date;
   readonly provider: BuyerCredentialProvider;
-  readonly secretEntryTerminal: HiddenTtyTerminal;
+  readonly secretEntryTerminal?: HiddenTtyTerminal;
+  readonly windowsMaskedSecretDialog?: WindowsMaskedSecretDialog;
   readonly credentialPolicyPath: string;
   readonly cwd?: string;
 }): Promise<{
@@ -454,6 +457,7 @@ export async function runSyntheticConditionalMandateSignToSendGate(input: {
       nowAtSign: input.now,
       provider: input.provider,
       secretEntryTerminal: input.secretEntryTerminal,
+      windowsMaskedSecretDialog: input.windowsMaskedSecretDialog,
       credentialPolicyPath: input.credentialPolicyPath,
       cwd: input.cwd,
       expectedUnsignedHash: input.derivation.unsigned_artifact_sha256,

@@ -15,7 +15,6 @@ import {
   mandateAddressesEqual,
   type HumanConditionalCredentialSigningMandate,
 } from "./buyer-conditional-credential-signing-mandate";
-import { B35_SECRET_ENTRY_MECHANISM } from "./buyer-hidden-tty-secret-entry";
 import type { BuyerSigningAuthorization } from "./buyer-signing-authorization";
 import { DERIVATION_TYPE_FROM_HUMAN_CONDITIONAL_CREDENTIAL_SIGNING_MANDATE } from "./buyer-signing-authorization";
 import {
@@ -144,7 +143,10 @@ export function verifyDerivedCredentialAccessAuthorizationIsSubsetOfConditionalM
   check("provider", c.provider_id === EXPLICIT_RUNTIME_KEY_PROVIDER_ID);
   check("provider_matches_mandate", c.provider_id === m.credential_provider_id);
   check("credential_kind", c.credential_kind === EXPLICIT_RUNTIME_KEY_CREDENTIAL_KIND);
-  check("secret_entry", c.required_secret_entry_mechanism === B35_SECRET_ENTRY_MECHANISM);
+  check(
+    "secret_entry",
+    c.required_secret_entry_mechanism === m.secret_entry_mechanism,
+  );
   check("transport", c.required_credential_transport === B34_ONE_SHOT_PIPE_TRANSPORT);
   check(
     "expected_signer",
