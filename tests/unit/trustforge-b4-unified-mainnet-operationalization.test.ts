@@ -364,6 +364,8 @@ describe("B.4 human decision → mandates", () => {
       selected,
       decisionProvider: createInjectedHumanPaymentDecisionProvider({
         decision: "APPROVE",
+        decision_source: "approve_button",
+        explicit_human_decision: true,
         human_decision_id: decisionId,
         decided_at: "2026-08-12T04:55:00.000Z",
         provider_id: "injected-test-decision",
@@ -405,11 +407,12 @@ describe("B.4 human decision → mandates", () => {
         selected,
         decisionProvider: createInjectedHumanPaymentDecisionProvider({
           decision: "REJECT",
+          decision_source: "reject_button",
+          explicit_human_decision: true,
           human_decision_id: "paydec_reject",
           decided_at: "2026-08-12T04:55:00.000Z",
           provider_id: "injected-test-decision",
           policy: "manual-approve-reject",
-          reason: "rejected",
         }),
         credentialProvider: createWindowsDpapiLocalSignerProvider({
           vaultBaseDir: dir,
@@ -442,6 +445,8 @@ describe("B.4 loopback E2E thin runner", () => {
       selected,
       decisionProvider: createInjectedHumanPaymentDecisionProvider({
         decision: "APPROVE",
+        decision_source: "approve_button",
+        explicit_human_decision: true,
         human_decision_id: "paydec_loopback",
         decided_at: "2026-08-12T04:55:00.000Z",
         provider_id: "injected-test-decision",
@@ -482,6 +487,8 @@ describe("B.4 loopback E2E thin runner", () => {
         selected,
         decisionProvider: createInjectedHumanPaymentDecisionProvider({
           decision: "APPROVE",
+          decision_source: "approve_button",
+          explicit_human_decision: true,
           human_decision_id: "paydec_retry",
           decided_at: "2026-08-12T04:55:00.000Z",
           provider_id: "injected-test-decision",

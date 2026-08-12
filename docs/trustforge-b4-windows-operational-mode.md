@@ -43,6 +43,18 @@ selects the DPAPI provider after vault setup.
 Reject never reaches the signer. Approve yields exact signing + send mandates
 sharing one `human_decision_id` — not a bare `authorized=true` flag.
 
+### B.4.1 explicit decision semantics
+
+- Approve button → `APPROVE` (`decision_source=approve_button`)
+- Reject button → `REJECT` (`decision_source=reject_button`)
+- Window X / Esc → `ABORT` (`window_close` / `keyboard_close`) — **never** `REJECT`
+- UI/process error → `UI_FAILED`
+- No automatic timeout, auto-close, auto-submit, or synthetic decision
+- Approval occurs before the fresh unpaid 402; seller 300s freshness is not an
+  approval-dialog timeout
+- Decision artifact includes `decision`, `decision_source`, and
+  `explicit_human_decision`
+
 ## CLI
 
 - `npm run trustforge:secure-signer-setup` — one-time protect for expected buyer

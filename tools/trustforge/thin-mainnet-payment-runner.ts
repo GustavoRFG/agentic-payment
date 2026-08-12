@@ -10,6 +10,8 @@ import { join } from "node:path";
 
 import {
   BLOCKED_B4_APPROVAL_REQUIRED,
+  BLOCKED_B4_HUMAN_DECISION_ABORTED,
+  BLOCKED_B4_HUMAN_DECISION_UI_FAILED,
   BLOCKED_B4_HUMAN_REJECTED,
   GUARD_HUMAN_REJECT_CANNOT_REACH_SIGNER,
   GUARD_THIN_RUNNER_CANNOT_BYPASS_PSA,
@@ -326,7 +328,9 @@ export interface ThinMainnetPaymentRunnerInput {
 
 export interface ThinMainnetPaymentRunnerResult {
   readonly state: ThinMainnetRunnerStateRecord;
-  readonly decision: "APPROVE" | "REJECT";
+  readonly decision: "APPROVE" | "REJECT" | "ABORT" | "UI_FAILED";
+  readonly decision_source: string;
+  readonly explicit_human_decision: boolean;
   readonly human_decision_id: string;
   readonly signing_mandate: HumanConditionalCredentialSigningMandate | null;
   readonly send_mandate: HumanConditionalPaymentSendMandate | null;
@@ -389,13 +393,39 @@ export async function runThinMainnetPayment(
     buildPaymentApprovalCandidateView(input.selected),
   );
 
+  persistJson(input.directory, "human_payment_decision.json", {
+    decision: decision.decision,
+    decision_source: decision.decision_source,
+    explicit_human_decision: decision.explicit_human_decision,
+    human_decision_id: decision.human_decision_id,
+    decided_at: decision.decided_at,
+    provider_id: decision.provider_id,
+    policy: decision.policy,
+  });
+
   if (decision.decision === "REJECT") {
     bump("HUMAN_REJECTED", { human_decision_id: decision.human_decision_id });
     void GUARD_HUMAN_REJECT_CANNOT_REACH_SIGNER;
-    fail(BLOCKED_B4_HUMAN_REJECTED, `human rejected (${decision.reason})`);
+    fail(BLOCKED_B4_HUMAN_REJECTED, `human rejected (${decision.decision_source})`);
+  }
+  if (decision.decision === "ABORT") {
+    bump("HUMAN_DECISION_ABORTED", { human_decision_id: decision.human_decision_id });
+    fail(
+      BLOCKED_B4_HUMAN_DECISION_ABORTED,
+      `human decision aborted (${decision.decision_source}); not an explicit REJECT`,
+    );
+  }
+  if (decision.decision === "UI_FAILED") {
+    bump("HUMAN_DECISION_UI_FAILED", { human_decision_id: decision.human_decision_id });
+    fail(BLOCKED_B4_HUMAN_DECISION_UI_FAILED, "approval UI failed");
+  }
+  if (decision.decision !== "APPROVE" || !decision.explicit_human_decision) {
+    bump("HUMAN_DECISION_UI_FAILED", { human_decision_id: decision.human_decision_id });
+    fail(BLOCKED_B4_APPROVAL_REQUIRED, "explicit APPROVE button required");
   }
 
   bump("HUMAN_APPROVED", { human_decision_id: decision.human_decision_id });
+  // Fresh unpaid 402 and JIT window begin ONLY after explicit APPROVE.
 
   const mode = resolveCredentialMode(input.credentialProvider);
   const mandateExpiresAt = new Date(
@@ -662,6 +692,8 @@ export async function runThinMainnetPayment(
   return {
     state,
     decision: "APPROVE",
+    decision_source: decision.decision_source,
+    explicit_human_decision: true,
     human_decision_id: humanDecisionId,
     signing_mandate: signingMandate,
     send_mandate: sendMandate,

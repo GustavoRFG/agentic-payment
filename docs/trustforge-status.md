@@ -101,6 +101,13 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   `credential_access_enabled=false`; golden trace
   `FIRST_REAL_MAINNET_PAYMENT_V1` `CONFIRMED`; no operational payment until
   human vault setup + approve)
+- B.4.1 approval UI explicit-decision corrective: ready (no payment)
+  (Approve/Reject only from explicit button clicks; window X/Esc → `ABORT` never
+  `REJECT`; no approval-dialog timeout/auto-close; approval before fresh unpaid
+  402; decision provenance `decision_source` + `explicit_human_decision`;
+  historical canary write-once preserved with
+  `CORRECTIVE_INTERPRETATION_B41.json`; see
+  `docs/trustforge-b41-approval-ui-explicit-decision.md`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

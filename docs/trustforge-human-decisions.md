@@ -75,6 +75,16 @@ requires exact conditional signing + send mandates sharing one
 action; until the DPAPI vault exists and a human Approves, no payment runs.
 See `docs/trustforge-b4-windows-operational-mode.md`.
 
+## B.4.1 approval UI explicit-decision corrective (ready / no payment)
+
+Operator statement: the B.4 canary
+`run_20260812_043500` was not an explicit Reject; the dialog closed before a
+decision. Historical evidence is write-once; corrective interpretation is
+`CORRECTIVE_INTERPRETATION_B41.json`. Production now requires explicit Approve
+or Reject button activation; window close is `ABORT` (fail-closed, not Reject);
+no approval-dialog timeout; approval remains before the fresh unpaid 402.
+See `docs/trustforge-b41-approval-ui-explicit-decision.md`.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

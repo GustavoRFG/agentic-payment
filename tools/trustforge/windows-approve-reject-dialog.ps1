@@ -1,6 +1,14 @@
-# TRUSTFORGE B.4 — Approve / Reject payment dialog
+# TRUSTFORGE B.4.1 — Approve / Reject payment dialog (explicit decisions only)
 # Args are public economics only. Never pass secrets.
-# Exit: 0 = APPROVE (stdout: APPROVE), 2 = REJECT, 3 = CLOSED
+#
+# Exit codes (stdout line is the machine token):
+#   0 APPROVE          — APPROVE button only
+#   2 REJECT           — REJECT button only
+#   3 ABORT            — window X / Alt+F4 / Esc / non-button close
+#   4 UI_FAILED        — unexpected UI/process failure
+#
+# No automatic timeout. No auto-close. No auto-submit.
+# ShowDialog blocks until an explicit human interaction.
 
 param(
   [Parameter(Mandatory = $true)][string]$ServiceLabel,
@@ -15,14 +23,21 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# explicit_source: none | approve_button | reject_button | window_close | keyboard_close
+$script:explicitSource = "none"
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "TRUSTFORGE — Payment Approval"
-$form.Size = New-Object System.Drawing.Size(560, 420)
+$form.Size = New-Object System.Drawing.Size(560, 440)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
 $form.TopMost = $true
+$form.ShowInTaskbar = $true
+$form.KeyPreview = $true
+# Do NOT set AcceptButton / CancelButton — Enter/Esc must not synthesize Approve/Reject.
+$form.AcceptButton = $null
 $form.CancelButton = $null
 
 $y = 16
@@ -48,32 +63,91 @@ Add-Label "Seller:`r`n$Seller" 36
 Add-Label "Amount: $AmountUsdc USDC" 24 $true
 Add-Label "Request:`r`n$RequestSummary" 36
 Add-Label "Policy: 1 attempt · 1 signature · 1 payment · NO RETRY · NO RESEND" 36
+Add-Label "Close (X) aborts without approving or rejecting." 20
 
 $btnReject = New-Object System.Windows.Forms.Button
-$btnReject.Location = New-Object System.Drawing.Point(280, 340)
+$btnReject.Location = New-Object System.Drawing.Point(280, 360)
 $btnReject.Size = New-Object System.Drawing.Size(110, 32)
 $btnReject.Text = "REJECT"
-$btnReject.DialogResult = [System.Windows.Forms.DialogResult]::Abort
+# No DialogResult — only Click handler may mark reject_button.
 
 $btnApprove = New-Object System.Windows.Forms.Button
-$btnApprove.Location = New-Object System.Drawing.Point(406, 340)
+$btnApprove.Location = New-Object System.Drawing.Point(406, 360)
 $btnApprove.Size = New-Object System.Drawing.Size(110, 32)
 $btnApprove.Text = "APPROVE"
-$btnApprove.DialogResult = [System.Windows.Forms.DialogResult]::Yes
-# Do not set AcceptButton — avoid silent Enter auto-approve.
+# No DialogResult — only Click handler may mark approve_button.
+
+$btnApprove.Add_Click({
+  $script:explicitSource = "approve_button"
+  $form.Close()
+})
+$btnReject.Add_Click({
+  $script:explicitSource = "reject_button"
+  $form.Close()
+})
+
+$form.Add_KeyDown({
+  param($sender, $e)
+  if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+    $script:explicitSource = "keyboard_close"
+    $e.Handled = $true
+    $form.Close()
+  }
+})
+
+$form.Add_FormClosing({
+  param($sender, $e)
+  if ($script:explicitSource -eq "none") {
+    # X / Alt+F4 / system close without button click.
+    $script:explicitSource = "window_close"
+  }
+})
 
 $form.Controls.Add($btnReject)
 $form.Controls.Add($btnApprove)
-$form.ActiveControl = $btnReject
+# Do not focus REJECT (avoids Enter activating Reject). Neutral focus on form.
+$form.ActiveControl = $null
 
-$result = $form.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-  Write-Output "APPROVE"
-  exit 0
+$form.Add_Shown({
+  $form.Activate()
+  $form.BringToFront()
+  $form.TopMost = $true
+  $form.TopMost = $false
+  $form.TopMost = $true
+})
+
+try {
+  [void]$form.ShowDialog()
+} catch {
+  Write-Output "UI_FAILED"
+  Write-Output ("decision_source=ui_failure")
+  exit 4
 }
-if ($result -eq [System.Windows.Forms.DialogResult]::Abort) {
-  Write-Output "REJECT"
-  exit 2
+
+switch ($script:explicitSource) {
+  "approve_button" {
+    Write-Output "APPROVE"
+    Write-Output "decision_source=approve_button"
+    exit 0
+  }
+  "reject_button" {
+    Write-Output "REJECT"
+    Write-Output "decision_source=reject_button"
+    exit 2
+  }
+  "keyboard_close" {
+    Write-Output "ABORT"
+    Write-Output "decision_source=keyboard_close"
+    exit 3
+  }
+  "window_close" {
+    Write-Output "ABORT"
+    Write-Output "decision_source=window_close"
+    exit 3
+  }
+  default {
+    Write-Output "UI_FAILED"
+    Write-Output "decision_source=ui_failure"
+    exit 4
+  }
 }
-Write-Output "CLOSED"
-exit 3
