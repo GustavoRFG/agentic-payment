@@ -7,7 +7,7 @@
  * Do not run without explicit human authorization for a real payment.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -70,6 +70,45 @@ async function main(): Promise<number> {
 
   mkdirSync(runDir, { recursive: true });
 
+  const credentialPolicyPath = join(runDir, "credential_provider_policy.operational.json");
+  writeFileSync(
+    credentialPolicyPath,
+    JSON.stringify(
+      {
+        schema_version: "trustforge_buyer_credential_provider_policy.v2",
+        credential_provider_configured: true,
+        allowed_provider_ids: [
+          "inactive_production",
+          "explicit-runtime-key",
+          "windows-dpapi-local-signer",
+          "encrypted-local-keystore",
+          "external-signer",
+          "secure-signing-provider",
+        ],
+        selected_productive_provider_id: B4_PROTECTED_SIGNER_PROVIDER_ID,
+        provider_id: B4_PROTECTED_SIGNER_PROVIDER_ID,
+        credential_kind: "windows_dpapi_protected_private_key",
+        adapter_installed: true,
+        transport_adapter_installed: true,
+        secret_entry_adapter_installed: true,
+        expected_signer_address: expectedBuyer,
+        credential_access_enabled: true,
+        real_backend_activation: false,
+        credential_caching_enabled: false,
+        automatic_discovery_enabled: false,
+        fallback_provider_enabled: false,
+        real_signing_enabled: false,
+        payment_bearing_send_enabled: false,
+        settlement_enabled: false,
+        retry_enabled: false,
+        effect:
+          "B.4 operational windows-dpapi-local-signer; payment send only via PSA/B371; no key prompt",
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+
   console.log(`provider: ${B4_PROTECTED_SIGNER_PROVIDER_ID}`);
   console.log(`vault: present (path redacted)`);
   console.log(`buyer: ${expectedBuyer}`);
@@ -80,6 +119,7 @@ async function main(): Promise<number> {
     selected,
     decisionProvider: createWindowsApproveRejectDialogProvider(),
     credentialProvider: createWindowsDpapiLocalSignerProvider(),
+    credentialPolicyPath,
   });
 
   console.log(`decision: ${result.decision}`);
