@@ -77,6 +77,14 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   locked to `explicit-runtime-key` + `HIDDEN_PARENT_TTY_ONE_SHOT` + B.3.4 pipe;
   signing does not authorize payment send; 300s cap preserved; no operational
   conditional mandate issued)
+- B.3.7 conditional one-shot payment send mandate: ready and inactive (offline)
+  (`HumanConditionalPaymentSendMandate` may conditionally authorize at most one
+  payment-bearing request after post-sign JIT audit PASS and exact derivation of
+  `PaymentSendAuthorization`; send mandate cannot authorize credential access or
+  signing; signing mandate cannot authorize send; `SEND_COMMITTED_NO_RETRY`
+  before network; ambiguous send → `AMBIGUOUS_SEND_TERMINAL_RECONCILE` with no
+  resend; 300s/`validBefore` preserved; no operational SEND mandate issued;
+  no live payment)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an

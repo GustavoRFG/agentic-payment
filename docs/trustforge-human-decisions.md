@@ -43,6 +43,24 @@ decision. Phase 6 must read the approved hash and summary from the resulting
 human artifact; it may canonicalize them for validation, but it must never use
 the runtime planner's own hash as the authorized value.
 
+## B.3.7 conditional one-shot payment send mandate (offline)
+
+A human conditional payment-send mandate may authorize deterministic derivation
+of at most one exact `PaymentSendAuthorization` after a fresh signed artifact
+passes an internal post-sign JIT audit. The send mandate itself cannot reach the
+network and cannot authorize credential access or signing. The signing mandate
+cannot authorize payment-bearing send. Ambiguous send outcomes are terminal
+(`AMBIGUOUS_SEND_TERMINAL_RECONCILE`) with no automatic retry/resend. No
+operational SEND mandate is created until a separate human decision; B.3.7
+proves the contract offline with synthetic fixtures only.
+
+The first real signed artifact audit
+`D:\trustforge\artifacts\runs\first-real-signed-artifact-audit\run_20260811_232958`
+classified the R6 signature as
+`FIRST_REAL_SIGNED_ARTIFACT_AUDIT_PASS_EXPIRED_ABANDON_REAUTHORIZE`. That
+artifact is permanently `EXPIRED_EVIDENCE_ONLY_REAUTHORIZE` and must not be
+reused for send.
+
 ## B.3.6.3 conditional credential+signing mandate (offline)
 
 A human conditional credential+signing mandate may authorize deterministic
