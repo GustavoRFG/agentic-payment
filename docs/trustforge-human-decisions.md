@@ -121,6 +121,16 @@ decision (`decided_by: Gustavo`, `2026-08-02T06:06:29Z`) in
 `A2_ONESOURCE_RETIREMENT_HUMAN_DECISION_PROVEN`. Agents must not auto-remove
 watch/block entries.
 
+## B.6 agentic payment decision (ready / no payment)
+
+B.6 may emit BUY/DEFER/DONT_BUY and bind selection hashes into a
+`PaymentApprovalIntent` preview. That is **not** payment authorization and must
+not open production Approve/Reject. Live unpaid evidence
+`D:\trustforge\artifacts\runs\b6-agentic-payment-decision\run_20260813_083938`
+→ `B6_AGENTIC_PAYMENT_DECISION_LAYER_READY_NO_PAYMENT` (decision BUY; dialog
+not opened). A future real payment still requires a separate explicit human
+APPROVE. See `docs/trustforge-b6-agentic-payment-decision.md`.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

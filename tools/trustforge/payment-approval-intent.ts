@@ -14,9 +14,11 @@ import {
   GUARD_METHOD_BINDING_CANDIDATE_AUTHORIZATION_REQUEST,
   GUARD_OPERATIONAL_UI_RENDERS_AUTHORITATIVE_PAYMENT_INTENT,
 } from "./b52-execution-gates";
+import { GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION } from "./b6-execution-gates";
 import { assertAuthorizationMethodBinding } from "./authorization-method-binding";
 import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
 import type { PaymentApprovalCandidateView } from "./human-payment-decision-provider";
+import type { PaymentSelectionDecisionV1 } from "./payment-selection-decision-v1";
 import {
   createThinSettlementRequestBinding,
   thinSettlementRequestSummary,
@@ -70,6 +72,11 @@ export interface PaymentApprovalIntent {
   readonly known_facts: readonly string[];
   readonly unknown_facts: readonly string[];
   readonly payment_authorized: false;
+  /** Optional B.6 selection binding — present when intent is derived from a decision. */
+  readonly selection_decision_hash?: string;
+  readonly selected_candidate_id?: string;
+  readonly selected_observation_id?: string;
+  readonly candidate_set_hash?: string;
 }
 
 export interface PaymentApprovalIntentHashRecord {
@@ -107,6 +114,18 @@ function intentHashBody(intent: PaymentApprovalIntent): Record<string, unknown> 
     allow_retry: intent.allow_retry,
     allow_resend: intent.allow_resend,
     payment_authorized: false,
+    ...(intent.selection_decision_hash !== undefined
+      ? { selection_decision_hash: intent.selection_decision_hash }
+      : {}),
+    ...(intent.selected_candidate_id !== undefined
+      ? { selected_candidate_id: intent.selected_candidate_id }
+      : {}),
+    ...(intent.selected_observation_id !== undefined
+      ? { selected_observation_id: intent.selected_observation_id }
+      : {}),
+    ...(intent.candidate_set_hash !== undefined
+      ? { candidate_set_hash: intent.candidate_set_hash }
+      : {}),
   };
 }
 
@@ -141,6 +160,10 @@ export function buildPaymentApprovalIntentFromSelected(input: {
   readonly whySelected?: string;
   readonly knownFacts?: readonly string[];
   readonly unknownFacts?: readonly string[];
+  readonly selectionDecisionHash?: string;
+  readonly selectedCandidateId?: string;
+  readonly selectedObservationId?: string;
+  readonly candidateSetHash?: string;
 }): PaymentApprovalIntent {
   const selected = input.selected;
   const method = (selected.method ?? "GET") as "GET" | "POST";
@@ -203,6 +226,65 @@ export function buildPaymentApprovalIntentFromSelected(input: {
     known_facts: input.knownFacts ?? [],
     unknown_facts: input.unknownFacts ?? [],
     payment_authorized: false,
+    ...(input.selectionDecisionHash !== undefined
+      ? { selection_decision_hash: input.selectionDecisionHash }
+      : {}),
+    ...(input.selectedCandidateId !== undefined
+      ? { selected_candidate_id: input.selectedCandidateId }
+      : {}),
+    ...(input.selectedObservationId !== undefined
+      ? { selected_observation_id: input.selectedObservationId }
+      : {}),
+    ...(input.candidateSetHash !== undefined
+      ? { candidate_set_hash: input.candidateSetHash }
+      : {}),
+  };
+}
+
+/**
+ * Fail-closed: PaymentApprovalIntent must reference the exact selection decision.
+ */
+export function assertPaymentApprovalIntentBindsSelectionDecision(
+  intent: PaymentApprovalIntent,
+  decision: PaymentSelectionDecisionV1,
+): {
+  readonly ok: true;
+  readonly guard: typeof GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION;
+} {
+  void GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION;
+  if (!intent.selection_decision_hash) {
+    throw new Error(
+      `${GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION}: missing selection_decision_hash`,
+    );
+  }
+  if (intent.selection_decision_hash !== decision.selectionDecisionHash) {
+    throw new Error(
+      `${GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION}: selection_decision_hash mismatch`,
+    );
+  }
+  if (decision.decision === "BUY") {
+    if (intent.selected_candidate_id !== decision.selectedCandidateId) {
+      throw new Error(
+        `${GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION}: selected_candidate_id mismatch`,
+      );
+    }
+    if (intent.selected_observation_id !== decision.selectedObservationId) {
+      throw new Error(
+        `${GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION}: selected_observation_id mismatch`,
+      );
+    }
+  }
+  if (
+    intent.candidate_set_hash !== undefined &&
+    intent.candidate_set_hash !== decision.candidateSetHash
+  ) {
+    throw new Error(
+      `${GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION}: candidate_set_hash mismatch`,
+    );
+  }
+  return {
+    ok: true,
+    guard: GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION,
   };
 }
 
