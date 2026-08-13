@@ -31,7 +31,9 @@
       "reason": "WATCH_SAME_OPERATOR_AS_BLOCKED_PEER",
       "related_to": "stableenrich.dev",
       "added_at": "2026-07-27T00:00:00Z",
-      "note": "Same apparent operator as stableenrich.dev, but no failing run of its own yet. Watched, not blocked — evidence-strict policy. Promote to entries[] only on its own evidence run (human decision)."
+      "note": "Same apparent operator as stableenrich.dev, but no failing run of its own yet. Watched, not blocked — evidence-strict policy. Promote to entries[] only on its own evidence run (human decision).",
+      "observation_note_a2_closeout": "A.2 debt closeout 2026-08-13: still watch-only; no independent failing evidence run for stableupload.dev itself; peer stableenrich.dev remains the sole entries[] block for PAY_TIME_402_EVAPORATION. Status unchanged — not promoted, not retired. Revisit only with domain-specific evidence + human decision.",
+      "observation_note_updated_at_utc": "2026-08-13T08:00:00Z"
     },
     {
       "domain": "stablestudio.dev",

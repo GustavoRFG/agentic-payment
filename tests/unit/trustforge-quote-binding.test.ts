@@ -8,8 +8,11 @@ import {
   extractBoundQuote,
   REJECTED_NON_POSITIVE_QUOTE,
   REJECTED_QUOTE_EXTRACTION_FAILED,
-  REJECTED_QUOTE_SOURCE_DISAGREEMENT,
 } from "../../tools/trustforge/quote-stability-probe";
+import {
+  PRICE_CHANGE_REQUIRES_REEVALUATION,
+  QUOTE_IDENTITY_CONTRADICTION,
+} from "../../tools/trustforge/quote-observation-semantics";
 import type { ProviderBlocklist } from "../../tools/trustforge/provider-blocklist";
 import { MAINNET_NETWORK, MAINNET_USDC_ADDRESS } from "../../shared/payment-safety";
 import { containsX402PaymentHeader } from "../../buyer-client/src/payment-bearing-request-guard";
@@ -193,21 +196,41 @@ describe("adapt quote classification", () => {
   });
 });
 
-describe("adapt quote binding — REJECTED_QUOTE_SOURCE_DISAGREEMENT", () => {
-  it("rejects when the live 402 amount disagrees with the catalog quote (the 400x drift case)", async () => {
+describe("adapt quote binding — live price movement vs catalog", () => {
+  it("adopts live 402 amount when catalog disagrees (price movement, not corruption)", async () => {
     // catalog says 5000 (stale census), the live+stable 402 says 2000000.
     const fetchImpl = fetchReturning(body("2000000"));
     const result = await adaptOne(candidate("5000", "0.005"), fetchImpl);
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.quote_atomic).toBe("2000000");
+    expect(result.candidate.adapt_evidence?.quote_binding?.bound_atomic).toBe("2000000");
+    expect(result.candidate.adapt_evidence?.quote_binding?.catalog_atomic).toBe("5000");
+    expect(result.candidate.adapt_evidence?.quote_binding?.classification).toBe(
+      PRICE_CHANGE_REQUIRES_REEVALUATION,
+    );
+  });
+
+  it("fail-closes on identity contradiction (payTo drift with amount change)", async () => {
+    const drifted = JSON.stringify({
+      x402Version: 2,
+      resource: { url: "https://quote.example/api/upload" },
+      accepts: [
+        {
+          scheme: "exact",
+          network: MAINNET_NETWORK,
+          asset: MAINNET_USDC_ADDRESS,
+          amount: "2000000",
+          payTo: "0x3333333333333333333333333333333333333333",
+          maxTimeoutSeconds: 300,
+        },
+      ],
+    });
+    const result = await adaptOne(candidate("5000", "0.005"), fetchReturning(drifted));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain(REJECTED_QUOTE_SOURCE_DISAGREEMENT);
-    expect(result.reason).toContain("live_402=2000000");
-    expect(result.reason).toContain("catalog=5000");
-    const rejection = result.rejectedCandidates.find((r) =>
-      r.reason.includes(REJECTED_QUOTE_SOURCE_DISAGREEMENT),
-    );
-    expect(rejection?.evidence?.quote_source).toEqual({ bound_atomic: "2000000", catalog_atomic: "5000" });
+    expect(result.reason).toContain(QUOTE_IDENTITY_CONTRADICTION);
   });
 });
 

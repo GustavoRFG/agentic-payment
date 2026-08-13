@@ -27,3 +27,11 @@ mcp/
 secrets/
 *.secret
 *_secret.txt
+
+# Generated local noise (never evidence fixtures)
+**/__pycache__/
+*.pyc
+vitest-*.txt
+vitest-out.txt
+vitest-run-out.txt
+vitest-agent-run.txt

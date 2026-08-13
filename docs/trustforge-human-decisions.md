@@ -112,6 +112,15 @@ records `B52_OTTOAI_PAYMENT_CONFIRMED_AFTER_RECONCILIATION` with Base USDC tx
 authorization and signature must not be reused. See
 `docs/trustforge-b52-ottoai-approval-binding.md`.
 
+## A.2 OneSource blocklist retirement (already proven)
+
+`api.onesource.io` retirement from the active blocklist is a recorded human
+decision (`decided_by: Gustavo`, `2026-08-02T06:06:29Z`) in
+`config/x402_provider_blocklist.json` (`watch[]` status
+`retired_stale_blocklist_entry`). Evidence status
+`A2_ONESOURCE_RETIREMENT_HUMAN_DECISION_PROVEN`. Agents must not auto-remove
+watch/block entries.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

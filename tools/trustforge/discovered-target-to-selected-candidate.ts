@@ -37,11 +37,17 @@ import {
   probeQuoteStability,
   REJECTED_NON_POSITIVE_QUOTE,
   REJECTED_QUOTE_EXTRACTION_FAILED,
-  REJECTED_QUOTE_SOURCE_DISAGREEMENT,
   REJECTED_QUOTE_UNSTABLE,
   type QuoteStabilityEvidence,
   type QuoteStabilityResult,
 } from "./quote-stability-probe";
+import {
+  classifyHistoricalVsLiveQuote,
+  buildPriceMovementEvidence,
+  LIVE_PRICE_MOVEMENT_OBSERVED,
+  PRICE_CHANGE_REQUIRES_REEVALUATION,
+  QUOTE_IDENTITY_CONTRADICTION,
+} from "./quote-observation-semantics";
 import {
   blocklistSkipReason,
   loadProviderBlocklist,
@@ -148,6 +154,9 @@ export interface QuoteBindingEvidence {
   readonly canonical_requirements_sha256: string;
   readonly canonical_envelope_sha256: string;
   readonly requirements_observed_at: string;
+  /** Present when catalog/historical amount differs from live bound amount. */
+  readonly price_movement?: import("./quote-observation-semantics").PriceMovementEvidence;
+  readonly classification?: string;
 }
 
 export type DiscoveredTargetAdaptResult =
@@ -964,49 +973,103 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
       });
       continue;
     }
+    // Between method and stability probes: identity fields must agree; amount may
+    // move (LIVE_PRICE_MOVEMENT). Envelope-only rotation is allowed when
+    // requirements identity fields (asset/payTo/network/scheme) remain coherent.
+    const firstB = firstRequirements.binding;
+    const secondB = secondRequirements.binding;
     if (
-      firstRequirements.binding.canonical_requirements_sha256 !==
-        secondRequirements.binding.canonical_requirements_sha256 ||
-      firstRequirements.binding.canonical_envelope_sha256 !==
-        secondRequirements.binding.canonical_envelope_sha256
+      firstB.asset.toLowerCase() !== secondB.asset.toLowerCase() ||
+      firstB.pay_to.toLowerCase() !== secondB.pay_to.toLowerCase() ||
+      firstB.canonical_network_caip2 !== secondB.canonical_network_caip2 ||
+      firstB.scheme !== secondB.scheme
     ) {
       rejectedCandidates.push({
         resourceUrl: entry.resourceUrl,
-        reason: `${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: requirements changed between method and stability probes`,
+        reason: `${QUOTE_IDENTITY_CONTRADICTION}: seller identity fields changed between method and stability probes`,
         evidence: {
           quote_stability: stability.evidence,
           seller_requirements: {
-            first_hash: firstRequirements.binding.canonical_requirements_sha256,
-            second_hash: secondRequirements.binding.canonical_requirements_sha256,
+            first_hash: firstB.canonical_requirements_sha256,
+            second_hash: secondB.canonical_requirements_sha256,
+          },
+        },
+      });
+      continue;
+    }
+    if (
+      firstB.canonical_requirements_sha256 !== secondB.canonical_requirements_sha256 &&
+      firstB.amount_atomic === secondB.amount_atomic
+    ) {
+      // Non-amount requirements drift without price change — still fail closed.
+      rejectedCandidates.push({
+        resourceUrl: entry.resourceUrl,
+        reason: `${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: requirements identity changed without price movement`,
+        evidence: {
+          quote_stability: stability.evidence,
+          seller_requirements: {
+            first_hash: firstB.canonical_requirements_sha256,
+            second_hash: secondB.canonical_requirements_sha256,
           },
         },
       });
       continue;
     }
 
-    // Quote binding: the persisted quote_atomic MUST come from the same live 402 the
-    // stability probe read — never catalog/census/cache. If the live 402 and the
-    // catalog quote disagree, reject instead of materializing a mis-bound candidate.
+    // Quote binding: persisted quote_atomic MUST come from the live stability 402 —
+    // never catalog/census/cache. Catalog disagreement is LIVE PRICE MOVEMENT for
+    // selection (reevaluate), not automatic corruption — unless identity contradicts.
     const catalogAtomic = adapted.candidate.quote_atomic;
-    if (boundAtomic === null || boundAtomic !== catalogAtomic) {
+    const histVsLive = classifyHistoricalVsLiveQuote({
+      historical: {
+        amount_atomic: catalogAtomic,
+        asset: adapted.candidate.asset,
+        pay_to: adapted.candidate.authorized_pay_to,
+        network: adapted.candidate.canonical_network_caip2,
+      },
+      live: {
+        amount_atomic: boundAtomic,
+        asset: secondB.asset,
+        pay_to: secondB.pay_to,
+        network: secondB.canonical_network_caip2,
+      },
+    });
+    if (!histVsLive.accept_live_for_selection) {
       rejectedCandidates.push({
         resourceUrl: entry.resourceUrl,
-        reason: `${REJECTED_QUOTE_SOURCE_DISAGREEMENT}: live_402=${boundAtomic ?? "null"} catalog=${catalogAtomic} for ${adapted.candidate.endpoint}`,
+        reason: `${histVsLive.classification}: ${histVsLive.reason} live_402=${boundAtomic ?? "null"} catalog=${catalogAtomic} for ${adapted.candidate.endpoint}`,
         evidence: {
           quote_stability: stability.evidence,
-          quote_source: { bound_atomic: boundAtomic, catalog_atomic: catalogAtomic },
+          quote_source: {
+            bound_atomic: boundAtomic,
+            catalog_atomic: catalogAtomic,
+            classification: histVsLive.classification,
+          },
         },
       });
       continue;
     }
+    const priceMovement =
+      histVsLive.classification === PRICE_CHANGE_REQUIRES_REEVALUATION ||
+      histVsLive.classification === LIVE_PRICE_MOVEMENT_OBSERVED
+        ? buildPriceMovementEvidence({
+            previous_amount_atomic: catalogAtomic,
+            current_amount_atomic: boundAtomic,
+            classification: histVsLive.classification,
+            observation_count: 2,
+          })
+        : null;
+
+    const liveUsdc = atomicUsdcToDecimal(boundAtomic);
 
     return {
       ok: true,
       candidate: {
         ...adapted.candidate,
         ...selectedCandidateRequirementsFields(secondRequirements),
-        // Bound to the live 402 (equals catalog here, since they must agree).
+        // Always bound to the freshest live 402.
         quote_atomic: boundAtomic,
+        quote_amount_usdc: liveUsdc,
         adapt_evidence: {
           quote_stability: stability.evidence,
           quote_binding: {
@@ -1016,6 +1079,12 @@ export async function adaptDiscoveredTargetWithPaidMethodProbe(
               secondRequirements.binding.canonical_requirements_sha256,
             canonical_envelope_sha256: secondRequirements.binding.canonical_envelope_sha256,
             requirements_observed_at: secondRequirements.requirements_observed_at,
+            ...(priceMovement
+              ? {
+                  price_movement: priceMovement,
+                  classification: histVsLive.classification,
+                }
+              : {}),
           },
         },
       },
