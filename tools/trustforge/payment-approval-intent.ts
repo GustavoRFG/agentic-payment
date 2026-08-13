@@ -15,6 +15,10 @@ import {
   GUARD_OPERATIONAL_UI_RENDERS_AUTHORITATIVE_PAYMENT_INTENT,
 } from "./b52-execution-gates";
 import { GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION } from "./b6-execution-gates";
+import {
+  GUARD_PAYMENT_APPROVAL_INTENT_BINDS_OBJECTIVE,
+  OBJECTIVE_SELECTION_BINDING_MISMATCH,
+} from "./b61-execution-gates";
 import { assertAuthorizationMethodBinding } from "./authorization-method-binding";
 import type { DiscoveredSelectedCandidate } from "./discovered-target-to-selected-candidate";
 import type { PaymentApprovalCandidateView } from "./human-payment-decision-provider";
@@ -77,6 +81,9 @@ export interface PaymentApprovalIntent {
   readonly selected_candidate_id?: string;
   readonly selected_observation_id?: string;
   readonly candidate_set_hash?: string;
+  /** Optional B.6.1 objective binding (transitive via selection). */
+  readonly objective_id?: string;
+  readonly objective_hash?: string;
 }
 
 export interface PaymentApprovalIntentHashRecord {
@@ -126,6 +133,10 @@ function intentHashBody(intent: PaymentApprovalIntent): Record<string, unknown> 
     ...(intent.candidate_set_hash !== undefined
       ? { candidate_set_hash: intent.candidate_set_hash }
       : {}),
+    ...(intent.objective_id !== undefined ? { objective_id: intent.objective_id } : {}),
+    ...(intent.objective_hash !== undefined
+      ? { objective_hash: intent.objective_hash }
+      : {}),
   };
 }
 
@@ -164,6 +175,8 @@ export function buildPaymentApprovalIntentFromSelected(input: {
   readonly selectedCandidateId?: string;
   readonly selectedObservationId?: string;
   readonly candidateSetHash?: string;
+  readonly objectiveId?: string;
+  readonly objectiveHash?: string;
 }): PaymentApprovalIntent {
   const selected = input.selected;
   const method = (selected.method ?? "GET") as "GET" | "POST";
@@ -238,6 +251,10 @@ export function buildPaymentApprovalIntentFromSelected(input: {
     ...(input.candidateSetHash !== undefined
       ? { candidate_set_hash: input.candidateSetHash }
       : {}),
+    ...(input.objectiveId !== undefined ? { objective_id: input.objectiveId } : {}),
+    ...(input.objectiveHash !== undefined
+      ? { objective_hash: input.objectiveHash }
+      : {}),
   };
 }
 
@@ -282,10 +299,66 @@ export function assertPaymentApprovalIntentBindsSelectionDecision(
       `${GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION}: candidate_set_hash mismatch`,
     );
   }
+  if (decision.objectiveHash) {
+    void GUARD_PAYMENT_APPROVAL_INTENT_BINDS_OBJECTIVE;
+    if (!intent.objective_hash) {
+      throw new Error(
+        `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: intent missing objective_hash for objective-bound decision`,
+      );
+    }
+    if (intent.objective_hash !== decision.objectiveHash) {
+      throw new Error(
+        `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: objective_hash mismatch`,
+      );
+    }
+    if (
+      decision.objectiveId &&
+      intent.objective_id !== undefined &&
+      intent.objective_id !== decision.objectiveId
+    ) {
+      throw new Error(
+        `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: objective_id mismatch`,
+      );
+    }
+  }
   return {
     ok: true,
     guard: GUARD_PAYMENT_APPROVAL_INTENT_BINDS_SELECTION_DECISION,
   };
+}
+
+/**
+ * Fail-closed: intent claiming objective Y cannot bind selection for objective X.
+ */
+export function assertPaymentApprovalIntentBindsObjective(input: {
+  readonly intent: PaymentApprovalIntent;
+  readonly expectedObjectiveHash: string;
+  readonly expectedObjectiveId?: string;
+}): {
+  readonly ok: true;
+  readonly guard: typeof GUARD_PAYMENT_APPROVAL_INTENT_BINDS_OBJECTIVE;
+} {
+  void GUARD_PAYMENT_APPROVAL_INTENT_BINDS_OBJECTIVE;
+  if (!input.intent.objective_hash) {
+    throw new Error(
+      `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: intent missing objective_hash`,
+    );
+  }
+  if (input.intent.objective_hash !== input.expectedObjectiveHash) {
+    throw new Error(
+      `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: intent objective_hash != expected`,
+    );
+  }
+  if (
+    input.expectedObjectiveId !== undefined &&
+    input.intent.objective_id !== undefined &&
+    input.intent.objective_id !== input.expectedObjectiveId
+  ) {
+    throw new Error(
+      `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: intent objective_id != expected`,
+    );
+  }
+  return { ok: true, guard: GUARD_PAYMENT_APPROVAL_INTENT_BINDS_OBJECTIVE };
 }
 
 /**
