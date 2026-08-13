@@ -116,6 +116,12 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   `docs/trustforge-b411-ps51-approval-ui-encoding.md`)
 - B.4 status: **COMPLETE** (repeatable mainnet settlement confirmed; closeout fix
   `04d2cf1`; human approval UX accepted)
+- B.5.0.1 human approval UI test isolation: ready (no payment)
+  (production `createWindowsApproveRejectDialogProvider` requires
+  `OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT` and is blocked under Vitest;
+  tests use `createTestHumanPaymentDecisionProvider` only; harness is
+  manual-probe-only; B43 acceptance preserved; see
+  `docs/trustforge-b501-approval-ui-test-isolation.md`)
 - B.5 productive payment generalization: ready (no payment)
   (`PaymentCandidateV1` → policy → deterministic selection → B4 runner bridge;
   discovery cannot authorize; live unpaid recon only; stop for human review

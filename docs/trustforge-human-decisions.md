@@ -92,6 +92,15 @@ typography in the approval `.ps1` under PowerShell 5.1. Encoding corrective
 makes the launcher ASCII-safe; no payment authorization and no canary relaunch
 in that task. See `docs/trustforge-b411-ps51-approval-ui-encoding.md`.
 
+## B.5.0.1 approval UI test isolation (ready / no payment)
+
+Automated suites must never show the production Approve/Reject dialog. Tests use
+`createTestHumanPaymentDecisionProvider` (headless). Production CLI still wires
+`OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT` for real human UI reachability only;
+that is not payment authorization. B.4.3 human UX acceptance evidence remains
+write-once under `D:\trustforge\artifacts\runs\b43-human-approval-ui-acceptance`.
+See `docs/trustforge-b501-approval-ui-test-isolation.md`.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

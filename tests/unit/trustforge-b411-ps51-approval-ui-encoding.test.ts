@@ -1,32 +1,37 @@
 /**
  * B.4.1.1 — Windows PowerShell 5.1 approval UI encoding corrective.
- * NO REAL SIGNER. NO REAL PAYMENT.
+ * NO REAL SIGNER. NO REAL PAYMENT. NO VISIBLE DIALOG.
+ *
+ * Visible production UI is forbidden in automated tests (B.5.0.1).
+ * Dialog launch/click proofs use headless TestHumanPaymentDecisionProvider
+ * and stdout/exit parse helpers only.
  */
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import {
+  GUARD_AUTOMATED_TESTS_CANNOT_INVOKE_PRODUCTION_APPROVAL_UI,
   WINDOWS_PS51_APPROVAL_SCRIPT_ENCODING_SAFE,
 } from "../../tools/trustforge/b4-execution-gates";
+import {
+  buildDecisionOutcome,
+  createTestHumanPaymentDecisionProvider,
+} from "../../tools/trustforge/human-payment-decision-provider";
 import {
   assertWindowsApproveRejectDialogScriptEncodingSafe,
   auditWindowsApproveRejectDialogScriptEncoding,
   defaultWindowsApproveRejectDialogScriptPath,
 } from "../../tools/trustforge/windows-approve-reject-dialog-ps51-encoding";
-import { parseWindowsApproveRejectDialogResultForTests } from "../../tools/trustforge/windows-approve-reject-dialog";
+import {
+  createWindowsApproveRejectDialogProvider,
+  OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT,
+  parseWindowsApproveRejectDialogResultForTests,
+} from "../../tools/trustforge/windows-approve-reject-dialog";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "../..");
 const PRODUCTION_SCRIPT = defaultWindowsApproveRejectDialogScriptPath();
-const HARNESS_SCRIPT = join(
-  ROOT,
-  "tools/trustforge/windows-approve-reject-dialog-test-harness.ps1",
-);
 
 function runPowershell51Parse(scriptPath: string): {
   readonly ok: boolean;
@@ -63,38 +68,7 @@ exit 0
   };
 }
 
-function runHarness(mode: "lifetime" | "approve" | "reject" | "abort"): {
-  readonly status: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-} {
-  const args = [
-    "-NoProfile",
-    "-STA",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    HARNESS_SCRIPT,
-    "-Mode",
-    mode,
-    "-ProductionScript",
-    PRODUCTION_SCRIPT,
-    "-HoldMs",
-    "1500",
-  ];
-  const result = spawnSync("powershell.exe", args, {
-    encoding: "utf8",
-    windowsHide: false,
-    timeout: 60_000,
-  });
-  return {
-    status: result.status,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-  };
-}
-
-describe("B.4.1.1 PS 5.1 approval UI encoding", () => {
+describe("B.4.1.1 PS 5.1 approval UI encoding (headless)", () => {
   it("encoding audit: production script is ASCII-only SAFE", () => {
     const audit = auditWindowsApproveRejectDialogScriptEncoding();
     expect(audit.ascii_only).toBe(true);
@@ -110,89 +84,121 @@ describe("B.4.1.1 PS 5.1 approval UI encoding", () => {
     }
   });
 
-  it("powershell.exe 5.1 ParseFile: production script PARSE_OK", () => {
+  it("powershell.exe 5.1 ParseFile: production script PARSE_OK (no UI)", () => {
     if (process.platform !== "win32") return;
     const parsed = runPowershell51Parse(PRODUCTION_SCRIPT);
     expect(parsed.ok, parsed.stderr || parsed.stdout).toBe(true);
   });
 
-  it("harness: production has no synthetic auto-close / test flags", () => {
+  it("production script has no harness/auto-close machinery", () => {
     const text = readFileSync(PRODUCTION_SCRIPT, "utf8");
     expect(text).not.toMatch(/\bHarnessMode\b|\bTestDecision\b/i);
-    expect(text).not.toMatch(/^\s*\$?HarnessMode|^\s*\[string\]\$TestDecision/im);
-    // Negative docs ("Never closes...") are OK; forbid synthetic timer/auto machinery.
     expect(text).not.toMatch(/System\.Windows\.Forms\.Timer|AutoClose|AutoSubmit/i);
     expect(text).toMatch(/ShowDialog/);
     expect(text).toMatch(/No automatic timeout/);
   });
 
-  it.runIf(process.platform === "win32")(
-    "A/B/C: dialog launches and stays open; elapsed time emits no decision",
-    () => {
-      const out = runHarness("lifetime");
-      expect(out.status, out.stderr || out.stdout).toBe(0);
-      expect(out.stdout).toContain("dialog_launched=true");
-      expect(out.stdout).toContain("dialog_still_open_after_hold=true");
-      expect(out.stdout).toContain("elapsed_time_emitted_decision=false");
-      expect(out.stdout).toContain("production_stdout=ABORT");
-      expect(out.stdout).toMatch(/production_stdout=decision_source=(window_close|keyboard_close)/);
-      expect(out.stdout).toContain("signer_invocations=0");
-      expect(out.stdout).toContain("payment_bearing_requests=0");
-    },
-  );
-
-  it.runIf(process.platform === "win32")(
-    "D: controlled APPROVE emits approve_button",
-    () => {
-      const out = runHarness("approve");
-      expect(out.status, out.stderr || out.stdout).toBe(0);
-      expect(out.stdout).toContain("production_stdout=APPROVE");
-      expect(out.stdout).toContain("production_stdout=decision_source=approve_button");
-      expect(out.stdout).toContain("production_exit_code=0");
-      const parsed = parseWindowsApproveRejectDialogResultForTests(
-        "APPROVE\ndecision_source=approve_button\n",
-        0,
-      );
-      expect(parsed).toEqual({
+  it("headless APPROVE / REJECT / ABORT via TestHumanPaymentDecisionProvider", async () => {
+    const now = "2026-08-13T05:00:00.000Z";
+    const approve = createTestHumanPaymentDecisionProvider(
+      buildDecisionOutcome({
         decision: "APPROVE",
         decision_source: "approve_button",
-      });
-    },
-  );
+        human_decision_id: "t_approve",
+        decided_at: now,
+        provider_id: "test-human-payment-decision",
+      }),
+    );
+    const reject = createTestHumanPaymentDecisionProvider(
+      buildDecisionOutcome({
+        decision: "REJECT",
+        decision_source: "reject_button",
+        human_decision_id: "t_reject",
+        decided_at: now,
+        provider_id: "test-human-payment-decision",
+      }),
+    );
+    const abort = createTestHumanPaymentDecisionProvider(
+      buildDecisionOutcome({
+        decision: "ABORT",
+        decision_source: "window_close",
+        human_decision_id: "t_abort",
+        decided_at: now,
+        provider_id: "test-human-payment-decision",
+      }),
+    );
+    const view = {
+      service_label: "x",
+      network_label: "Base",
+      buyer: "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+      seller: "0x52E29e0d2Aa49bfBfC548C0A9F2196F4aa51f3ea",
+      amount_usdc: "0.001",
+      amount_atomic: "1000",
+      request_summary: "GET",
+      endpoint: "https://example.invalid",
+      method: "GET",
+      max_attempts: 1 as const,
+      max_signatures: 1 as const,
+      max_payment_requests: 1 as const,
+      allow_retry: false as const,
+      allow_resend: false as const,
+    };
+    expect((await approve.decideOnce(view)).decision).toBe("APPROVE");
+    expect((await reject.decideOnce(view)).decision).toBe("REJECT");
+    expect((await abort.decideOnce(view)).decision).toBe("ABORT");
+  });
 
-  it.runIf(process.platform === "win32")(
-    "E: controlled REJECT emits reject_button",
-    () => {
-      const out = runHarness("reject");
-      expect(out.status, out.stderr || out.stdout).toBe(0);
-      expect(out.stdout).toContain("production_stdout=REJECT");
-      expect(out.stdout).toContain("production_stdout=decision_source=reject_button");
-      expect(out.stdout).toContain("production_exit_code=2");
-    },
-  );
+  it("production stdout/exit parse: APPROVE / REJECT / ABORT (no spawn)", () => {
+    expect(
+      parseWindowsApproveRejectDialogResultForTests(
+        "APPROVE\ndecision_source=approve_button\n",
+        0,
+      ),
+    ).toEqual({ decision: "APPROVE", decision_source: "approve_button" });
+    expect(
+      parseWindowsApproveRejectDialogResultForTests(
+        "REJECT\ndecision_source=reject_button\n",
+        2,
+      ),
+    ).toEqual({ decision: "REJECT", decision_source: "reject_button" });
+    expect(
+      parseWindowsApproveRejectDialogResultForTests(
+        "ABORT\ndecision_source=window_close\n",
+        3,
+      ),
+    ).toEqual({ decision: "ABORT", decision_source: "window_close" });
+  });
 
-  it.runIf(process.platform === "win32")(
-    "F: controlled close emits ABORT (never REJECT)",
-    () => {
-      const out = runHarness("abort");
-      expect(out.status, out.stderr || out.stdout).toBe(0);
-      expect(out.stdout).toContain("production_stdout=ABORT");
-      expect(out.stdout).toMatch(/production_stdout=decision_source=(window_close|keyboard_close)/);
-      expect(out.stdout).not.toContain("production_stdout=REJECT");
-      expect(out.stdout).toContain("production_exit_code=3");
-    },
-  );
+  it("production provider refuses launch under Vitest even with checkpoint", async () => {
+    expect(GUARD_AUTOMATED_TESTS_CANNOT_INVOKE_PRODUCTION_APPROVAL_UI).toBeTruthy();
+    const provider = createWindowsApproveRejectDialogProvider({
+      operationalHumanCheckpoint: OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT,
+    });
+    await expect(
+      provider.decideOnce({
+        service_label: "x",
+        network_label: "Base",
+        buyer: "0x4cf373373aba89b9bbd5a428fd71831bcbc7d0c1",
+        seller: "0x52E29e0d2Aa49bfBfC548C0A9F2196F4aa51f3ea",
+        amount_usdc: "0.001",
+        amount_atomic: "1000",
+        request_summary: "GET",
+        endpoint: "https://example.invalid",
+        method: "GET",
+        max_attempts: 1,
+        max_signatures: 1,
+        max_payment_requests: 1,
+        allow_retry: false,
+        allow_resend: false,
+      }),
+    ).rejects.toThrow(GUARD_AUTOMATED_TESTS_CANNOT_INVOKE_PRODUCTION_APPROVAL_UI);
+  });
 
   it("G: decision parsing has no signer/payment side effects", () => {
     parseWindowsApproveRejectDialogResultForTests(
       "APPROVE\ndecision_source=approve_button\n",
       0,
     );
-    parseWindowsApproveRejectDialogResultForTests(
-      "ABORT\ndecision_source=window_close\n",
-      3,
-    );
-    // Pure function — no vault, no network, no signer module imported here for effects.
     expect(true).toBe(true);
   });
 });

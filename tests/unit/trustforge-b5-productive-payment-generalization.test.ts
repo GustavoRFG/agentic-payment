@@ -30,7 +30,7 @@ import {
 import {
   privateKeyAsciiToCredentialBytes,
 } from "../../tools/trustforge/buyer-windows-masked-secret-dialog";
-import { createInjectedHumanPaymentDecisionProvider } from "../../tools/trustforge/human-payment-decision-provider";
+import { createTestHumanPaymentDecisionProvider } from "../../tools/trustforge/human-payment-decision-provider";
 import {
   createDiscoveredSelectedCandidateDiscovery,
   createStaticFixtureDiscovery,
@@ -425,7 +425,7 @@ describe("B.5 loopback E2E via generalized runner", () => {
     const approve = await runThinMainnetPaymentFromB5Selection({
       directory: join(dir, "approve"),
       selection: pipeline.selection,
-      decisionProvider: createInjectedHumanPaymentDecisionProvider({
+      decisionProvider: createTestHumanPaymentDecisionProvider({
         decision: "APPROVE",
         decision_source: "approve_button",
         explicit_human_decision: true,
@@ -460,7 +460,7 @@ describe("B.5 loopback E2E via generalized runner", () => {
       runThinMainnetPaymentFromB5Selection({
         directory: join(dir, "reject"),
         selection: pipeline.selection,
-        decisionProvider: createInjectedHumanPaymentDecisionProvider({
+        decisionProvider: createTestHumanPaymentDecisionProvider({
           decision: "REJECT",
           decision_source: "reject_button",
           explicit_human_decision: true,

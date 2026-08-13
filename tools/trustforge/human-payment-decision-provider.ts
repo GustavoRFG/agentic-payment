@@ -132,20 +132,34 @@ export function buildDecisionOutcome(input: {
   };
 }
 
-/** Injected adapter for tests — no GUI, no auto-timeout. */
-export function createInjectedHumanPaymentDecisionProvider(
+export const TEST_HUMAN_PAYMENT_DECISION_PROVIDER_ID =
+  "test-human-payment-decision" as const;
+
+/**
+ * TestHumanPaymentDecisionProvider — headless / in-memory only.
+ * NEVER spawns WinForms, PowerShell UI, mouse, SendKeys, or UI Automation.
+ * TEST DECISION != HUMAN DECISION.
+ */
+export function createTestHumanPaymentDecisionProvider(
   outcome: HumanPaymentDecisionOutcome | (() => HumanPaymentDecisionOutcome),
 ): HumanPaymentDecisionProvider {
   let used = false;
   return {
-    providerId: "injected-test-decision",
+    providerId: TEST_HUMAN_PAYMENT_DECISION_PROVIDER_ID,
     policy: B4_MANUAL_APPROVE_REJECT_POLICY,
     async decideOnce() {
       if (used) {
-        throw new Error("injected decision provider is one-shot");
+        throw new Error("test decision provider is one-shot");
       }
       used = true;
       return typeof outcome === "function" ? outcome() : outcome;
     },
   };
+}
+
+/** @deprecated Use createTestHumanPaymentDecisionProvider */
+export function createInjectedHumanPaymentDecisionProvider(
+  outcome: HumanPaymentDecisionOutcome | (() => HumanPaymentDecisionOutcome),
+): HumanPaymentDecisionProvider {
+  return createTestHumanPaymentDecisionProvider(outcome);
 }

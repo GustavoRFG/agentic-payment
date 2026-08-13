@@ -1,14 +1,17 @@
-# TRUSTFORGE B.4.1.1 - TEST HARNESS ONLY (not used by production payment path)
-# Drives the PRODUCTION windows-approve-reject-dialog.ps1 via UI Automation.
-# ASCII-only. No signer. No payment. No synthetic callbacks inside production.
+# TRUSTFORGE — LEGACY MANUAL UI PROBE (FORBIDDEN IN AUTOMATED TESTS)
 #
-# Modes:
-#   lifetime  - launch production dialog, wait HoldMs, assert still alive, then close -> ABORT
-#   approve   - launch production dialog, click APPROVE
-#   reject    - launch production dialog, click REJECT
-#   abort     - launch production dialog, close window (X)
+# B.5.0.1: Automated unit/regression suites MUST NOT invoke this script.
+# Visible Approve/Reject UI must mean a real human checkpoint.
+# Use createTestHumanPaymentDecisionProvider for headless APPROVE/REJECT/ABORT.
 #
-# Usage (powershell.exe 5.1):
+# This file is retained only for rare offline manual operator probes.
+# It is not part of npm test / vitest.
+# Do not spawn from TypeScript tests.
+#
+# ASCII-only. No signer. No payment.
+#
+# Modes: lifetime | approve | reject | abort
+# Usage (manual only):
 #   powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File <this> -Mode approve -ProductionScript <path>
 
 param(

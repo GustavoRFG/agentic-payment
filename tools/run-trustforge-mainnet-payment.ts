@@ -16,7 +16,10 @@ import {
   BLOCKED_B4_PROTECTED_SIGNER_UNAVAILABLE,
 } from "./trustforge/b4-execution-gates";
 import type { DiscoveredSelectedCandidate } from "./trustforge/discovered-target-to-selected-candidate";
-import { createWindowsApproveRejectDialogProvider } from "./trustforge/windows-approve-reject-dialog";
+import {
+  createWindowsApproveRejectDialogProvider,
+  OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT,
+} from "./trustforge/windows-approve-reject-dialog";
 import { createWindowsDpapiLocalSignerProvider } from "./trustforge/windows-dpapi-local-signer";
 import {
   defaultTrustForgeSignersDir,
@@ -117,7 +120,10 @@ async function main(): Promise<number> {
   const result = await runThinMainnetPayment({
     directory: runDir,
     selected,
-    decisionProvider: createWindowsApproveRejectDialogProvider(),
+    decisionProvider: createWindowsApproveRejectDialogProvider({
+      // UI reachability only — not payment authorization.
+      operationalHumanCheckpoint: OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT,
+    }),
     credentialProvider: createWindowsDpapiLocalSignerProvider(),
     credentialPolicyPath,
   });

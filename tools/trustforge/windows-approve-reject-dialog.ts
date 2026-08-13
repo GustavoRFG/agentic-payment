@@ -13,6 +13,8 @@ import {
   B4_APPROVE_REJECT_DECISION_PROVIDER_ID,
   B4_MANUAL_APPROVE_REJECT_POLICY,
   BLOCKED_B4_HUMAN_DECISION_UI_FAILED,
+  BLOCKED_B4_PRODUCTION_APPROVAL_UI_WITHOUT_OPERATIONAL_CONTEXT,
+  GUARD_AUTOMATED_TESTS_CANNOT_INVOKE_PRODUCTION_APPROVAL_UI,
   GUARD_NO_APPROVAL_DIALOG_AUTO_TIMEOUT,
   GUARD_WINDOW_CLOSE_IS_ABORT_NOT_REJECT,
 } from "./b4-execution-gates";
@@ -70,18 +72,62 @@ function parseDialogProcessOutput(stdout: string, exitCode: number): {
   return { decision: "UI_FAILED", decision_source: "ui_failure" };
 }
 
+/**
+ * Explicit operational context required to show the visible production dialog.
+ * This is UI-reachability only — it does NOT authorize payment.
+ * Automated tests must never construct or pass this object.
+ */
+export const OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT = {
+  mode: "operational_human_checkpoint",
+  acknowledges_visible_dialog_is_real_human_checkpoint: true,
+} as const;
+
+export type OperationalHumanApprovalUiCheckpoint =
+  typeof OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT;
+
+function assertOperationalHumanApprovalUiAllowed(
+  checkpoint: OperationalHumanApprovalUiCheckpoint | undefined,
+): void {
+  void GUARD_AUTOMATED_TESTS_CANNOT_INVOKE_PRODUCTION_APPROVAL_UI;
+  // Vitest / NODE_ENV=test: hard-block visible production UI.
+  if (process.env.VITEST === "true" || process.env.NODE_ENV === "test") {
+    throw new Error(
+      `${GUARD_AUTOMATED_TESTS_CANNOT_INVOKE_PRODUCTION_APPROVAL_UI}: visible production Approve/Reject UI cannot run under automated tests`,
+    );
+  }
+  if (
+    !checkpoint ||
+    checkpoint.mode !== "operational_human_checkpoint" ||
+    checkpoint.acknowledges_visible_dialog_is_real_human_checkpoint !== true
+  ) {
+    throw new Error(
+      `${BLOCKED_B4_PRODUCTION_APPROVAL_UI_WITHOUT_OPERATIONAL_CONTEXT}: production approval UI requires OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT (not payment authorization)`,
+    );
+  }
+}
+
 export function createWindowsApproveRejectDialogProvider(options?: {
   readonly scriptPath?: string;
   readonly powershellPath?: string;
+  /**
+   * Required for any visible dialog launch. Operational CLI must pass
+   * OPERATIONAL_HUMAN_APPROVAL_UI_CHECKPOINT. Tests must use
+   * createTestHumanPaymentDecisionProvider instead.
+   */
+  readonly operationalHumanCheckpoint?: OperationalHumanApprovalUiCheckpoint;
 }): HumanPaymentDecisionProvider {
   const scriptPath = options?.scriptPath ?? defaultScriptPath();
   const powershellPath = options?.powershellPath ?? "powershell.exe";
+  const checkpoint = options?.operationalHumanCheckpoint;
   let used = false;
 
   return {
     providerId: B4_APPROVE_REJECT_DECISION_PROVIDER_ID,
     policy: B4_MANUAL_APPROVE_REJECT_POLICY,
     async decideOnce(candidate: PaymentApprovalCandidateView) {
+      // Gate before any spawn — tests never reach PowerShell UI.
+      assertOperationalHumanApprovalUiAllowed(checkpoint);
+
       if (used) {
         throw new Error(
           `${BLOCKED_B4_HUMAN_DECISION_UI_FAILED}: decision dialog already used`,

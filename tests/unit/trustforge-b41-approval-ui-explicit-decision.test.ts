@@ -15,7 +15,7 @@ import {
   assertOnlyExplicitButtonProducesReject,
   assertWindowCloseIsAbortNotReject,
   buildDecisionOutcome,
-  createInjectedHumanPaymentDecisionProvider,
+  createTestHumanPaymentDecisionProvider,
 } from "../../tools/trustforge/human-payment-decision-provider";
 import { parseWindowsApproveRejectDialogResultForTests } from "../../tools/trustforge/windows-approve-reject-dialog";
 import {
@@ -28,7 +28,7 @@ const NOW = new Date("2026-08-12T16:00:00.000Z");
 describe("B.4.1 explicit approval decisions", () => {
   it("A/B: no decision emitted merely because time passes (injected holds until called)", async () => {
     let resolved = false;
-    const provider = createInjectedHumanPaymentDecisionProvider(() => {
+    const provider = createTestHumanPaymentDecisionProvider(() => {
       resolved = true;
       return buildDecisionOutcome({
         decision: "APPROVE",

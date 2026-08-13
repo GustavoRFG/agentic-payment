@@ -32,7 +32,7 @@ import { runSecureSignerSetup } from "../../tools/trustforge/buyer-secure-signer
 import { createWindowsDpapiLocalSignerProvider } from "../../tools/trustforge/windows-dpapi-local-signer";
 import { createSyntheticXorProtectedSecretBackend } from "../../tools/trustforge/windows-dpapi-protect";
 import {
-  createInjectedHumanPaymentDecisionProvider,
+  createTestHumanPaymentDecisionProvider,
 } from "../../tools/trustforge/human-payment-decision-provider";
 import {
   FIRST_REAL_MAINNET_PAYMENT_V1,
@@ -362,7 +362,7 @@ describe("B.4 human decision → mandates", () => {
     const result = await runThinMainnetPayment({
       directory: dir,
       selected,
-      decisionProvider: createInjectedHumanPaymentDecisionProvider({
+      decisionProvider: createTestHumanPaymentDecisionProvider({
         decision: "APPROVE",
         decision_source: "approve_button",
         explicit_human_decision: true,
@@ -415,7 +415,7 @@ describe("B.4 human decision → mandates", () => {
       runThinMainnetPayment({
         directory: dir,
         selected,
-        decisionProvider: createInjectedHumanPaymentDecisionProvider({
+        decisionProvider: createTestHumanPaymentDecisionProvider({
           decision: "REJECT",
           decision_source: "reject_button",
           explicit_human_decision: true,
@@ -453,7 +453,7 @@ describe("B.4 loopback E2E thin runner", () => {
     const result = await runThinMainnetPayment({
       directory: dir,
       selected,
-      decisionProvider: createInjectedHumanPaymentDecisionProvider({
+      decisionProvider: createTestHumanPaymentDecisionProvider({
         decision: "APPROVE",
         decision_source: "approve_button",
         explicit_human_decision: true,
@@ -495,7 +495,7 @@ describe("B.4 loopback E2E thin runner", () => {
       runThinMainnetPayment({
         directory: dir,
         selected,
-        decisionProvider: createInjectedHumanPaymentDecisionProvider({
+        decisionProvider: createTestHumanPaymentDecisionProvider({
           decision: "APPROVE",
           decision_source: "approve_button",
           explicit_human_decision: true,
