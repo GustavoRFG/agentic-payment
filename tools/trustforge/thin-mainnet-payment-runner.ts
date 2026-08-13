@@ -65,6 +65,21 @@ import {
   type PaymentApprovalCandidateView,
 } from "./human-payment-decision-provider";
 import {
+  assertFreshTermsWithinPaymentApprovalIntent,
+  assertHumanDecisionBindsPaymentIntentHash,
+  assertHumanDisplayBindsPaymentApprovalIntent,
+  paymentApprovalIntentHash,
+  paymentApprovalIntentToCandidateView,
+  proveCandidateAuthorizationRequestTripleBinding,
+  proveMethodBindingNominalGet,
+  type PaymentApprovalIntent,
+} from "./payment-approval-intent";
+import {
+  BLOCKED_B52_FRESH_TERMS_DIFFER_FROM_HUMAN_APPROVAL_REAUTHORIZE,
+  BLOCKED_B52_HUMAN_DECISION_UI_FAILED_NO_PAYMENT,
+  GUARD_HUMAN_DECISION_BINDS_PAYMENT_INTENT_HASH,
+} from "./b52-execution-gates";
+import {
   runPaidQuoteFreshnessPreflight,
   type AuthorizedPaymentQuote,
 } from "./paid-quote-freshness-preflight";
@@ -331,6 +346,12 @@ export interface ThinMainnetPaymentRunnerInput {
   readonly nonceSource?: () => `0x${string}`;
   /** Optional B.5 selection id recorded for ledger linkage (not authority). */
   readonly b5_selection_id?: string;
+  /**
+   * B.5.2 authoritative approval object. When present, the operational UI must
+   * render from this intent (not a report preview), and fresh pay-time terms are
+   * compared against it (envelope rotation allowed if economics unchanged).
+   */
+  readonly paymentApprovalIntent?: PaymentApprovalIntent;
 }
 
 export interface ThinMainnetPaymentRunnerResult {
@@ -406,9 +427,44 @@ export async function runThinMainnetPayment(
   bump("CANDIDATE_READY");
   bump("HUMAN_DECISION_PENDING");
 
-  const decision = await input.decisionProvider.decideOnce(
-    buildPaymentApprovalCandidateView(input.selected),
-  );
+  const approvalIntent = input.paymentApprovalIntent ?? null;
+  const intentHash = approvalIntent ? paymentApprovalIntentHash(approvalIntent) : null;
+  const approvalView: PaymentApprovalCandidateView = approvalIntent
+    ? paymentApprovalIntentToCandidateView(approvalIntent)
+    : buildPaymentApprovalCandidateView(input.selected);
+
+  if (approvalIntent) {
+    persistJson(input.directory, "payment_approval_intent.json", approvalIntent);
+    persistJson(input.directory, "payment_approval_intent_hash.json", {
+      schema_version: "trustforge_payment_approval_intent_hash.v1",
+      payment_approval_intent_hash: intentHash,
+      algorithm: "canonical_json_sha256",
+    });
+    const displayProof = assertHumanDisplayBindsPaymentApprovalIntent({
+      intent: approvalIntent,
+      displayed: {
+        service: approvalView.service_label,
+        endpoint: approvalView.endpoint,
+        method: approvalView.method,
+        request: approvalView.request_summary,
+        network: "Base",
+        asset: "USDC",
+        amount: approvalView.amount_usdc,
+        pay_to: approvalView.seller,
+      },
+    });
+    persistJson(input.directory, "human_display_binding_proof.json", displayProof);
+  }
+
+  const decision = await input.decisionProvider.decideOnce(approvalView);
+
+  if (approvalIntent && intentHash) {
+    void GUARD_HUMAN_DECISION_BINDS_PAYMENT_INTENT_HASH;
+    assertHumanDecisionBindsPaymentIntentHash({
+      payment_approval_intent_hash: decision.payment_approval_intent_hash,
+      expected_hash: intentHash,
+    });
+  }
 
   persistJson(input.directory, "human_payment_decision.json", {
     decision: decision.decision,
@@ -418,6 +474,8 @@ export async function runThinMainnetPayment(
     decided_at: decision.decided_at,
     provider_id: decision.provider_id,
     policy: decision.policy,
+    payment_approval_intent_hash: decision.payment_approval_intent_hash ?? intentHash,
+    bound_method: decision.bound_method ?? approvalView.method,
   });
 
   if (decision.decision === "REJECT") {
@@ -434,7 +492,12 @@ export async function runThinMainnetPayment(
   }
   if (decision.decision === "UI_FAILED") {
     bump("HUMAN_DECISION_UI_FAILED", { human_decision_id: decision.human_decision_id });
-    fail(BLOCKED_B4_HUMAN_DECISION_UI_FAILED, "approval UI failed");
+    fail(
+      approvalIntent
+        ? BLOCKED_B52_HUMAN_DECISION_UI_FAILED_NO_PAYMENT
+        : BLOCKED_B4_HUMAN_DECISION_UI_FAILED,
+      "approval UI failed",
+    );
   }
   if (decision.decision !== "APPROVE" || !decision.explicit_human_decision) {
     bump("HUMAN_DECISION_UI_FAILED", { human_decision_id: decision.human_decision_id });
@@ -456,11 +519,19 @@ export async function runThinMainnetPayment(
       authorized: quote,
       fetchImpl: input.fetchImpl,
       now,
+      // B.5.2: OttoAI-style sellers rotate non-economic envelope metadata.
+      allowEnvelopeRotation: Boolean(approvalIntent),
     });
     if (!preflight.go || !preflight.outcome?.sellerRequirements) {
       bump("REQUIREMENTS_CHANGED", {
         notes: preflight.reasons.join(";") || "freshness_failed",
       });
+      if (approvalIntent) {
+        fail(
+          BLOCKED_B52_FRESH_TERMS_DIFFER_FROM_HUMAN_APPROVAL_REAUTHORIZE,
+          `fresh 402 preflight failed: ${preflight.reasons.join("; ") || "no 402"}`,
+        );
+      }
       fail(
         "REQUIREMENTS_CHANGED",
         `fresh 402 preflight failed: ${preflight.reasons.join("; ") || "no 402"}`,
@@ -469,8 +540,37 @@ export async function runThinMainnetPayment(
     freshObservation = preflight.outcome.sellerRequirements;
   }
 
-  // Exact hash gate vs selected candidate economics.
-  if (
+  if (approvalIntent) {
+    try {
+      assertFreshTermsWithinPaymentApprovalIntent({
+        intent: approvalIntent,
+        fresh: {
+          endpoint: input.selected.endpoint,
+          method: (input.selected.method ?? "GET") as string,
+          request_binding_sha256: freshObservation.binding.request_binding_sha256,
+          network_canonical: freshObservation.binding.canonical_network_caip2,
+          asset: freshObservation.binding.asset,
+          amount_atomic: freshObservation.binding.amount_atomic,
+          pay_to: freshObservation.binding.pay_to,
+          scheme: freshObservation.binding.scheme,
+          requirements_identity: freshObservation.binding.canonical_requirements_sha256,
+        },
+      });
+      persistJson(input.directory, "jit_authority_subset_proof.json", {
+        ok: true,
+        invariant: "authority(JIT) ⊆ authority(PaymentApprovalIntent)",
+        envelope_rotated:
+          freshObservation.binding.canonical_envelope_sha256 !==
+          input.selected.canonical_envelope_sha256,
+        fresh_requirements_identity:
+          freshObservation.binding.canonical_requirements_sha256,
+        fresh_envelope_identity: freshObservation.binding.canonical_envelope_sha256,
+      });
+    } catch (error) {
+      bump("REQUIREMENTS_CHANGED", { notes: "intent_authority_mismatch" });
+      throw error;
+    }
+  } else if (
     freshObservation.binding.canonical_requirements_sha256 !==
       input.selected.canonical_requirements_sha256 ||
     freshObservation.binding.canonical_envelope_sha256 !==
@@ -478,11 +578,24 @@ export async function runThinMainnetPayment(
     freshObservation.binding.request_binding_sha256 !==
       input.selected.request_binding_sha256
   ) {
+    // Legacy exact-hash gate (pre-B.5.2 / no PaymentApprovalIntent).
     bump("REQUIREMENTS_CHANGED", { notes: "fresh_hash_mismatch" });
     fail("REQUIREMENTS_CHANGED", "fresh unpaid 402 hashes differ from selected candidate");
   }
 
   bump("FRESH_REQUIREMENTS_VALIDATED");
+  persistJson(input.directory, "fresh_paytime_requirements.json", {
+    schema_version: "trustforge_fresh_paytime_requirements.v1",
+    canonical_requirements_sha256:
+      freshObservation.binding.canonical_requirements_sha256,
+    canonical_envelope_sha256: freshObservation.binding.canonical_envelope_sha256,
+    request_binding_sha256: freshObservation.binding.request_binding_sha256,
+    amount_atomic: freshObservation.binding.amount_atomic,
+    pay_to: freshObservation.binding.pay_to,
+    network: freshObservation.binding.canonical_network_caip2,
+    asset: freshObservation.binding.asset,
+    observed_at: freshObservation.requirements_observed_at,
+  });
 
   const humanDecisionId = decision.human_decision_id;
   const signingMandate = sealSigningMandate({
@@ -627,6 +740,45 @@ export async function runThinMainnetPayment(
   const signedArtifact = JSON.parse(
     readFileSync(join(input.directory, SIGNED_ARTIFACT), "utf8"),
   ) as SignedArtifact;
+
+  const authorizedMethod = (psa.method ?? input.selected.method ?? "GET") as string;
+  const actualRequestMethod = (input.selected.method ?? "GET") as string;
+  const methodNominal = proveMethodBindingNominalGet({
+    normalizedCandidateMethod: actualRequestMethod,
+    selectedCandidateMethod: actualRequestMethod,
+    paymentApprovalIntentMethod: approvalIntent?.method ?? actualRequestMethod,
+    humanDecisionBoundMethod: decision.bound_method ?? approvalView.method,
+    buyerSigningAuthorizationMethod: derivation.derived_signing_authorization.method,
+    paymentSendAuthorizationMethod: authorizedMethod,
+    productiveHttpRequestMethod: actualRequestMethod,
+  });
+  if (methodNominal.status !== "PASS") {
+    fail(
+      "BLOCKED_AUTHORIZATION_METHOD_MISMATCH",
+      methodNominal.reasons.join("; ") || "method binding failed",
+    );
+  }
+  const triple = proveCandidateAuthorizationRequestTripleBinding({
+    authorizationRequestIdentity: psa.request_binding_sha256,
+    selectedCandidateRequestIdentity: input.selected.request_binding_sha256,
+    actualRequestIdentity: input.selected.request_binding_sha256,
+    method: actualRequestMethod,
+  });
+  if (!triple.result.endsWith("PASS")) {
+    fail(
+      "BLOCKED_AUTHORIZATION_REQUEST_BINDING_MISMATCH",
+      triple.reasons.join("; ") || "triple request binding failed",
+    );
+  }
+  persistJson(input.directory, "pre_send_method_binding.json", {
+    authorizedMethod,
+    actualRequestMethod,
+    methodBinding: "PASS",
+    method_nominal: methodNominal,
+    triple_request_binding: triple,
+  });
+  persistJson(input.directory, "method_binding_proof.json", methodNominal);
+  persistJson(input.directory, "triple_request_binding_proof.json", triple);
 
   bump("SEND_COMMITTED_NO_RETRY");
   authority.push("SEND_COMMITTED_NO_RETRY");

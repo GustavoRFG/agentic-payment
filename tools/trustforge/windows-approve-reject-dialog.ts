@@ -18,6 +18,7 @@ import {
   GUARD_NO_APPROVAL_DIALOG_AUTO_TIMEOUT,
   GUARD_WINDOW_CLOSE_IS_ABORT_NOT_REJECT,
 } from "./b4-execution-gates";
+import { GUARD_OPERATIONAL_UI_RENDERS_AUTHORITATIVE_PAYMENT_INTENT } from "./b52-execution-gates";
 import {
   buildDecisionOutcome,
   type HumanPaymentDecisionKind,
@@ -143,36 +144,71 @@ export function createWindowsApproveRejectDialogProvider(options?: {
       // Fail closed before spawn if the launcher is not PS 5.1-safe.
       assertWindowsApproveRejectDialogScriptEncodingSafe(scriptPath);
 
+      // B.5.2: operational UI must render authoritative PaymentApprovalIntent projection.
+      if (candidate.ui_source === "authoritative_PaymentApprovalIntent") {
+        void GUARD_OPERATIONAL_UI_RENDERS_AUTHORITATIVE_PAYMENT_INTENT;
+        if (!candidate.payment_approval_intent_hash) {
+          throw new Error(
+            `${GUARD_OPERATIONAL_UI_RENDERS_AUTHORITATIVE_PAYMENT_INTENT}: missing payment_approval_intent_hash`,
+          );
+        }
+      }
+
       const decided_at = new Date().toISOString();
       const human_decision_id = `paydec_${randomUUID()}`;
+
+      const psArgs = [
+        "-NoProfile",
+        "-STA",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        scriptPath,
+        "-ServiceLabel",
+        candidate.service_label,
+        "-NetworkLabel",
+        candidate.network_label === "eip155:8453" ? "Base" : candidate.network_label,
+        "-Buyer",
+        candidate.buyer,
+        "-Seller",
+        candidate.seller,
+        "-AmountUsdc",
+        candidate.amount_usdc,
+        "-RequestSummary",
+        candidate.request_summary,
+      ];
+      if (candidate.dialog_title) {
+        psArgs.push("-DialogTitle", candidate.dialog_title);
+      }
+      if (candidate.method) {
+        psArgs.push("-Method", candidate.method);
+      }
+      if (candidate.advertised_purpose) {
+        psArgs.push("-AdvertisedPurpose", candidate.advertised_purpose);
+      }
+      if (candidate.purpose_quality_note) {
+        psArgs.push("-PurposeQualityNote", candidate.purpose_quality_note);
+      }
+      if (candidate.why_selected) {
+        psArgs.push("-WhySelected", candidate.why_selected);
+      }
+      if (candidate.known_facts?.length) {
+        psArgs.push("-KnownFacts", candidate.known_facts.map((f) => `- ${f}`).join("\n"));
+      }
+      if (candidate.unknown_facts?.length) {
+        psArgs.push("-UnknownFacts", candidate.unknown_facts.map((f) => `- ${f}`).join("\n"));
+      }
+      if (candidate.payment_approval_intent_hash) {
+        psArgs.push("-IntentHash", candidate.payment_approval_intent_hash);
+      }
 
       let stdout = "";
       let stderr = "";
       const code = await new Promise<number>((resolve, reject) => {
-        const child = spawn(
-          powershellPath,
-          [
-            "-NoProfile",
-            "-STA",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            scriptPath,
-            "-ServiceLabel",
-            candidate.service_label,
-            "-NetworkLabel",
-            candidate.network_label,
-            "-Buyer",
-            candidate.buyer,
-            "-Seller",
-            candidate.seller,
-            "-AmountUsdc",
-            candidate.amount_usdc,
-            "-RequestSummary",
-            candidate.request_summary,
-          ],
-          { windowsHide: false, stdio: ["ignore", "pipe", "pipe"] },
-        );
+        const child = spawn(powershellPath, psArgs, {
+          windowsHide: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         let settled = false;
         const finish = (exit: number, error?: Error) => {
           if (settled) return;
@@ -218,6 +254,8 @@ export function createWindowsApproveRejectDialogProvider(options?: {
         human_decision_id,
         decided_at,
         provider_id: B4_APPROVE_REJECT_DECISION_PROVIDER_ID,
+        payment_approval_intent_hash: candidate.payment_approval_intent_hash,
+        bound_method: candidate.method,
       });
       return outcome;
     },

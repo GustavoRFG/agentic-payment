@@ -114,6 +114,13 @@ export function evaluateFresh402AgainstAuthorizedQuote(
   outcome: TargetHandshakeOutcome,
   quote: AuthorizedPaymentQuote,
   now: Date = new Date(),
+  options: {
+    /**
+     * B.5.2: when true, non-economic envelope rotation is allowed if requirements
+     * hash and economic fields still match the authorized quote / intent.
+     */
+    readonly allowEnvelopeRotation?: boolean;
+  } = {},
 ): PaidQuoteFreshnessPreflightResult {
   const reasons: string[] = [];
   let effectiveSigningDeadline: string | null = null;
@@ -142,7 +149,10 @@ export function evaluateFresh402AgainstAuthorizedQuote(
     ) {
       reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: requirements hash mismatch`);
     }
-    if (freshRequirements.binding.canonical_envelope_sha256 !== quote.canonical_envelope_sha256) {
+    if (
+      !options.allowEnvelopeRotation &&
+      freshRequirements.binding.canonical_envelope_sha256 !== quote.canonical_envelope_sha256
+    ) {
       reasons.push(`${BLOCKED_PAYMENT_REQUIREMENTS_HASH_MISMATCH}: envelope hash mismatch`);
     }
     if (quote.human_authorization_expires_at) {
@@ -232,6 +242,7 @@ export async function runPaidQuoteFreshnessPreflight(input: {
   readonly authorized: AuthorizedPaymentQuote;
   readonly fetchImpl?: typeof fetch;
   readonly now?: Date;
+  readonly allowEnvelopeRotation?: boolean;
 }): Promise<PaidQuoteFreshnessPreflightResult> {
   const candidate = buildProbeCandidateForAuthorizedQuote(input.authorized);
 
@@ -242,5 +253,7 @@ export async function runPaidQuoteFreshnessPreflight(input: {
     maxTargetPriceAtomic: maxAtomic,
   });
 
-  return evaluateFresh402AgainstAuthorizedQuote(outcome, input.authorized, input.now);
+  return evaluateFresh402AgainstAuthorizedQuote(outcome, input.authorized, input.now, {
+    allowEnvelopeRotation: input.allowEnvelopeRotation,
+  });
 }

@@ -44,6 +44,15 @@ export interface PaymentApprovalCandidateView {
   readonly max_payment_requests: 1;
   readonly allow_retry: false;
   readonly allow_resend: false;
+  /** B.5.2: hash of authoritative PaymentApprovalIntent (required for operational APPROVE). */
+  readonly payment_approval_intent_hash?: string;
+  readonly advertised_purpose?: string;
+  readonly purpose_quality_note?: string;
+  readonly why_selected?: string;
+  readonly known_facts?: readonly string[];
+  readonly unknown_facts?: readonly string[];
+  readonly dialog_title?: string;
+  readonly ui_source?: "authoritative_PaymentApprovalIntent" | "legacy_candidate_view";
 }
 
 export interface HumanPaymentDecisionProvenance {
@@ -58,6 +67,9 @@ export type HumanPaymentDecisionOutcome = HumanPaymentDecisionProvenance & {
   readonly decided_at: string;
   readonly provider_id: string;
   readonly policy: typeof B4_MANUAL_APPROVE_REJECT_POLICY;
+  /** B.5.2: binds APPROVE/REJECT to the authoritative PaymentApprovalIntent hash. */
+  readonly payment_approval_intent_hash?: string;
+  readonly bound_method?: string;
 };
 
 export interface HumanPaymentDecisionProvider {
@@ -110,6 +122,8 @@ export function buildDecisionOutcome(input: {
   readonly human_decision_id: string;
   readonly decided_at: string;
   readonly provider_id: string;
+  readonly payment_approval_intent_hash?: string;
+  readonly bound_method?: string;
 }): HumanPaymentDecisionOutcome {
   const explicit =
     input.decision_source === "approve_button" ||
@@ -129,6 +143,10 @@ export function buildDecisionOutcome(input: {
     decided_at: input.decided_at,
     provider_id: input.provider_id,
     policy: B4_MANUAL_APPROVE_REJECT_POLICY,
+    ...(input.payment_approval_intent_hash
+      ? { payment_approval_intent_hash: input.payment_approval_intent_hash }
+      : {}),
+    ...(input.bound_method ? { bound_method: input.bound_method } : {}),
   };
 }
 
@@ -147,12 +165,19 @@ export function createTestHumanPaymentDecisionProvider(
   return {
     providerId: TEST_HUMAN_PAYMENT_DECISION_PROVIDER_ID,
     policy: B4_MANUAL_APPROVE_REJECT_POLICY,
-    async decideOnce() {
+    async decideOnce(candidate: PaymentApprovalCandidateView) {
       if (used) {
         throw new Error("test decision provider is one-shot");
       }
       used = true;
-      return typeof outcome === "function" ? outcome() : outcome;
+      const base = typeof outcome === "function" ? outcome() : outcome;
+      // Headless: bind intent hash / method from the authoritative view when present.
+      return {
+        ...base,
+        payment_approval_intent_hash:
+          base.payment_approval_intent_hash ?? candidate.payment_approval_intent_hash,
+        bound_method: base.bound_method ?? candidate.method,
+      };
     },
   };
 }

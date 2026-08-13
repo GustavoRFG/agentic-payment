@@ -1,4 +1,4 @@
-# TRUSTFORGE B.4.1 / B.4.1.1 - Approve / Reject payment dialog (explicit decisions only)
+# TRUSTFORGE B.4.1 / B.5.2 - Approve / Reject payment dialog (explicit decisions only)
 # Args are public economics only. Never pass secrets.
 #
 # This file MUST remain ASCII-only (bytes 0x00-0x7F) so Windows PowerShell 5.1
@@ -20,7 +20,15 @@ param(
   [Parameter(Mandatory = $true)][string]$Buyer,
   [Parameter(Mandatory = $true)][string]$Seller,
   [Parameter(Mandatory = $true)][string]$AmountUsdc,
-  [Parameter(Mandatory = $true)][string]$RequestSummary
+  [Parameter(Mandatory = $true)][string]$RequestSummary,
+  [Parameter(Mandatory = $false)][string]$DialogTitle = "TRUSTFORGE - Payment Approval",
+  [Parameter(Mandatory = $false)][string]$Method = "",
+  [Parameter(Mandatory = $false)][string]$AdvertisedPurpose = "",
+  [Parameter(Mandatory = $false)][string]$PurposeQualityNote = "",
+  [Parameter(Mandatory = $false)][string]$WhySelected = "",
+  [Parameter(Mandatory = $false)][string]$KnownFacts = "",
+  [Parameter(Mandatory = $false)][string]$UnknownFacts = "",
+  [Parameter(Mandatory = $false)][string]$IntentHash = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,8 +39,8 @@ Add-Type -AssemblyName System.Drawing
 $script:explicitSource = "none"
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "TRUSTFORGE - Payment Approval"
-$form.Size = New-Object System.Drawing.Size(560, 440)
+$form.Text = $DialogTitle
+$form.Size = New-Object System.Drawing.Size(640, 720)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -44,39 +52,60 @@ $form.KeyPreview = $true
 $form.AcceptButton = $null
 $form.CancelButton = $null
 
-$y = 16
+$y = 12
 function Add-Label([string]$text, [int]$height = 20, [bool]$bold = $false) {
   $script:label = New-Object System.Windows.Forms.Label
   $script:label.Location = New-Object System.Drawing.Point(16, $script:y)
-  $script:label.Size = New-Object System.Drawing.Size(520, $height)
+  $script:label.Size = New-Object System.Drawing.Size(600, $height)
   $script:label.Text = $text
   if ($bold) {
-    $script:label.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $script:label.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
   } else {
     $script:label.Font = New-Object System.Drawing.Font("Segoe UI", 9)
   }
   $form.Controls.Add($script:label)
-  $script:y += ($height + 6)
+  $script:y += ($height + 4)
 }
 
-Add-Label "TRUSTFORGE - Payment Approval" 24 $true
+Add-Label $DialogTitle 28 $true
 Add-Label "Service:`r`n$ServiceLabel" 36
+if ($AdvertisedPurpose -ne "") {
+  Add-Label "Advertised purpose:`r`n$AdvertisedPurpose" 40
+}
+if ($PurposeQualityNote -ne "") {
+  Add-Label "Important:`r`n$PurposeQualityNote" 40 $true
+}
 Add-Label "Network: $NetworkLabel" 20
-Add-Label "Buyer:`r`n$Buyer" 36
+if ($Method -ne "") {
+  Add-Label "Method: $Method" 20 $true
+}
+Add-Label "Request:`r`n$RequestSummary" 40
+Add-Label "Cost: $AmountUsdc USDC" 22 $true
 Add-Label "Seller:`r`n$Seller" 36
-Add-Label "Amount: $AmountUsdc USDC" 24 $true
-Add-Label "Request:`r`n$RequestSummary" 36
-Add-Label "Policy: 1 attempt | 1 signature | 1 payment | NO RETRY | NO RESEND" 36
+Add-Label "Buyer:`r`n$Buyer" 36
+if ($WhySelected -ne "") {
+  Add-Label "Why selected:`r`n$WhySelected" 48
+}
+if ($KnownFacts -ne "") {
+  Add-Label "Known:`r`n$KnownFacts" 56
+}
+if ($UnknownFacts -ne "") {
+  Add-Label "Unknown:`r`n$UnknownFacts" 48
+}
+Add-Label "Execution: 1 signature | 1 payment | NO RETRY | NO RESEND" 28
+if ($IntentHash -ne "") {
+  Add-Label ("Intent hash: " + $IntentHash.Substring(0, [Math]::Min(16, $IntentHash.Length)) + "...") 20
+}
 Add-Label "Close (X) aborts without approving or rejecting." 20
 
 $btnReject = New-Object System.Windows.Forms.Button
-$btnReject.Location = New-Object System.Drawing.Point(280, 360)
+$btnReject.Location = New-Object System.Drawing.Point(340, 640)
 $btnReject.Size = New-Object System.Drawing.Size(110, 32)
 $btnReject.Text = "REJECT"
 # No DialogResult - only Click handler may mark reject_button.
 
 $btnApprove = New-Object System.Windows.Forms.Button
-$btnApprove.Location = New-Object System.Drawing.Point(406, 360)
+$btnApprove.Location = New-Object System.Drawing.Point(466, 640)
 $btnApprove.Size = New-Object System.Drawing.Size(110, 32)
 $btnApprove.Text = "APPROVE"
 $btnApprove.Enabled = $true
