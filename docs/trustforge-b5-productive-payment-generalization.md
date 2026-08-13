@@ -37,3 +37,13 @@ signer.
 
 If a second live candidate is found, stop for human review. Do not treat B.5
 engineering completion as payment authorization.
+
+## Confirmed productive generalization
+
+Classification: `B5_PRODUCTIVE_PAYMENT_GENERALIZATION_CONFIRMED`
+
+B.5.2 proved a second seller through the generalized path (OttoAI crypto-news),
+with authoritative `PaymentApprovalIntent` binding, explicit human APPROVE, and
+on-chain reconciled settlement. See
+`docs/trustforge-b52-ottoai-approval-binding.md` and evidence
+`D:\trustforge\artifacts\runs\b52-ottoai-diversity-payment\run_20260813_072814`.

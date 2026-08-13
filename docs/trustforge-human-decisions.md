@@ -101,6 +101,17 @@ that is not payment authorization. B.4.3 human UX acceptance evidence remains
 write-once under `D:\trustforge\artifacts\runs\b43-human-approval-ui-acceptance`.
 See `docs/trustforge-b501-approval-ui-test-isolation.md`.
 
+## B.5.2 OttoAI diversity payment (complete / write-once)
+
+Human accepted OttoAI as the B5 diversity candidate and authorized the real
+operational Approve/Reject checkpoint. Payment authority arose only from an
+explicit APPROVE click bound to `paymentApprovalIntentHash`. Evidence
+`D:\trustforge\artifacts\runs\b52-ottoai-diversity-payment\run_20260813_072814`
+records `B52_OTTOAI_PAYMENT_CONFIRMED_AFTER_RECONCILIATION` with Base USDC tx
+`0xbfc8c16825481f3b00044be78c2324bf7172e22b388030b84a1c5f0f0892dbd0`. That
+authorization and signature must not be reused. See
+`docs/trustforge-b52-ottoai-approval-binding.md`.
+
 ## B.3.7 conditional one-shot payment send mandate (offline)
 
 A human conditional payment-send mandate may authorize deterministic derivation

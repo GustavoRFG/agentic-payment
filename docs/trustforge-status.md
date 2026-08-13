@@ -122,11 +122,17 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   tests use `createTestHumanPaymentDecisionProvider` only; harness is
   manual-probe-only; B43 acceptance preserved; see
   `docs/trustforge-b501-approval-ui-test-isolation.md`)
-- B.5 productive payment generalization: ready (no payment)
-  (`PaymentCandidateV1` → policy → deterministic selection → B4 runner bridge;
-  discovery cannot authorize; live unpaid recon only; stop for human review
-  before any diversity payment; see
-  `docs/trustforge-b5-productive-payment-generalization.md`)
+- B.5 productive payment generalization: **CONFIRMED**
+  (`PaymentCandidateV1` → policy → selection → B4 runner bridge; second-seller
+  OttoAI diversity payment reconciled on-chain in B.5.2; see
+  `docs/trustforge-b5-productive-payment-generalization.md` and
+  `docs/trustforge-b52-ottoai-approval-binding.md`)
+- B.5.2 OttoAI approval binding + diversity payment: **COMPLETE**
+  (`PaymentApprovalIntent` → intent-hash-bound human APPROVE → JIT ⊆ intent →
+  GET triple-binding → one-shot B371 send; evidence
+  `b52-ottoai-diversity-payment\run_20260813_072814`; tx
+  `0xbfc8c16825481f3b00044be78c2324bf7172e22b388030b84a1c5f0f0892dbd0`;
+  `B52_OTTOAI_PAYMENT_CONFIRMED_AFTER_RECONCILIATION`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an
