@@ -1,0 +1,22 @@
+{
+  "schema_version": "trustforge_b5_candidate_policy.v1",
+  "effect": "Analysis-only eligibility for B.5 candidate consideration. Does NOT authorize payment, signing, credential access, or send.",
+  "payment_authorization": false,
+  "supported_networks": ["eip155:8453"],
+  "supported_assets": ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"],
+  "supported_schemes": ["exact"],
+  "supported_protocol_versions": [1, 2],
+  "supported_methods": ["GET"],
+  "max_single_payment_atomic_by_asset": {
+    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": "5000"
+  },
+  "min_single_payment_atomic": "1",
+  "max_discovery_age_seconds": 86400,
+  "require_request_binding": true,
+  "require_seller_requirements_identity": true,
+  "require_productive_core_compatibility": true,
+  "notes": [
+    "max_single_payment_atomic 5000 = 0.005 USDC experimental consideration ceiling",
+    "POLICY_ELIGIBLE != PAYMENT_AUTHORIZED"
+  ]
+}
