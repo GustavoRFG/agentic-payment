@@ -16,7 +16,16 @@ export type CandidateDisposition =
   | "NOT_SELECTED"
   | "DEFERRED"
   | "INELIGIBLE"
-  | "UNSUPPORTED";
+  | "UNSUPPORTED"
+  | "OUT_OF_SCOPE_OBJECTIVE";
+
+export type ObjectiveDisposition =
+  | "IN_SCOPE"
+  | "OUT_OF_SCOPE_OBJECTIVE"
+  | "OBJECTIVE_UNKNOWN"
+  | "OBJECTIVE_PARTIAL"
+  | "OBJECTIVE_BUDGET_EXCEEDED"
+  | "NO_OBJECTIVE_APPLIED";
 
 export interface CandidateDecisionEntry {
   readonly candidateId: string;
@@ -34,6 +43,10 @@ export interface CandidateDecisionEntry {
   readonly candidateSha256?: string;
   readonly policyVerdictSha256?: string;
   readonly economicAssessmentSha256?: string;
+  /** B.6.1: hash of CapabilityMatchAssessment when objective-bound. */
+  readonly capabilityMatchAssessmentHash?: string;
+  /** B.6.1: objective-scope disposition before economic ranking. */
+  readonly objectiveDisposition?: ObjectiveDisposition;
 }
 
 export interface CandidateDecisionSet {

@@ -8,6 +8,10 @@ import {
   BLOCKED_B6_SELECTION_STALE,
   GUARD_B6_BUY_IS_NOT_PAYMENT_AUTHORIZATION,
 } from "./b6-execution-gates";
+import {
+  GUARD_SELECTION_DECISION_BINDS_OBJECTIVE,
+  OBJECTIVE_SELECTION_BINDING_MISMATCH,
+} from "./b61-execution-gates";
 import type { CandidateDecisionEntry } from "./candidate-decision-set";
 import { canonicalJsonSha256 } from "./x402-seller-requirements-binding";
 
@@ -44,6 +48,9 @@ export interface PaymentSelectionDecisionV1 {
   readonly payment_authorized: false;
   /** Selection freshness — not the EIP-3009 / signing window. */
   readonly expiresAt: string;
+  /** B.6.1: bound objective identity (null only for legacy non-objective decisions). */
+  readonly objectiveId?: string | null;
+  readonly objectiveHash?: string | null;
 }
 
 function decisionHashBody(
@@ -68,6 +75,8 @@ function decisionHashBody(
     rejectionReasons: decision.rejectionReasons ?? null,
     payment_authorized: false,
     expiresAt: decision.expiresAt,
+    objectiveId: decision.objectiveId ?? null,
+    objectiveHash: decision.objectiveHash ?? null,
   };
 }
 
@@ -114,11 +123,37 @@ export function buildPaymentSelectionDecision(
     rejectionReasons: input.rejectionReasons,
     payment_authorized: false,
     expiresAt: input.expiresAt,
+    objectiveId: input.objectiveId ?? null,
+    objectiveHash: input.objectiveHash ?? null,
   };
   return {
     ...partial,
     selectionDecisionHash: paymentSelectionDecisionHash(partial),
   };
+}
+
+export function assertSelectionDecisionBindsObjective(input: {
+  readonly decision: PaymentSelectionDecisionV1;
+  readonly objectiveId: string;
+  readonly objectiveHash: string;
+}): { readonly ok: true; readonly guard: typeof GUARD_SELECTION_DECISION_BINDS_OBJECTIVE } {
+  void GUARD_SELECTION_DECISION_BINDS_OBJECTIVE;
+  if (!input.decision.objectiveId || !input.decision.objectiveHash) {
+    throw new Error(
+      `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: decision missing objective binding`,
+    );
+  }
+  if (input.decision.objectiveId !== input.objectiveId) {
+    throw new Error(
+      `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: objectiveId mismatch`,
+    );
+  }
+  if (input.decision.objectiveHash !== input.objectiveHash) {
+    throw new Error(
+      `${OBJECTIVE_SELECTION_BINDING_MISMATCH}: objectiveHash mismatch`,
+    );
+  }
+  return { ok: true, guard: GUARD_SELECTION_DECISION_BINDS_OBJECTIVE };
 }
 
 export function assertSelectionDecisionIntegrity(
