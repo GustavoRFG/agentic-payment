@@ -49,6 +49,7 @@
     "trustforge:mainnet:settle": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-paid-settlement.ts --network mainnet",
     "trustforge:mainnet:classify": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-x402-classify.ts --network mainnet",
     "trustforge:mainnet-payment": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-mainnet-payment.ts",
+    "trustforge:b5:unpaid-discovery": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-b5-unpaid-discovery.ts",
     "trustforge:secure-signer-setup": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-secure-signer-setup.ts",
     "trustforge:rich:assert-invariants": "node ./seller-api/node_modules/tsx/dist/cli.mjs tools/run-trustforge-rich-invariants.ts",
     "mcp:build": "npm --prefix mcp-gateway run build",

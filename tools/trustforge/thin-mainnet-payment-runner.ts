@@ -305,6 +305,11 @@ function persistJson(directory: string, name: string, value: unknown): void {
 
 export interface ThinMainnetPaymentRunnerInput {
   readonly directory: string;
+  /**
+   * Neutral productive input: DiscoveredSelectedCandidate (legacy/adapt) or
+   * resolved from a B.5 PaymentCandidateSelection via selectedPaymentCandidateToDiscovered.
+   * Must not encode vendor-specific provider conditionals.
+   */
   readonly selected: DiscoveredSelectedCandidate;
   readonly decisionProvider: HumanPaymentDecisionProvider;
   readonly credentialProvider: BuyerCredentialProvider;
@@ -324,6 +329,8 @@ export interface ThinMainnetPaymentRunnerInput {
   readonly secretEntryTerminal?: HiddenTtyTerminal | null;
   readonly skipOnchainVerify?: boolean;
   readonly nonceSource?: () => `0x${string}`;
+  /** Optional B.5 selection id recorded for ledger linkage (not authority). */
+  readonly b5_selection_id?: string;
 }
 
 export interface ThinMainnetPaymentRunnerResult {
@@ -376,6 +383,16 @@ export async function runThinMainnetPayment(
 
   let state = existing ?? createRunnerState(runId, now);
   persistRunnerState(input.directory, state);
+  if (input.b5_selection_id) {
+    persistJson(input.directory, "b5_selection_link.json", {
+      schema_version: "trustforge_b5_selection_link.v1",
+      b5_selection_id: input.b5_selection_id,
+      service_id: input.selected.service_id,
+      endpoint: input.selected.endpoint,
+      linked_at: now.toISOString(),
+      note: "Planning link only; payment authority remains B4 human decision + PSA",
+    });
+  }
 
   const bump = (
     to: Parameters<typeof transitionRunnerState>[1],

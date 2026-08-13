@@ -114,6 +114,13 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   `WINDOWS_PS51_APPROVAL_SCRIPT_ENCODING_SAFE=PASS`; `powershell.exe` 5.1
   parse-proven; harness-only UI probes; no canary relaunch; see
   `docs/trustforge-b411-ps51-approval-ui-encoding.md`)
+- B.4 status: **COMPLETE** (repeatable mainnet settlement confirmed; closeout fix
+  `04d2cf1`; human approval UX accepted)
+- B.5 productive payment generalization: ready (no payment)
+  (`PaymentCandidateV1` → policy → deterministic selection → B4 runner bridge;
+  discovery cannot authorize; live unpaid recon only; stop for human review
+  before any diversity payment; see
+  `docs/trustforge-b5-productive-payment-generalization.md`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an
