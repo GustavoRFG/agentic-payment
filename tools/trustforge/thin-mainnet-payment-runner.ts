@@ -657,10 +657,13 @@ export async function runThinMainnetPayment(
     sendResult.transport_outcome.kind === "response_observed" &&
     !input.skipOnchainVerify
   ) {
-    const receipt = extractAndSanitizeFacilitatorReceipt(
-      { headers: new Headers() },
-      sendResult.transport_outcome.body_text,
-    );
+    const outcome = sendResult.transport_outcome;
+    const receipt =
+      outcome.facilitator_receipt ??
+      extractAndSanitizeFacilitatorReceipt(
+        { headers: new Headers() },
+        outcome.body_text,
+      );
     facilitatorTx = receipt.transactionHash;
     if (facilitatorTx) {
       const verified = await verifyBaseUsdcPayment({
@@ -670,14 +673,46 @@ export async function runThinMainnetPayment(
         fetchImpl: input.fetchImpl,
       });
       onchainStatus = verified.status;
+      persistJson(input.directory, "onchain_verification.json", {
+        schema_version: "trustforge_onchain_verification.v1",
+        ...verified,
+        facilitator_receipt_parse_status: receipt.parseStatus,
+        facilitator_receipt_source: receipt.source,
+      });
       if (verified.status === "ONCHAIN_VERIFIED") {
         authority.push("ONCHAIN_VERIFIED");
         bump("RECONCILED");
       }
+    } else {
+      persistJson(input.directory, "onchain_verification.json", {
+        schema_version: "trustforge_onchain_verification.v1",
+        status: "not_executed",
+        transaction_hash: null,
+        detail:
+          "no facilitator transaction hash in sanitized receipt; HTTP response observed",
+        facilitator_receipt_parse_status: receipt.parseStatus,
+        facilitator_receipt_source: receipt.source,
+      });
     }
   }
 
   bump("CONFIRMED");
+
+  // Durable closeout before process return/exit (B.4.2).
+  persistJson(input.directory, "thin_mainnet_closeout.json", {
+    schema_version: "trustforge_thin_mainnet_closeout.v1",
+    run_id: state.run_id,
+    state: "CONFIRMED",
+    human_decision_id: humanDecisionId,
+    payment_send_authorization_sha256: psaSha,
+    http_status: httpStatus,
+    facilitator_tx_hash: facilitatorTx,
+    onchain_status: onchainStatus,
+    payment_bearing_requests: sendResult.payment_bearing_request_invocations,
+    retry: 0,
+    resend: 0,
+    closed_out_at: now.toISOString(),
+  });
 
   const golden_compare = compareRunnerAgainstGoldenTrace({
     signatures: 1,

@@ -129,15 +129,25 @@ async function main(): Promise<number> {
   console.log(`golden_compare_ok: ${result.golden_compare?.ok ?? "n/a"}`);
   if (result.http_status != null) console.log(`http_status: ${result.http_status}`);
   if (result.onchain_status) console.log(`onchain_status: ${result.onchain_status}`);
+  if (result.facilitator_tx_hash) {
+    console.log(`facilitator_tx_hash: ${result.facilitator_tx_hash}`);
+  }
   // Never print nonce, signature, payment header, or private key material.
   return result.state.state === "CONFIRMED" ? 0 : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main()
-    .then((code) => process.exit(code))
-    .catch((error) => {
+    .then(async (code) => {
+      // Yield so destroyed child stdio handles finish closing before hard exit
+      // (mitigates Windows libuv UV_HANDLE_CLOSING abort after success).
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      process.exitCode = code;
+      process.exit(code);
+    })
+    .catch(async (error) => {
       console.error(error instanceof Error ? error.message : error);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       process.exit(1);
     });
 }

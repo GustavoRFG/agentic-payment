@@ -14,6 +14,10 @@ import {
   BLOCKED_B371_TRANSPORT_FAILED,
   GUARD_NO_PAYMENT_HEADER_SECRET_LEAKAGE,
 } from "./b371-execution-gates";
+import {
+  extractAndSanitizeFacilitatorReceipt,
+  type SanitizedFacilitatorReceipt,
+} from "./facilitator-settlement-receipt";
 
 export interface PreparedPaymentBearingRequest {
   readonly url: string;
@@ -29,6 +33,8 @@ export type PaymentBearingTransportOutcome =
       readonly redirected: false;
       readonly body_text: string;
       readonly observed_at: string;
+      /** Extracted before body truncation; never includes PAYMENT-SIGNATURE. */
+      readonly facilitator_receipt?: SanitizedFacilitatorReceipt;
     }
   | {
       readonly kind: "ambiguous";
@@ -98,12 +104,19 @@ export function createFetchPaymentBearingHttpTransport(options?: {
           };
         }
         const body_text = await response.text();
+        // Capture settlement receipt from headers/body BEFORE any truncation.
+        // Do not retain raw payment-response header values beyond sanitization.
+        const facilitator_receipt = extractAndSanitizeFacilitatorReceipt(
+          response,
+          body_text,
+        );
         return {
           kind: "response_observed",
           status: response.status,
           redirected: false,
           body_text,
           observed_at: new Date().toISOString(),
+          facilitator_receipt,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

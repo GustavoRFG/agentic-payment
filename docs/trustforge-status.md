@@ -253,3 +253,7 @@ Phase 5/6 human artifact and compares them before wallet loading. Query
 canonicalization sorts distinct keys while preserving repeated-value order and
 multiplicity, and authorization summaries are compared by their canonical
 semantic hash rather than textual property order.
+
+## B.4.2 settlement closeout (2026-08-13)
+
+Post-success productive-runner abort (EXITCODE -1073740791 / libuv `UV_HANDLE_CLOSING`) after CONFIRMED is classified `POST_SUCCESS_RESOURCE_LIFECYCLE_DEFECT`. Fix destroys dialog child stdio and persists closeout/receipt/onchain artifacts before return. Read-only reconciliation of canary `run_20260812_201353` confirms settlement tx `0x1f4630dcec6e0cc100050225b4bab2f89dec5fd065793f9928e2efc7ce9ea565` → `B42_REPEATABLE_MAINNET_SETTLEMENT_CONFIRMED_AFTER_RECONCILIATION` (evidence `run_20260813_003850`). No payment in this closeout.

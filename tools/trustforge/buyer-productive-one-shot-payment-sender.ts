@@ -414,6 +414,39 @@ export async function sendAuthorizedPaymentOnce(
     if (!existsSync(lifePath)) {
       persistPaymentSendLifecycle(input.directory, ledger.get(psaSha)!);
     }
+    if (outcome.kind === "response_observed") {
+      const bodyExcerpt =
+        outcome.body_text.length > 256
+          ? `${outcome.body_text.slice(0, 256)}…`
+          : outcome.body_text;
+      writeArtifactOnce(join(input.directory, "payment_http_response_sanitized.json"), {
+        schema_version: "trustforge_payment_http_response_sanitized.v1",
+        status: outcome.status,
+        observed_at: outcome.observed_at,
+        body_sha256: createHash("sha256")
+          .update(outcome.body_text, "utf8")
+          .digest("hex"),
+        body_excerpt: bodyExcerpt,
+        payment_request_headers_persisted: false,
+      });
+      writeArtifactOnce(join(input.directory, "facilitator_receipt_sanitized.json"), {
+        schema_version: "trustforge_facilitator_receipt_sanitized.v1",
+        ...(outcome.facilitator_receipt ?? {
+          parseStatus: "missing",
+          source: "none",
+          rawHeaderName: null,
+          transactionHash: null,
+          network: null,
+          payer: null,
+          payTo: null,
+          asset: null,
+          amountAtomic: null,
+          facilitator: null,
+          settledAtUtc: null,
+          parseErrorClass: "MISSING_TX_HASH_FIELD",
+        }),
+      });
+    }
   }
 
   const sanitizedOutcome: PaymentBearingTransportOutcome =
@@ -427,6 +460,7 @@ export async function sendAuthorizedPaymentOnce(
               ? `${outcome.body_text.slice(0, 256)}…`
               : outcome.body_text,
           observed_at: outcome.observed_at,
+          facilitator_receipt: outcome.facilitator_receipt,
         }
       : outcome;
 

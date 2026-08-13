@@ -127,6 +127,25 @@ export function createWindowsApproveRejectDialogProvider(options?: {
           ],
           { windowsHide: false, stdio: ["ignore", "pipe", "pipe"] },
         );
+        let settled = false;
+        const finish = (exit: number, error?: Error) => {
+          if (settled) return;
+          settled = true;
+          // Drain/destroy stdio before process teardown. Leaving closing pipe
+          // handles around until process.exit can trip libuv UV_HANDLE_CLOSING
+          // asserts on Windows (observed EXITCODE -1073740791 after success).
+          try {
+            child.stdout?.removeAllListeners();
+            child.stderr?.removeAllListeners();
+            child.removeAllListeners();
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+          } catch {
+            // ignore destroy races
+          }
+          if (error) reject(error);
+          else resolve(exit);
+        };
         child.stdout.on("data", (c: Buffer) => {
           stdout += c.toString("utf8");
         });
@@ -134,14 +153,15 @@ export function createWindowsApproveRejectDialogProvider(options?: {
           stderr += c.toString("utf8");
         });
         child.on("error", (error) => {
-          reject(
+          finish(
+            4,
             new Error(
               `${BLOCKED_B4_HUMAN_DECISION_UI_FAILED}: failed to spawn dialog (${error.message})`,
             ),
           );
         });
         // No timeout — ShowDialog must block until human interaction.
-        child.on("close", (c) => resolve(c ?? 4));
+        child.on("close", (c) => finish(c ?? 4));
       });
 
       void stderr;

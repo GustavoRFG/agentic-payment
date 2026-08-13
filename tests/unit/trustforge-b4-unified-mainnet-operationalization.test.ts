@@ -4,7 +4,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -396,6 +396,16 @@ describe("B.4 human decision → mandates", () => {
     );
     expect(result.golden_compare?.ok).toBe(true);
     expect(result.state.state).toBe("CONFIRMED");
+    // B.4.2 closeout durability: response + closeout persisted before return.
+    expect(existsSync(join(dir, "payment_http_response_sanitized.json"))).toBe(true);
+    expect(existsSync(join(dir, "facilitator_receipt_sanitized.json"))).toBe(true);
+    expect(existsSync(join(dir, "thin_mainnet_closeout.json"))).toBe(true);
+    const closeout = JSON.parse(
+      readFileSync(join(dir, "thin_mainnet_closeout.json"), "utf8"),
+    ) as { payment_bearing_requests: number; retry: number; resend: number };
+    expect(closeout.payment_bearing_requests).toBe(1);
+    expect(closeout.retry).toBe(0);
+    expect(closeout.resend).toBe(0);
   });
 
   it("Reject → no signer / HUMAN_REJECTED", async () => {
