@@ -1,0 +1,13 @@
+{
+  "id": "trustforge_b6_decision_policy",
+  "version": 1,
+  "payment_authorization": false,
+  "selection_ttl_ms": 1800000,
+  "cheap_max_atomic": "5000",
+  "price_rise_defer_bps": 500,
+  "notes": [
+    "Deterministic transparent policy — not ML/LLM judgment",
+    "BUY != PAYMENT_AUTHORIZED",
+    "Incomplete utility leans DEFER, not DONT_BUY"
+  ]
+}

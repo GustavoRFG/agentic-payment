@@ -133,6 +133,14 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   `b52-ottoai-diversity-payment\run_20260813_072814`; tx
   `0xbfc8c16825481f3b00044be78c2324bf7172e22b388030b84a1c5f0f0892dbd0`;
   `B52_OTTOAI_PAYMENT_CONFIRMED_AFTER_RECONCILIATION`)
+- B.6 agentic payment decision layer: **READY (no payment)**
+  (`PaymentSelectionDecision` BUY/DEFER/DONT_BUY over frozen candidate set;
+  economics v2; quote movement vs identity; selection bound into
+  `PaymentApprovalIntent`; zero execution authority; live unpaid BUY on OttoAI
+  crypto-news; evidence
+  `b6-agentic-payment-decision\run_20260813_083938` →
+  `B6_AGENTIC_PAYMENT_DECISION_LAYER_READY_NO_PAYMENT`; see
+  `docs/trustforge-b6-agentic-payment-decision.md`)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an
