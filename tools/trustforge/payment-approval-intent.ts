@@ -84,6 +84,9 @@ export interface PaymentApprovalIntent {
   /** Optional B.6.1 objective binding (transitive via selection). */
   readonly objective_id?: string;
   readonly objective_hash?: string;
+  /** Optional B.6.2 need binding (audit identities; transitive via objective). */
+  readonly need_id?: string;
+  readonly need_hash?: string;
 }
 
 export interface PaymentApprovalIntentHashRecord {
@@ -137,6 +140,8 @@ function intentHashBody(intent: PaymentApprovalIntent): Record<string, unknown> 
     ...(intent.objective_hash !== undefined
       ? { objective_hash: intent.objective_hash }
       : {}),
+    ...(intent.need_id !== undefined ? { need_id: intent.need_id } : {}),
+    ...(intent.need_hash !== undefined ? { need_hash: intent.need_hash } : {}),
   };
 }
 
@@ -177,6 +182,8 @@ export function buildPaymentApprovalIntentFromSelected(input: {
   readonly candidateSetHash?: string;
   readonly objectiveId?: string;
   readonly objectiveHash?: string;
+  readonly needId?: string;
+  readonly needHash?: string;
 }): PaymentApprovalIntent {
   const selected = input.selected;
   const method = (selected.method ?? "GET") as "GET" | "POST";
@@ -255,6 +262,8 @@ export function buildPaymentApprovalIntentFromSelected(input: {
     ...(input.objectiveHash !== undefined
       ? { objective_hash: input.objectiveHash }
       : {}),
+    ...(input.needId !== undefined ? { need_id: input.needId } : {}),
+    ...(input.needHash !== undefined ? { need_hash: input.needHash } : {}),
   };
 }
 

@@ -70,6 +70,11 @@ export interface PaymentDecisionObjectiveV1 {
   readonly decisionContext: string | null;
   readonly objectiveHash: string;
   readonly payment_authorized: false;
+  /** B.6.2: upstream need binding (null for legacy B6.1-only objectives). */
+  readonly needId?: string | null;
+  readonly needHash?: string | null;
+  readonly needProvenanceAssessmentHash?: string | null;
+  readonly objectiveDerivationProofHash?: string | null;
 }
 
 function objectiveHashBody(
@@ -97,6 +102,10 @@ function objectiveHashBody(
     diversityPreference: objective.diversityPreference,
     decisionContext: objective.decisionContext,
     payment_authorized: false,
+    needId: objective.needId ?? null,
+    needHash: objective.needHash ?? null,
+    needProvenanceAssessmentHash: objective.needProvenanceAssessmentHash ?? null,
+    // objectiveDerivationProofHash is attached after hashing (seal); not part of identity hash
   };
 }
 
@@ -153,10 +162,26 @@ export function buildPaymentDecisionObjective(
     diversityPreference: input.diversityPreference,
     decisionContext: input.decisionContext,
     payment_authorized: false,
+    needId: input.needId ?? null,
+    needHash: input.needHash ?? null,
+    needProvenanceAssessmentHash: input.needProvenanceAssessmentHash ?? null,
+    objectiveDerivationProofHash: input.objectiveDerivationProofHash ?? null,
   };
+  const hash = paymentDecisionObjectiveHash(partial);
   return {
     ...partial,
-    objectiveHash: paymentDecisionObjectiveHash(partial),
+    objectiveHash: hash,
+  };
+}
+
+/** Attach derivation proof seal without changing objectiveHash. */
+export function sealObjectiveWithDerivationProof(
+  objective: PaymentDecisionObjectiveV1,
+  proofHash: string,
+): PaymentDecisionObjectiveV1 {
+  return {
+    ...objective,
+    objectiveDerivationProofHash: proofHash,
   };
 }
 
