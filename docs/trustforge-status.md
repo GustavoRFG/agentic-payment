@@ -141,6 +141,20 @@ Activation state (do not collapse these into a single ambiguous “B.2 active”
   `b6-agentic-payment-decision\run_20260813_083938` →
   `B6_AGENTIC_PAYMENT_DECISION_LAYER_READY_NO_PAYMENT`; see
   `docs/trustforge-b6-agentic-payment-decision.md`)
+- B.6.1 objective-bound payment decisions: **PROVEN (no payment)**
+- B.6.2 payment-need / objective provenance: **PROVEN (no payment)**
+  (`PaymentNeed` → provenance → objective → selection → intent; decision quality
+  cannot invent a need; evidence under `b62-payment-need-provenance`)
+- B.6.3 pre-existing bounded payment authority: **READY (no payment)**
+  (`AutonomyAuthorityV1` externally issued + signed TEST fixtures only;
+  `AuthorityPolicyEvaluator` read-only → `AUTONOMY_ALLOWED` |
+  `HUMAN_REQUIRED` | `AUTONOMY_DENIED` | `AUTHORITY_UNAVAILABLE`;
+  append-only consumption/revocation ledgers; seller history observational;
+  `AUTONOMY_ALLOWED != SEND`; atomic budget reservation required before any
+  future autonomous send; evidence
+  `b63-preexisting-bounded-authority\run_20260815_230537Z` →
+  `B63_PREEXISTING_BOUNDED_PAYMENT_AUTHORITY_READY_NO_PAYMENT`;
+  no real autonomy authority, no signer, no payment)
 
 Productive prepare may reserve an attempt and persist an unsigned artifact only
 with a valid activation policy, concrete human payment authorization, and an
